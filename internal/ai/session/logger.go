@@ -139,13 +139,110 @@ func NewReader(dir string) *Reader {
 	return &Reader{dir: dir}
 }
 
-func (r *Reader) Read(date time.Time) ([]LogEntry, error) {
-	filename := filepath.Join(r.dir, fmt.Sprintf("%s.jsonl", date.Format("2006-01-02")))
-	data, err := os.ReadFile(filename)
+type SessionInfo struct {
+	Date      time.Time `json:"date"`
+	Filename  string    `json:"filename"`
+	Entries   int       `json:"entries"`
+	Queries   int       `json:"queries"`
+	Errors    int       `json:"errors"`
+	StartTime time.Time `json:"start_time"`
+	EndTime   time.Time `json:"end_time"`
+}
+
+func (r *Reader) ListSessions() ([]SessionInfo, error) {
+	entries, err := os.ReadDir(r.dir)
 	if err != nil {
 		return nil, err
 	}
 
+	var sessions []SessionInfo
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+
+		_, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		dateStr := strings.TrimSuffix(entry.Name(), ".jsonl")
+		date, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			continue
+		}
+
+		si := SessionInfo{
+			Date:     date,
+			Filename: entry.Name(),
+		}
+
+		logEntries, err := r.Read(date)
+		if err == nil {
+			si.Entries = len(logEntries)
+			for _, e := range logEntries {
+				if e.Level == LogQuery {
+					si.Queries++
+				}
+				if e.Level == LogError {
+					si.Errors++
+				}
+			}
+			if len(logEntries) > 0 {
+				si.StartTime = logEntries[0].Timestamp
+				si.EndTime = logEntries[len(logEntries)-1].Timestamp
+			}
+		}
+
+		sessions = append(sessions, si)
+	}
+
+	return sessions, nil
+}
+
+func (r *Reader) ReadFile(filename string) ([]LogEntry, error) {
+	path := filepath.Join(r.dir, filename)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return parseEntries(data)
+}
+
+func (r *Reader) ReadAll() ([]LogEntry, error) {
+	entries, err := os.ReadDir(r.dir)
+	if err != nil {
+		return nil, err
+	}
+
+	var allEntries []LogEntry
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+
+		logEntries, err := r.ReadFile(entry.Name())
+		if err != nil {
+			continue
+		}
+		allEntries = append(allEntries, logEntries...)
+	}
+
+	return allEntries, nil
+}
+
+func (r *Reader) Read(date time.Time) ([]LogEntry, error) {
+	filename := fmt.Sprintf("%s.jsonl", date.Format("2006-01-02"))
+	data, err := os.ReadFile(filepath.Join(r.dir, filename))
+	if err != nil {
+		return nil, err
+	}
+
+	return parseEntries(data)
+}
+
+func parseEntries(data []byte) ([]LogEntry, error) {
 	var entries []LogEntry
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	for decoder.More() {
@@ -155,6 +252,5 @@ func (r *Reader) Read(date time.Time) ([]LogEntry, error) {
 		}
 		entries = append(entries, entry)
 	}
-
 	return entries, nil
 }

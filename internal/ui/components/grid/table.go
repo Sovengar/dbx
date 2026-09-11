@@ -10,41 +10,90 @@ import (
 	"github.com/buble/dbx/internal/theme"
 )
 
+type CellEditCommitMsg struct {
+	Schema string
+	Table  string
+	Query  string
+	Args   []interface{}
+}
+
+type GridInsertRowMsg struct {
+	Schema string
+	Table  string
+}
+
+type GridFilterApplyMsg struct {
+	Schema     string
+	Table      string
+	Where      string
+	ClientSide bool
+}
+
+type GridSortApplyMsg struct {
+	Schema   string
+	Table    string
+	OrderBy  string
+	OrderDir string
+	Where    string
+}
+
 type Grid struct {
-	styles     *theme.Styles
-	header     *Header
-	cells      *CellRenderer
-	pager      *Pager
-	data       *postgres.QueryResult
-	columns    []string
-	widths     []int
-	cursorRow  int
-	cursorCol  int
-	scrollCol  int
-	width      int
-	height     int
-	focused    bool
-	tableName  string
-	schema     string
+	styles      *theme.Styles
+	header      *Header
+	cells       *CellRenderer
+	pager       *Pager
+	mouse       *MouseHandler
+	data        *postgres.QueryResult
+	columns     []string
+	widths      []int
+	cursorRow   int
+	cursorCol   int
+	scrollCol   int
+	width       int
+	height      int
+	focused     bool
+	tableName   string
+	schema      string
+	editing     bool
+	editRow     int
+	editCol     int
+	editValue   string
+	editCursor  int
+	filtering   bool
+	filter      string
+	whereFilter  *WhereFilter
+	whereClause  string
+	pendingDigits string
 }
 
 func New(styles *theme.Styles, pageSize int) *Grid {
-	return &Grid{
+	g := &Grid{
 		styles: styles,
 		header: NewHeader(styles),
 		cells:  NewCellRenderer(styles),
 		pager:  NewPager(styles, pageSize),
 		widths: make([]int, 0),
 	}
+	g.mouse = NewMouseHandler(g)
+	return g
 }
 
 func (g *Grid) SetData(result *postgres.QueryResult, schema, table string) {
+	isNewTable := g.tableName != table
 	g.data = result
 	g.tableName = table
 	g.schema = schema
 	g.cursorRow = 0
 	g.cursorCol = 0
 	g.scrollCol = 0
+	g.editing = false
+	g.editValue = ""
+	g.editCursor = 0
+	g.whereFilter = nil
+	g.whereClause = ""
+	if isNewTable {
+		g.header.ClearSort()
+	}
 
 	if result == nil || len(result.Columns) == 0 {
 		g.columns = nil
@@ -107,6 +156,24 @@ func (g *Grid) calculateWidths() {
 		}
 	}
 
+	// Cap individual column widths so multiple columns fit in viewport
+	available := g.width - 4
+	if available > 0 && len(g.widths) > 0 {
+		minCols := 5
+		if len(g.widths) < minCols {
+			minCols = len(g.widths)
+		}
+		maxColWidth := available / minCols
+		if maxColWidth < 10 {
+			maxColWidth = 10
+		}
+		for i := range g.widths {
+			if g.widths[i] > maxColWidth {
+				g.widths[i] = maxColWidth
+			}
+		}
+	}
+
 	g.syncScroll()
 }
 
@@ -116,9 +183,10 @@ func (g *Grid) syncScroll() {
 		return
 	}
 
+	// Phase 1: Expand left — bring columns into view from the left side
 	for g.scrollCol > 0 {
 		prevWidth := g.widths[g.scrollCol-1]
-		if available+prevWidth > 0 {
+		if available >= prevWidth {
 			g.scrollCol--
 			available += prevWidth
 		} else {
@@ -126,26 +194,25 @@ func (g *Grid) syncScroll() {
 		}
 	}
 
-	total := 0
-	for i := g.scrollCol; i < len(g.widths); i++ {
-		if total+g.widths[i] > available {
-			break
+	// Phase 2: Ensure cursorCol is visible — scroll right if cursor is beyond visible area
+	// Calculate cumulative width from scrollCol to cursorCol
+	if g.cursorCol >= g.scrollCol {
+		cumWidth := 0
+		for i := g.scrollCol; i <= g.cursorCol && i < len(g.widths); i++ {
+			cumWidth += g.widths[i]
 		}
-		total += g.widths[i]
+		// If cursor column doesn't fit, scroll right until it does
+		for cumWidth > available && g.scrollCol < g.cursorCol {
+			cumWidth -= g.widths[g.scrollCol]
+			g.scrollCol++
+		}
 	}
 
+	// Phase 3: If cursor is left of scroll window, scroll left
 	if g.cursorCol < g.scrollCol {
 		g.scrollCol = g.cursorCol
 	}
 
-	cumWidth := 0
-	for i := g.scrollCol; i <= g.cursorCol && i < len(g.widths); i++ {
-		cumWidth += g.widths[i]
-	}
-	for cumWidth > available && g.scrollCol < g.cursorCol {
-		cumWidth -= g.widths[g.scrollCol]
-		g.scrollCol++
-	}
 }
 
 func (g *Grid) visibleColumns() ([]string, []int) {
@@ -172,11 +239,17 @@ func (g *Grid) visibleColumns() ([]string, []int) {
 }
 
 func (g *Grid) SetWidth(w int) {
+	if w == g.width {
+		return
+	}
 	g.width = w
 	g.calculateWidths()
 }
 
 func (g *Grid) SetHeight(h int) {
+	if h == g.height {
+		return
+	}
 	g.height = h
 }
 
@@ -202,6 +275,22 @@ func (g *Grid) TableName() string {
 	return g.tableName
 }
 
+func (g *Grid) HandleClick(x, y int) bool {
+	return g.mouse.HandleClick(x, y)
+}
+
+func (g *Grid) HandleHeaderClick(x int) tea.Cmd {
+	return g.mouse.HandleHeaderClick(x)
+}
+
+func (g *Grid) HandleScrollUp() bool {
+	return g.mouse.HandleScrollUp()
+}
+
+func (g *Grid) HandleScrollDown() bool {
+	return g.mouse.HandleScrollDown()
+}
+
 func (g *Grid) Update(msg tea.Msg) (tea.Cmd, bool) {
 	if !g.focused {
 		return nil, false
@@ -221,6 +310,51 @@ func (g *Grid) Update(msg tea.Msg) (tea.Cmd, bool) {
 
 func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	key := msg.String()
+
+	if g.editing {
+		return g.handleEditKey(msg)
+	}
+
+	if g.filtering {
+		return g.handleFilterKey(msg)
+	}
+
+	if g.whereFilter != nil && g.whereFilter.Visible() {
+		handled, _ := g.whereFilter.HandleKey(msg)
+		if !handled {
+			return nil, false
+		}
+		if g.whereFilter.ShouldApply() {
+			where := g.whereFilter.Input()
+			g.whereClause = where
+			g.whereFilter = nil
+			clientSide := len(g.data.Rows) <= MaxRows
+			return func() tea.Msg {
+				return GridFilterApplyMsg{
+					Schema:     g.schema,
+					Table:      g.tableName,
+					Where:      where,
+					ClientSide: clientSide,
+				}
+			}, true
+		}
+		if !g.whereFilter.Visible() {
+			return nil, true
+		}
+		return nil, true
+	}
+
+	if key >= "0" && key <= "9" {
+		g.pendingDigits += key
+		n := 0
+		for _, ch := range g.pendingDigits {
+			n = n*10 + int(ch-'0')
+		}
+		g.pager.GoToPage(n)
+		g.clampCursor()
+		return nil, true
+	}
+	g.pendingDigits = ""
 
 	switch key {
 	case "j", "down":
@@ -247,20 +381,286 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case "ctrl+d":
 		g.halfPageDown()
 		return nil, true
-	case "n":
+	case "N":
+		g.pager.LastPage()
+		g.clampCursor()
+		return nil, true
+	case "P":
+		g.pager.FirstPage()
+		g.clampCursor()
+		return nil, true
+	case "n", "]", "ctrl+right":
 		g.pager.NextPage()
 		g.clampCursor()
 		return nil, true
-	case "p":
+	case "p", "[", "ctrl+left":
 		g.pager.PrevPage()
 		g.clampCursor()
 		return nil, true
 	case "s":
-		g.toggleSort()
+		return g.toggleSort(), true
+	case "/":
+		g.startWhereFilter()
 		return nil, true
+	case "f":
+		g.startColumnFind()
+		return nil, true
+	case "enter":
+		g.startEdit()
+		return nil, true
+	case "i":
+		return g.startInsertRow()
 	}
 
 	return nil, false
+}
+
+func (g *Grid) startWhereFilter() {
+	if g.data == nil || len(g.data.Columns) == 0 {
+		return
+	}
+	g.whereFilter = NewWhereFilter(g.styles, g.data.Columns, g.width)
+	g.whereFilter.Show()
+	if g.whereClause != "" {
+		g.whereFilter.SetInput(g.whereClause)
+	}
+}
+
+func (g *Grid) startColumnFind() {
+	g.filtering = true
+	g.filter = ""
+}
+
+func (g *Grid) handleFilterKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	key := msg.String()
+	switch key {
+	case "esc":
+		g.filtering = false
+		g.filter = ""
+		return nil, true
+	case "enter":
+		g.jumpToBestMatch()
+		g.filtering = false
+		g.filter = ""
+		return nil, true
+	case "backspace":
+		if len(g.filter) > 0 {
+			g.filter = g.filter[:len(g.filter)-1]
+		}
+		return nil, true
+	default:
+		if len(key) == 1 {
+			g.filter += key
+		}
+		return nil, true
+	}
+}
+
+func (g *Grid) jumpToBestMatch() {
+	if g.filter == "" || len(g.columns) == 0 {
+		return
+	}
+	query := strings.ToLower(g.filter)
+	for i, col := range g.columns {
+		if strings.Contains(strings.ToLower(col), query) {
+			g.jumpToColumn(i)
+			return
+		}
+	}
+}
+
+func (g *Grid) jumpToColumn(colIndex int) {
+	scrollStart := colIndex - 2
+	if scrollStart < 0 {
+		scrollStart = 0
+	}
+	g.scrollCol = scrollStart
+	g.cursorCol = colIndex
+}
+
+func (g *Grid) IsFiltering() bool {
+	return g.filtering
+}
+
+func (g *Grid) IsWhereFiltering() bool {
+	return g.whereFilter != nil && g.whereFilter.Visible()
+}
+
+func (g *Grid) FilterText() string {
+	return g.filter
+}
+
+func (g *Grid) WhereClause() string {
+	return g.whereClause
+}
+
+func (g *Grid) TotalRows() int {
+	if g.data == nil {
+		return 0
+	}
+	return g.data.Count
+}
+
+func (g *Grid) startEdit() {
+	if g.data == nil || len(g.data.Rows) == 0 {
+		return
+	}
+	if g.cursorRow < 0 || g.cursorRow >= len(g.data.Rows) {
+		return
+	}
+	if g.cursorCol < 0 || g.cursorCol >= len(g.columns) {
+		return
+	}
+
+	g.editing = true
+	g.editRow = g.cursorRow
+	g.editCol = g.cursorCol
+	g.editValue = fmt.Sprintf("%v", g.data.Rows[g.editRow][g.editCol])
+	g.editCursor = len(g.editValue)
+}
+
+func (g *Grid) startInsertRow() (tea.Cmd, bool) {
+	if g.data == nil || len(g.columns) == 0 {
+		return nil, false
+	}
+
+	return func() tea.Msg {
+		return GridInsertRowMsg{
+			Schema: g.schema,
+			Table:  g.tableName,
+		}
+	}, true
+}
+
+func (g *Grid) handleEditKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	key := msg.String()
+
+	switch key {
+	case "esc":
+		g.editing = false
+		g.editValue = ""
+		return nil, true
+	case "enter", "tab":
+		cmd := g.commitEdit()
+		g.editing = false
+		g.editValue = ""
+		return cmd, true
+	case "up":
+		if g.editRow > 0 {
+			g.editRow--
+			g.cursorRow = g.editRow - g.pager.Offset()
+			g.editValue = fmt.Sprintf("%v", g.data.Rows[g.editRow][g.editCol])
+			g.editCursor = len(g.editValue)
+		}
+		return nil, true
+	case "down":
+		maxRow := len(g.data.Rows) - 1
+		if g.editRow < maxRow {
+			g.editRow++
+			g.cursorRow = g.editRow - g.pager.Offset()
+			g.editValue = fmt.Sprintf("%v", g.data.Rows[g.editRow][g.editCol])
+			g.editCursor = len(g.editValue)
+		}
+		return nil, true
+	case "left":
+		if g.editCursor > 0 {
+			g.editCursor--
+		}
+		return nil, true
+	case "right":
+		if g.editCursor < len(g.editValue) {
+			g.editCursor++
+		}
+		return nil, true
+	case "home", "ctrl+a":
+		g.editCursor = 0
+		return nil, true
+	case "end", "ctrl+e":
+		g.editCursor = len(g.editValue)
+		return nil, true
+	case "backspace":
+		if g.editCursor > 0 {
+			g.editValue = g.editValue[:g.editCursor-1] + g.editValue[g.editCursor:]
+			g.editCursor--
+		}
+		return nil, true
+	case "delete":
+		if g.editCursor < len(g.editValue) {
+			g.editValue = g.editValue[:g.editCursor] + g.editValue[g.editCursor+1:]
+		}
+		return nil, true
+	default:
+		if msg.Text != "" && !isControlKey(msg) {
+			g.editValue = g.editValue[:g.editCursor] + msg.Text + g.editValue[g.editCursor:]
+			g.editCursor += len(msg.Text)
+			return nil, true
+		}
+	}
+
+	return nil, false
+}
+
+func isControlKey(msg tea.KeyPressMsg) bool {
+	return msg.Mod > 0
+}
+
+func (g *Grid) commitEdit() tea.Cmd {
+	if g.editRow < 0 || g.editRow >= len(g.data.Rows) {
+		return nil
+	}
+	row := g.data.Rows[g.editRow]
+	colName := g.columns[g.editCol]
+
+	newVal := g.parseEditValue(g.editValue, row[g.editCol])
+	g.data.Rows[g.editRow][g.editCol] = newVal
+
+	var whereParts []string
+	var args []interface{}
+	argIdx := 1
+	for i, val := range row {
+		if i == g.editCol {
+			continue
+		}
+		whereParts = append(whereParts, fmt.Sprintf("%q = $%d", g.columns[i], argIdx))
+		args = append(args, val)
+		argIdx++
+	}
+	args = append(args, newVal)
+
+	query := fmt.Sprintf("UPDATE %q.%q SET %q = $%d WHERE %s",
+		g.schema, g.tableName, colName, argIdx, strings.Join(whereParts, " AND "))
+
+	f, _ := os.OpenFile("/tmp/dbx_grid_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if f != nil {
+		fmt.Fprintf(f, "commitEdit: query=%s\n", query)
+		f.Close()
+	}
+
+	return func() tea.Msg {
+		return CellEditCommitMsg{
+			Schema: g.schema,
+			Table:  g.tableName,
+			Query:  query,
+			Args:   args,
+		}
+	}
+}
+
+func (g *Grid) parseEditValue(s string, original interface{}) interface{} {
+	switch original.(type) {
+	case int64:
+		var v int64
+		fmt.Sscanf(s, "%d", &v)
+		return v
+	case float64:
+		var v float64
+		fmt.Sscanf(s, "%g", &v)
+		return v
+	case bool:
+		return s == "true" || s == "t" || s == "1"
+	default:
+		return s
+	}
 }
 
 func (g *Grid) moveDown() {
@@ -279,15 +679,22 @@ func (g *Grid) moveUp() {
 func (g *Grid) moveRight() {
 	if g.cursorCol < len(g.columns)-1 {
 		g.cursorCol++
-		g.syncScroll()
+	} else {
+		// Wrap to first column
+		g.cursorCol = 0
+		g.scrollCol = 0
 	}
+	g.syncScroll()
 }
 
 func (g *Grid) moveLeft() {
 	if g.cursorCol > 0 {
 		g.cursorCol--
-		g.syncScroll()
+	} else {
+		// Wrap to last column
+		g.cursorCol = len(g.columns) - 1
 	}
+	g.syncScroll()
 }
 
 func (g *Grid) moveToFirst() {
@@ -318,11 +725,24 @@ func (g *Grid) halfPageDown() {
 	}
 }
 
-func (g *Grid) toggleSort() {
+func (g *Grid) toggleSort() tea.Cmd {
 	if g.cursorCol < 0 || g.cursorCol >= len(g.columns) {
-		return
+		return nil
 	}
 	g.header.ToggleSort(g.cursorCol)
+
+	sortCol := g.header.SortColumn()
+	sortDir := g.header.SortDirection()
+
+	return func() tea.Msg {
+		return GridSortApplyMsg{
+			Schema:   g.schema,
+			Table:    g.tableName,
+			OrderBy:  sortCol,
+			OrderDir: sortDir,
+			Where:    g.whereClause,
+		}
+	}
 }
 
 func (g *Grid) visibleRows() int {
@@ -354,16 +774,6 @@ func (g *Grid) clampCursor() {
 }
 
 func (g *Grid) View() string {
-	// DEBUG: log view state
-	f, _ := os.OpenFile("/tmp/dbx_grid_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if f != nil {
-		fmt.Fprintf(f, "\nView called: g.data=%v g.columns=%d g.widths=%d g.height=%d scrollCol=%d cursorCol=%d\n", g.data != nil, len(g.columns), len(g.widths), g.height, g.scrollCol, g.cursorCol)
-		if g.data != nil {
-			fmt.Fprintf(f, "  g.data.Rows=%d g.data.Columns=%d\n", len(g.data.Rows), len(g.data.Columns))
-		}
-		f.Close()
-	}
-
 	if g.data == nil || len(g.columns) == 0 {
 		return g.styles.Text.Render("  No data loaded")
 	}
@@ -372,6 +782,7 @@ func (g *Grid) View() string {
 	contentHeight := g.height - 6
 
 	visCols, visWidths := g.visibleColumns()
+
 	g.header.SetColumns(visCols)
 	g.header.SetWidths(visWidths)
 	header := g.header.Render()
@@ -394,14 +805,46 @@ func (g *Grid) View() string {
 				visValues[j] = row[colIdx]
 			}
 		}
-		selected := visibleCount == g.cursorRow
-		rendered := g.cells.RenderRow(visValues, visWidths, selected)
+		isSelected := visibleCount == g.cursorRow
+		isEditing := g.editing && visibleCount == (g.editRow-offset) && g.editRow >= offset && g.editRow < endRow
+		var rendered string
+		if isEditing {
+			editColLocal := g.editCol - g.scrollCol
+			if editColLocal >= 0 && editColLocal < len(visWidths) {
+				rendered = g.cells.RenderEditRow(visValues, visWidths, editColLocal, g.editValue, g.editCursor)
+			} else {
+				activeCol := g.cursorCol - g.scrollCol
+				rendered = g.cells.RenderRow(visValues, visWidths, activeCol)
+			}
+		} else if isSelected {
+			activeCol := g.cursorCol - g.scrollCol
+			rendered = g.cells.RenderRow(visValues, visWidths, activeCol)
+		} else {
+			rendered = g.cells.RenderRow(visValues, visWidths, -1)
+		}
 		rows = append(rows, rendered)
 		visibleCount++
 	}
 
-	pager := g.pager.Render(g.width)
+	pager := g.pager.Render()
 
-	result := title + "\n" + header + "\n" + strings.Join(rows, "\n") + "\n" + pager
+	var result string
+	if g.whereFilter != nil && g.whereFilter.Visible() {
+		filterBar := g.whereFilter.RenderInput()
+		popup := g.whereFilter.RenderPopup()
+		result = title + "\n" + filterBar + "\n"
+		if popup != "" {
+			result += popup + "\n"
+		}
+		result += header + "\n" + strings.Join(rows, "\n") + "\n" + pager
+	} else if g.whereClause != "" {
+		activeFilter := g.styles.Help.Render("  WHERE " + g.whereClause)
+		result = title + "\n" + activeFilter + "\n" + header + "\n" + strings.Join(rows, "\n") + "\n" + pager
+	} else if g.filtering {
+		filterLine := g.styles.Text.Render("Column: " + g.filter + "_")
+		result = title + "\n" + filterLine + "\n" + header + "\n" + strings.Join(rows, "\n") + "\n" + pager
+	} else {
+		result = title + "\n" + header + "\n" + strings.Join(rows, "\n") + "\n" + pager
+	}
 	return result
 }

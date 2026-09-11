@@ -3,8 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -13,9 +13,11 @@ import (
 	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/buble/dbx/internal/theme"
+	"github.com/buble/dbx/internal/ui"
 	"github.com/buble/dbx/internal/ui/components/editor"
 	"github.com/buble/dbx/internal/ui/components/explorer"
 	"github.com/buble/dbx/internal/ui/components/grid"
+	"github.com/buble/dbx/internal/ui/components/palette"
 	"github.com/buble/dbx/internal/ui/components/picker"
 	"github.com/jackc/pgx/v5"
 )
@@ -30,28 +32,37 @@ const (
 )
 
 type Model struct {
-	state          AppState
-	config         *config.Config
-	theme          *theme.Theme
-	styles         *theme.Styles
-	picker         *picker.Picker
-	explorer       *explorer.Explorer
-	grid           *grid.Grid
-	editor         *editor.SQLEditor
-	router         *Router
+	state           AppState
+	config          *config.Config
+	theme           *theme.Theme
+	styles          *theme.Styles
+	picker          *picker.Picker
+	explorer        *explorer.Explorer
+	grid            *grid.Grid
+	editor          *editor.SQLEditor
+	router          *Router
 	keybindRegistry *config.KeybindRegistry
-	project        *config.FoundProject
-	conn           *pgx.Conn
-	width          int
-	height         int
-	err            error
-	editorOpen     bool
-	queryExecuting bool
+	keybinds        map[string]string
+	palette         *palette.Palette
+	helpModal       *ui.HelpModal
+	toast           *ui.ToastManager
+	statusbar       *ui.StatusBar
+	project         *config.FoundProject
+	conn            *pgx.Conn
+	width           int
+	height          int
+	err             error
+	editorOpen      bool
+	queryExecuting  bool
+	lastClickTime   time.Time
+	lastClickX      int
+	lastClickY      int
 }
 
 func NewModel(cfg *config.Config) Model {
 	t := theme.Resolve(cfg.Theme.Mode)
 	kbr := config.NewKeybindRegistry(cfg.Keybindings)
+	kbs := kbr.Flatten()
 	pageSize := 100
 	if cfg.UI.PageSize > 0 {
 		pageSize = cfg.UI.PageSize
@@ -63,14 +74,19 @@ func NewModel(cfg *config.Config) Model {
 		picker:          picker.New(t.Styles()),
 		grid:            grid.New(t.Styles(), pageSize),
 		editor:          editor.NewSQLEditor(t.Styles()),
-		router:          NewRouter(kbr.Flatten()),
+		router:          NewRouter(kbs),
 		keybindRegistry: kbr,
+		keybinds:        kbs,
+		palette:         palette.New(t.Styles(), kbs),
+		helpModal:       ui.NewHelpModal(t.Styles(), kbs),
+		toast:           ui.NewToastManager(t.Styles()),
+		statusbar:       ui.NewStatusBar(t.Styles(), kbs),
 		state:           StatePicker,
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.scanProjects()
+	return tea.Batch(m.scanProjects(), tickToast())
 }
 
 func (m Model) scanProjects() tea.Cmd {
@@ -87,6 +103,14 @@ func (m Model) scanProjects() tea.Cmd {
 
 type projectsScannedMsg struct {
 	projects []config.FoundProject
+}
+
+type toastTickMsg struct{}
+
+func tickToast() tea.Cmd {
+	return tea.Every(time.Second, func(t time.Time) tea.Msg {
+		return toastTickMsg{}
+	})
 }
 
 func (m Model) connectToDB(project config.FoundProject) tea.Cmd {
@@ -138,6 +162,17 @@ func (m Model) loadSchema(conn *pgx.Conn, project config.FoundProject) tea.Cmd {
 	}
 }
 
+func (m Model) isDDL(sql string) bool {
+	trimmed := strings.TrimSpace(strings.ToUpper(sql))
+	ddlPrefixes := []string{"CREATE ", "DROP ", "ALTER ", "TRUNCATE "}
+	for _, prefix := range ddlPrefixes {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 type schemaLoadedMsg struct {
 	root *explorer.Node
 	err  error
@@ -152,6 +187,7 @@ type tableDataLoadedMsg struct {
 	result *postgres.QueryResult
 	schema string
 	table  string
+	where  string
 	err    error
 }
 
@@ -162,62 +198,44 @@ type queryExecutedMsg struct {
 }
 
 func (m Model) loadTableData(schema, table string) tea.Cmd {
+	return m.loadTableDataWithWhere(schema, table, "")
+}
+
+func (m Model) loadTableDataWithWhere(schema, table, where string) tea.Cmd {
+	return m.loadTableDataWithSortAndWhere(schema, table, "1", "", where)
+}
+
+func (m Model) loadTableDataWithSortAndWhere(schema, table, orderBy, orderDir, where string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(m.conn)
 
-		result, err := loader.Select(ctx, table, postgres.SelectOptions{
-			Schema:  schema,
-			Limit:   1000,
-			OrderBy: "1",
-		})
+		opts := postgres.SelectOptions{
+			Schema:   schema,
+			Limit:    grid.MaxRows,
+			OrderBy:  orderBy,
+			OrderDir: orderDir,
+		}
+		if where != "" {
+			opts.Where = strings.TrimRight(strings.TrimSpace(where), ";")
+		}
+
+		result, err := loader.Select(ctx, table, opts)
 
 		if err != nil {
 			return tableDataLoadedMsg{err: fmt.Errorf("SELECT failed: %w", err)}
 		}
 
-		// DEBUG
-		f, _ := os.Create("/tmp/dbx_load_debug.log")
-		if f != nil {
-			fmt.Fprintf(f, "loadTableData: schema=%q table=%q\n", schema, table)
-			fmt.Fprintf(f, "  result.Columns=%d result.Rows=%d\n", len(result.Columns), len(result.Rows))
-			if len(result.Columns) > 0 {
-				for i, c := range result.Columns {
-					fmt.Fprintf(f, "  Column[%d]: %s\n", i, c.Name)
-				}
-			}
-			if len(result.Rows) > 0 {
-				fmt.Fprintf(f, "  First row len=%d\n", len(result.Rows[0]))
-			}
-			f.Close()
-		}
-
-		return tableDataLoadedMsg{result: result, schema: schema, table: table}
+		return tableDataLoadedMsg{result: result, schema: schema, table: table, where: where}
 	}
 }
 
 func (m Model) executeQuery(sql string) tea.Cmd {
 	return func() tea.Msg {
-		// DEBUG
-		if f, err := os.OpenFile("/tmp/dbx_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-			fmt.Fprintf(f, "EXECUTING: %s\n", sql)
-			f.Close()
-		}
-
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(m.conn)
 
 		result, err := loader.ExecuteRaw(ctx, sql)
-
-		// DEBUG
-		if f, err := os.OpenFile("/tmp/dbx_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-			if err != nil {
-				fmt.Fprintf(f, "EXEC ERROR: %v\n", err)
-			} else {
-				fmt.Fprintf(f, "EXEC OK: %d rows, %d cols\n", result.Count, len(result.Columns))
-			}
-			f.Close()
-		}
 
 		if err != nil {
 			return queryExecutedMsg{err: fmt.Errorf("query failed: %w", err), sql: sql}
@@ -234,11 +252,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.picker.SetWidth(msg.Width)
 		m.picker.SetHeight(msg.Height)
+		m.toast.SetWidth(msg.Width)
+		m.palette.SetWidth(msg.Width)
+		m.palette.SetHeight(msg.Height)
+		m.helpModal.SetWidth(msg.Width)
+		m.helpModal.SetHeight(msg.Height)
+		m.statusbar.SetWidth(msg.Width)
 		if m.explorer != nil {
 			m.explorer.SetWidth(msg.Width / 3)
 			m.explorer.SetHeight(msg.Height - 2)
 		}
-		return m, nil
+		return m, tickToast()
+
+	case toastTickMsg:
+		m.toast.Update()
+		return m, tickToast()
 
 	case projectsScannedMsg:
 		m.picker.SetProjects(msg.projects)
@@ -252,25 +280,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.state = StateError
 			m.err = msg.err
+			m.toast.ShowError(fmt.Sprintf("Connection failed: %v", msg.err))
 			return m, nil
 		}
 		m.conn = msg.conn
 		m.state = StateLoading
+		m.toast.ShowInfo("Connected to database")
 		return m, m.loadSchema(msg.conn, *msg.project)
 
 	case schemaLoadedMsg:
 		if msg.err != nil {
 			m.state = StateError
 			m.err = msg.err
+			m.toast.ShowError(fmt.Sprintf("Schema load failed: %v", msg.err))
 			return m, nil
 		}
-		m.explorer = explorer.New(m.styles, nil)
+		m.explorer = explorer.New(m.styles, nil, m.keybinds)
 		m.explorer.SetWidth(m.width / 3)
 		m.explorer.SetHeight(m.height - 2)
 		m.explorer.SetNodes([]*explorer.Node{msg.root})
 		m.grid.SetWidth(m.width * 2 / 3)
 		m.grid.SetHeight(m.height - 4)
 		m.state = StateMain
+		m.toast.ShowSuccess("Schema loaded")
 		return m, nil
 
 	case tableSelectedMsg:
@@ -282,56 +314,190 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tableDataLoadedMsg:
 		if msg.err != nil {
 			m.err = msg.err
+			m.toast.ShowError(fmt.Sprintf("Load failed: %v", msg.err))
 			return m, nil
 		}
-		// DEBUG
-		f, _ := os.Create("/tmp/dbx_app_debug.log")
-		if f != nil {
-			fmt.Fprintf(f, "tableDataLoadedMsg: schema=%q table=%q\n", msg.schema, msg.table)
-			fmt.Fprintf(f, "  result.Columns=%d result.Rows=%d\n", len(msg.result.Columns), len(msg.result.Rows))
-			f.Close()
-		}
 		m.grid.SetData(msg.result, msg.schema, msg.table)
+		m.statusbar.SetTable(msg.schema, msg.table, msg.result.Count)
+		m.statusbar.SetFilter(msg.where)
 		m.router.FocusPane(FocusGrid)
 		return m, nil
 
+	case grid.CellEditCommitMsg:
+		if m.conn == nil {
+			return m, nil
+		}
+		_, err := m.conn.Exec(context.Background(), msg.Query, msg.Args...)
+		if err != nil {
+			m.toast.ShowError(fmt.Sprintf("Update failed: %v", err))
+			return m, nil
+		}
+		m.toast.ShowSuccess("Row updated")
+		return m, m.loadTableData(msg.Schema, msg.Table)
+
+	case grid.GridInsertRowMsg:
+		if m.conn == nil {
+			return m, nil
+		}
+		query := fmt.Sprintf("INSERT INTO %q.%q DEFAULT VALUES", msg.Schema, msg.Table)
+		_, err := m.conn.Exec(context.Background(), query)
+		if err != nil {
+			m.toast.ShowError(fmt.Sprintf("Insert failed: %v", err))
+			return m, nil
+		}
+		m.toast.ShowSuccess("Row inserted")
+		return m, m.loadTableData(msg.Schema, msg.Table)
+
+	case grid.GridFilterApplyMsg:
+		if m.conn == nil {
+			return m, nil
+		}
+		return m, m.loadTableDataWithWhere(msg.Schema, msg.Table, msg.Where)
+
+	case grid.GridSortApplyMsg:
+		if m.conn == nil {
+			return m, nil
+		}
+		return m, m.loadTableDataWithSortAndWhere(msg.Schema, msg.Table, msg.OrderBy, msg.OrderDir, msg.Where)
+
 	case queryExecutedMsg:
 		m.queryExecuting = false
-
-		// DEBUG
-		if f, err := os.OpenFile("/tmp/dbx_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-			if msg.err != nil {
-				fmt.Fprintf(f, "HANDLER ERROR: %v\n", msg.err)
-			} else {
-				fmt.Fprintf(f, "HANDLER OK: %d rows\n", msg.result.Count)
-			}
-			f.Close()
-		}
-
 		if msg.err != nil {
-			m.err = msg.err
+			m.toast.ShowError(fmt.Sprintf("Query failed: %v", msg.err))
 			return m, nil
 		}
 		m.grid.SetData(msg.result, "", "query")
 		m.editor.PushHistory(msg.sql)
+		m.statusbar.SetTable("", "query", msg.result.Count)
 		m.router.FocusPane(FocusGrid)
+		m.toast.ShowSuccess(fmt.Sprintf("Query returned %d rows", msg.result.Count))
+
+		if m.isDDL(msg.sql) && m.conn != nil && m.project != nil {
+			return m, m.loadSchema(m.conn, *m.project)
+		}
 		return m, nil
 
 	case explorer.TableSelectedMsg:
 		return m, m.loadTableData(msg.Schema, msg.Table)
 
+	case explorer.NewTableMsg:
+		schema := msg.Schema
+		if schema == "" {
+			schema = "public"
+		}
+		m.editorOpen = true
+		m.editor.Focus()
+		m.editor.SetContent(fmt.Sprintf("CREATE TABLE %s.new_table (\n    id SERIAL PRIMARY KEY,\n    name VARCHAR(255) NOT NULL\n);", schema))
+		m.statusbar.SetEditorOpen(true)
+		return m, nil
+
+	case explorer.DropTableMsg:
+		m.editorOpen = true
+		m.editor.Focus()
+		m.editor.SetContent(fmt.Sprintf("DROP TABLE %s.%s;", msg.Schema, msg.Table))
+		m.statusbar.SetEditorOpen(true)
+		return m, nil
+
+	case explorer.ViewDDLMsg:
+		m.editorOpen = true
+		m.editor.Focus()
+		m.editor.SetContent(fmt.Sprintf("-- DDL for %s.%s\n-- Run this query to see the table definition:\nSELECT pg_get_tabledef('%s', '%s');", msg.Schema, msg.Table, msg.Schema, msg.Table))
+		m.statusbar.SetEditorOpen(true)
+		return m, nil
+
 	case picker.ConnectionSelectedMsg:
 		m.state = StateLoading
 		m.project = &msg.Project
+		m.toast.ShowInfo(fmt.Sprintf("Connecting to %s...", msg.Project.Name))
 		return m, m.connectToDB(msg.Project)
 
+	case palette.CommandSelectedMsg:
+		return m.handlePaletteCommand(msg.Action)
+
+	case tea.MouseWheelMsg:
+		if m.state == StateMain {
+			if m.router.Focus() == FocusExplorer && m.explorer != nil {
+				mm := msg.Mouse()
+				if mm.Button == tea.MouseWheelUp {
+					m.explorer.Update(tea.KeyPressMsg{Code: 'k'})
+				} else if mm.Button == tea.MouseWheelDown {
+					m.explorer.Update(tea.KeyPressMsg{Code: 'j'})
+				}
+			}
+			if m.router.Focus() == FocusGrid && m.grid != nil {
+				mm := msg.Mouse()
+				if mm.Button == tea.MouseWheelUp {
+					m.grid.Update(tea.KeyPressMsg{Code: 'k'})
+				} else if mm.Button == tea.MouseWheelDown {
+					m.grid.Update(tea.KeyPressMsg{Code: 'j'})
+				}
+			}
+		}
+		return m, nil
+
+	case tea.MouseClickMsg:
+		if m.state == StateMain {
+			mm := msg.Mouse()
+			paneWidth := m.width / 3
+			now := time.Now()
+
+			isDoubleClick := !m.lastClickTime.IsZero() &&
+				now.Sub(m.lastClickTime) < 300*time.Millisecond &&
+				abs(mm.X-m.lastClickX) <= 2 &&
+				abs(mm.Y-m.lastClickY) <= 2
+
+			m.lastClickTime = now
+			m.lastClickX = mm.X
+			m.lastClickY = mm.Y
+
+			if mm.X < paneWidth && m.explorer != nil {
+				localY := mm.Y - 3
+				if m.explorer.IsFiltering() {
+					localY--
+				}
+				if isDoubleClick {
+					m.explorer.HandleClick(localY)
+					return m, m.explorer.ToggleExpand()
+				}
+				m.explorer.HandleClick(localY)
+			} else if mm.X >= paneWidth && m.grid != nil {
+				m.router.FocusPane(FocusGrid)
+				localX := mm.X - paneWidth
+				localY := mm.Y - 3
+				if isDoubleClick {
+					m.grid.HandleClick(localX, localY)
+					if cmd, _ := m.grid.Update(tea.KeyPressMsg{Code: 13}); cmd != nil {
+						return m, cmd
+					}
+					return m, nil
+				}
+				m.grid.HandleClick(localX, localY)
+				if cmd := m.grid.HandleHeaderClick(localX); cmd != nil {
+					return m, cmd
+				}
+			}
+		}
+		return m, nil
+
 	case tea.KeyPressMsg:
-		// Let picker handle keys first when in picker state
+		if m.helpModal.IsVisible() {
+			if cmd, handled := m.helpModal.Update(msg); handled {
+				return m, cmd
+			}
+			return m, nil
+		}
+
+		if m.palette.IsVisible() {
+			if cmd, handled := m.palette.Update(msg); handled {
+				return m, cmd
+			}
+			return m, nil
+		}
+
 		if m.state == StatePicker {
 			if cmd, handled := m.picker.Update(msg); handled {
 				return m, cmd
 			}
-			// Also handle quit in picker state
 			key := msg.String()
 			if key == "q" || key == "ctrl+c" {
 				return m, tea.Quit
@@ -339,32 +505,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Handle keys in main state
 		if m.state == StateMain {
 			key := msg.String()
 
-			// Editor modal captures keys when open
 			if m.editorOpen {
-				// DEBUG: Log all keys to file
-				if f, err := os.OpenFile("/tmp/dbx_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-					fmt.Fprintf(f, "key=%q code=%d mod=%d\n", key, msg.Code, msg.Mod)
-					f.Close()
-				}
-
 				if key == "esc" {
 					m.editorOpen = false
 					m.editor.Blur()
 					return m, nil
 				}
 
-				// Handle editor-specific keys
 				if key == "ctrl+enter" || key == "ctrl+r" {
 					sql := m.editor.Content()
-					// DEBUG: Log conditions
-					if f, err := os.OpenFile("/tmp/dbx_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-						fmt.Fprintf(f, "EXEC: sql=%q conn=%v queryExec=%v\n", sql, m.conn != nil, m.queryExecuting)
-						f.Close()
-					}
 					if sql != "" && m.conn != nil && !m.queryExecuting {
 						m.queryExecuting = true
 						return m, m.executeQuery(sql)
@@ -372,67 +524,134 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 
-				// Forward to editor component
 				if cmd, handled := m.editor.Update(msg); handled {
 					return m, cmd
 				}
 				return m, nil
 			}
 
-			ctx := m.router.Context()
-
-			action := m.router.Match(key, ctx)
-			if action == "" {
-				action = m.router.Match(key, "global")
+			if m.router.Focus() == FocusGrid && m.grid != nil && m.grid.IsFiltering() {
+				if cmd, handled := m.grid.Update(msg); handled {
+					return m, cmd
+				}
+				return m, nil
 			}
 
-			switch action {
-			case "global.quit":
+			if m.router.Focus() == FocusGrid && m.grid != nil && m.grid.IsWhereFiltering() {
+				if cmd, handled := m.grid.Update(msg); handled {
+					return m, cmd
+				}
+				return m, nil
+			}
+
+			if m.router.Focus() == FocusExplorer && m.explorer != nil && m.explorer.IsFiltering() {
+				if cmd, handled := m.explorer.Update(msg); handled {
+					return m, cmd
+				}
+				return m, nil
+			}
+
+			if key == m.keybinds["global.help"] {
+				m.helpModal.Show()
+				return m, nil
+			}
+
+			if key == m.keybinds["global.palette"] {
+				m.palette.Show()
+				return m, nil
+			}
+
+			if key == m.keybinds["global.quit"] {
 				if m.conn != nil {
 					m.conn.Close(context.Background())
 				}
 				return m, tea.Quit
-			case "global.cycle_focus":
+			}
+
+			if key == m.keybinds["global.cycle_focus"] {
 				m.router.CycleFocus()
 				return m, nil
-			case "global.focus_explorer":
+			}
+
+			if key == m.keybinds["global.focus_explorer"] {
 				m.router.FocusPane(FocusExplorer)
 				return m, nil
-			case "global.focus_grid":
+			}
+
+			if key == m.keybinds["global.focus_grid"] {
 				m.router.FocusPane(FocusGrid)
 				return m, nil
-			case "global.focus_editor":
+			}
+
+			if key == m.keybinds["global.focus_editor"] {
 				m.editorOpen = !m.editorOpen
 				if m.editorOpen {
 					m.editor.Focus()
 				} else {
 					m.editor.Blur()
 				}
+				m.statusbar.SetEditorOpen(m.editorOpen)
 				return m, nil
-			case "explorer.filter":
-				if m.router.Focus() == FocusExplorer && m.explorer != nil {
-					m.explorer.StartFilter()
+			}
+
+			if m.router.Focus() == FocusExplorer && m.explorer != nil {
+				if cmd, handled := m.explorer.Update(msg); handled {
+					return m, cmd
 				}
-				return m, nil
 			}
 
-		// Forward to focused component
-		if m.router.Focus() == FocusExplorer && m.explorer != nil {
-			if cmd, handled := m.explorer.Update(msg); handled {
-				return m, cmd
+			if m.router.Focus() == FocusGrid && m.grid != nil {
+				if cmd, handled := m.grid.Update(msg); handled {
+					return m, cmd
+				}
 			}
-		}
 
-		if m.router.Focus() == FocusGrid && m.grid != nil {
-			if cmd, handled := m.grid.Update(msg); handled {
-				return m, cmd
-			}
-		}
-
-		return m, nil
+			return m, nil
 		}
 	}
 
+	return m, nil
+}
+
+func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
+	switch action {
+	case "global.quit":
+		if m.conn != nil {
+			m.conn.Close(context.Background())
+		}
+		return m, tea.Quit
+	case "global.cycle_focus":
+		m.router.CycleFocus()
+	case "global.focus_explorer":
+		m.router.FocusPane(FocusExplorer)
+	case "global.focus_grid":
+		m.router.FocusPane(FocusGrid)
+	case "global.focus_editor":
+		m.editorOpen = !m.editorOpen
+		if m.editorOpen {
+			m.editor.Focus()
+		} else {
+			m.editor.Blur()
+		}
+		m.statusbar.SetEditorOpen(m.editorOpen)
+	case "global.help":
+		m.helpModal.Show()
+	case "global.refresh":
+		if m.project != nil && m.conn != nil {
+			return m, m.loadSchema(m.conn, *m.project)
+		}
+	case "editor.execute":
+		if !m.editorOpen {
+			m.editorOpen = true
+			m.editor.Focus()
+			m.statusbar.SetEditorOpen(true)
+		}
+	case "editor.clear":
+		m.editor.Clear()
+		m.toast.ShowInfo("Editor cleared")
+	default:
+		m.toast.ShowInfo(fmt.Sprintf("Command: %s", action))
+	}
 	return m, nil
 }
 
@@ -450,6 +669,26 @@ func (m Model) View() tea.View {
 		content = m.renderMainView()
 	}
 
+	toastLines := m.toast.ViewLines()
+	for i := len(toastLines) - 1; i >= 0; i-- {
+		toastBox := m.styles.Border.Width(30).Render(toastLines[i])
+		content = overlayBottomRight(content, toastBox, m.width, m.height, i)
+	}
+
+	if m.helpModal.IsVisible() {
+		helpView := m.helpModal.View()
+		if helpView != "" {
+			content = overlay(content, helpView, m.width, m.height)
+		}
+	}
+
+	if m.palette.IsVisible() {
+		paletteView := m.palette.View()
+		if paletteView != "" {
+			content = overlay(content, paletteView, m.width, m.height)
+		}
+	}
+
 	v := tea.NewView(content)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
@@ -457,13 +696,18 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) renderMainView() string {
-	titleText := "dbx"
 	if m.explorer != nil {
-		if selected := m.explorer.Selected(); selected != nil {
-			titleText = selected.Name
+		if selected := m.explorer.Selected(); selected != nil && selected.Type == explorer.NodeTable {
+			schema := ""
+			if s, ok := selected.Metadata["schema"].(string); ok {
+				schema = s
+			}
+			m.statusbar.SetTable(schema, selected.Name, selected.RowCount())
 		}
 	}
-	title := m.styles.Title.Render(titleText)
+
+	m.statusbar.SetFocus(m.router.Context())
+	statusLine := m.statusbar.RenderStatus()
 
 	contentHeight := m.height - 4
 	paneWidth := m.width / 3
@@ -478,7 +722,7 @@ func (m Model) renderMainView() string {
 		panes = append(panes, m.renderGrid(m.width, contentHeight))
 	}
 
-	content := title + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, panes...)
+	content := statusLine + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, panes...)
 
 	if m.editorOpen {
 		modalW := m.width * 6 / 10
@@ -487,7 +731,7 @@ func (m Model) renderMainView() string {
 		content = overlay(content, modal, m.width, contentHeight)
 	}
 
-	content += "\n" + m.renderHelp()
+	content += "\n" + m.statusbar.Render()
 
 	return content
 }
@@ -548,72 +792,6 @@ func (m Model) renderEditor(w, h int) string {
 		Render(title + "\n" + content + "\n" + hint)
 }
 
-func (m Model) renderHelp() string {
-	help1 := m.helpLine1()
-	help2 := m.helpLine2()
-
-	sep := m.styles.Sep.Render(strings.Repeat("─", m.width))
-
-	return sep + "\n" +
-		m.styles.Help.Render("  "+help1) + "\n" +
-		"\n" +
-		m.styles.Help.Render("  "+help2)
-}
-
-func (m Model) helpLine1() string {
-	r := m.router
-	segments := []string{
-		"/ filter",
-		"Tab cycle",
-		r.KeyFor("global.help") + " help",
-		r.KeyFor("global.quit") + " quit",
-	}
-
-	if m.editorOpen {
-		segments = append(segments, "esc close")
-	} else {
-		segments = append(segments, r.KeyFor("global.focus_editor")+" editor")
-	}
-
-	segments = append(segments, ": palette")
-
-	return strings.Join(segments, " · ")
-}
-
-func (m Model) helpLine2() string {
-	r := m.router
-	ctx := m.router.Context()
-
-	var segments []string
-
-	if ctx == "explorer" {
-		segments = []string{
-			"j/k navigate",
-			r.KeyFor("explorer.expand") + " expand",
-			r.KeyFor("explorer.collapse") + " collapse",
-			r.KeyFor("explorer.new") + " new",
-			r.KeyFor("explorer.drop") + " drop",
-			r.KeyFor("explorer.view_ddl") + " ddl",
-		}
-	} else if ctx == "grid" {
-		segments = []string{
-			"j/k navigate",
-			r.KeyFor("grid.edit_cell") + " edit",
-			r.KeyFor("grid.delete_row") + " delete",
-			r.KeyFor("grid.insert_row") + " insert",
-			r.KeyFor("grid.yank") + " yank",
-			r.KeyFor("grid.sort") + " sort",
-		}
-	} else {
-		segments = []string{
-			r.KeyFor("global.refresh") + " refresh",
-			r.KeyFor("global.export") + " export",
-		}
-	}
-
-	return strings.Join(segments, " · ")
-}
-
 func overlay(base, box string, width, height int) string {
 	lines := strings.Split(base, "\n")
 	blocks := strings.Split(box, "\n")
@@ -637,21 +815,32 @@ func overlay(base, box string, width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m *Router) Match(key, context string) string {
-	_ = context
-	switch key {
-	case "q", "ctrl+c":
-		return "global.quit"
-	case "tab":
-		return "global.cycle_focus"
-	case "1":
-		return "global.focus_explorer"
-	case "2":
-		return "global.focus_grid"
-	case "E":
-		return "global.focus_editor"
-	case "/":
-		return "explorer.filter"
+func overlayBottomRight(base, box string, width, height, stackOffset int) string {
+	lines := strings.Split(base, "\n")
+	blocks := strings.Split(box, "\n")
+	bw := lipgloss.Width(blocks[0])
+	bh := len(blocks)
+	if bh > height {
+		bh = height
 	}
-	return ""
+	x := width - bw - 1
+	if x < 0 {
+		x = 0
+	}
+	y := height - bh - 5 - stackOffset*(bh+1)
+	if y < 0 {
+		y = 0
+	}
+	for j := 0; j < bh && y+j < len(lines); j++ {
+		line := lines[y+j]
+		lines[y+j] = ansi.Truncate(line, x, "") + blocks[j] + ansi.TruncateLeft(line, x+bw, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }

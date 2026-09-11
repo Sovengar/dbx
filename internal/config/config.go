@@ -42,6 +42,7 @@ type ConnectionConfig struct {
 
 type AIConfig struct {
 	Provider  string                    `mapstructure:"provider"`
+	Model     string                    `mapstructure:"model"`
 	Providers map[string]AIProviderConf `mapstructure:"providers"`
 }
 
@@ -69,9 +70,16 @@ func Load() (*Config, error) {
 
 	configDir, err := os.UserConfigDir()
 	if err == nil {
+		configPath := filepath.Join(configDir, "dbx")
 		v.SetConfigName("config")
 		v.SetConfigType("toml")
-		v.AddConfigPath(filepath.Join(configDir, "dbx"))
+		v.AddConfigPath(configPath)
+
+		cfgFile := filepath.Join(configPath, "config.toml")
+		if _, err := os.Stat(cfgFile); os.IsNotExist(err) {
+			_ = os.MkdirAll(configPath, 0o755)
+			_ = v.WriteConfigAs(cfgFile)
+		}
 	}
 
 	v.SetEnvPrefix("DBX")
@@ -90,9 +98,8 @@ func Load() (*Config, error) {
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("theme.mode", "system")
 
-	v.SetDefault("keybindings.mode", "vim")
-
-	v.SetDefault("ai.provider", "anthropic")
+	v.SetDefault("ai.provider", "opencode-go")
+	v.SetDefault("ai.model", "mimo-v2.5")
 
 	v.SetDefault("session.enabled", true)
 	v.SetDefault("session.retention_days", 30)

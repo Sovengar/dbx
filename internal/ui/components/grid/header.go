@@ -3,7 +3,9 @@ package grid
 import (
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/buble/dbx/internal/theme"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type SortDirection int
@@ -98,6 +100,18 @@ func (h *Header) Render() string {
 				label = col + " ↑"
 			case SortDesc:
 				label = col + " ↓"
+			}
+		}
+
+		maxTextWidth := width - 2
+		if maxTextWidth < 0 {
+			maxTextWidth = 0
+		}
+		if lipgloss.Width(label) > maxTextWidth {
+			if maxTextWidth <= 3 {
+				label = label[:maxTextWidth]
+			} else {
+				label = ansi.Truncate(label, maxTextWidth, "...")
 			}
 		}
 

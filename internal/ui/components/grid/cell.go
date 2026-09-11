@@ -2,15 +2,12 @@ package grid
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/buble/dbx/internal/theme"
 	"github.com/charmbracelet/x/ansi"
 )
-
-var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 type CellRenderer struct {
 	styles *theme.Styles
@@ -64,55 +61,58 @@ func (cr *CellRenderer) RenderCell(value interface{}, width int, selected bool) 
 	raw := cr.FormatValue(value)
 	truncated := cr.Truncate(raw, width-2)
 
-	var cell string
 	if selected {
-		cell = cr.styles.Selected.
+		return cr.styles.Selected.
 			PaddingLeft(1).
 			PaddingRight(1).
 			Width(width).
 			Render(truncated)
-	} else {
-		cell = cr.styles.Text.
-			PaddingLeft(1).
-			PaddingRight(1).
-			Width(width).
-			Render(truncated)
+	}
+	return cr.styles.Text.
+		PaddingLeft(1).
+		PaddingRight(1).
+		Width(width).
+		Render(truncated)
+}
+
+func (cr *CellRenderer) RenderRow(values []interface{}, widths []int, activeCol int) string {
+	var cells []string
+	for i, val := range values {
+		cells = append(cells, cr.RenderCell(val, widths[i], i == activeCol))
+	}
+	return strings.Join(cells, "")
+}
+
+func (cr *CellRenderer) RenderEditCell(value interface{}, width int, editValue string, cursorPos int) string {
+	truncated := cr.Truncate(editValue, width-2)
+
+	runes := []rune(truncated)
+	if cursorPos > len(runes) {
+		cursorPos = len(runes)
 	}
 
-	// DEBUG
-	f, _ := os.OpenFile("/tmp/dbx_cell_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if f != nil {
-		fmt.Fprintf(f, "  RenderCell: width=%d rawLen=%d truncatedLen=%d cellLen=%d value=%v\n", width, lipgloss.Width(raw), lipgloss.Width(truncated), lipgloss.Width(cell), value)
-		f.Close()
-	}
+	left := string(runes[:cursorPos])
+	right := string(runes[cursorPos:])
+
+	display := left + "█" + right
+
+	cell := cr.styles.Selected.
+		PaddingLeft(1).
+		PaddingRight(1).
+		Width(width).
+		Render(display)
 
 	return cell
 }
 
-func (cr *CellRenderer) RenderRow(values []interface{}, widths []int, selected bool) string {
-	if len(values) != len(widths) {
-		// DEBUG
-		f, _ := os.Create("/tmp/dbx_cell_debug.log")
-		if f != nil {
-			fmt.Fprintf(f, "RenderRow MISMATCH: values=%d widths=%d\n", len(values), len(widths))
-			f.Close()
-		}
-		return ""
-	}
-
+func (cr *CellRenderer) RenderEditRow(values []interface{}, widths []int, editCol int, editValue string, editCursor int) string {
 	var cells []string
 	for i, val := range values {
-		cells = append(cells, cr.RenderCell(val, widths[i], selected))
+		if i == editCol {
+			cells = append(cells, cr.RenderEditCell(val, widths[i], editValue, editCursor))
+		} else {
+			cells = append(cells, cr.RenderCell(val, widths[i], false))
+		}
 	}
-
-	result := strings.Join(cells, "")
-
-	// DEBUG
-	f, _ := os.OpenFile("/tmp/dbx_cell_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if f != nil {
-		fmt.Fprintf(f, "RenderRow OK: values=%d widths=%d resultWidth=%d selected=%v\n", len(values), len(widths), lipgloss.Width(result), selected)
-		f.Close()
-	}
-
-	return result
+	return strings.Join(cells, "")
 }

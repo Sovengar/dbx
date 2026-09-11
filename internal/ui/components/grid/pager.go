@@ -2,7 +2,6 @@ package grid
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/buble/dbx/internal/theme"
 )
@@ -79,7 +78,18 @@ func (p *Pager) LastPage() {
 	p.page = p.TotalPages()
 }
 
-func (p *Pager) Render(width int) string {
+func (p *Pager) GoToPage(n int) {
+	if n < 1 {
+		n = 1
+	}
+	total := p.TotalPages()
+	if n > total {
+		n = total
+	}
+	p.page = n
+}
+
+func (p *Pager) Render() string {
 	if p.totalRows == 0 {
 		return p.styles.Help.Render("  No data")
 	}
@@ -91,35 +101,7 @@ func (p *Pager) Render(width int) string {
 		endRow = p.totalRows
 	}
 
-	info := fmt.Sprintf("  %d-%d of %d", startRow, endRow, p.totalRows)
-	pageInfo := fmt.Sprintf("Page %d of %d", p.page, totalPages)
+	info := fmt.Sprintf("  %d-%d of %d · Page %d of %d", startRow, endRow, p.totalRows, p.page, totalPages)
 
-	left := p.styles.Help.Render(info)
-	right := p.styles.Help.Render(pageInfo)
-
-	padding := width - lipgloss.Width(info) - lipgloss.Width(pageInfo)
-	if padding < 0 {
-		padding = 0
-	}
-
-	return left + strings.Repeat(" ", padding) + right
-}
-
-func lipglossWidth(s string) int {
-	visible := 0
-	inSeq := false
-	for _, r := range s {
-		if r == '\x1b' {
-			inSeq = true
-			continue
-		}
-		if inSeq {
-			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
-				inSeq = false
-			}
-			continue
-		}
-		visible++
-	}
-	return visible
+	return p.styles.Help.Render(info)
 }

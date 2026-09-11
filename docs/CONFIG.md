@@ -56,6 +56,7 @@ mode = "vim"
 
 # Explorer
 # "explorer.expand" = ["enter", "l"]
+# "explorer.toggle_columns" = "space"
 # "explorer.collapse" = ["backspace", "h"]
 # "explorer.new" = "n"
 # "explorer.drop" = "d"

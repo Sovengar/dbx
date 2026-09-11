@@ -73,6 +73,21 @@ func init() {
 func getConnection(cmd *cobra.Command) (*pgx.Conn, error) {
 	connName, _ := cmd.Flags().GetString("connection")
 
+	// First, try to find .dbx.toml in current directory
+	if dsn := findLocalDSN(); dsn != "" {
+		ctx := context.Background()
+		conn, err := pgx.Connect(ctx, dsn)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect: %w", err)
+		}
+		if err := conn.Ping(ctx); err != nil {
+			conn.Close(ctx)
+			return nil, fmt.Errorf("failed to ping: %w", err)
+		}
+		return conn, nil
+	}
+
+	// Fall back to global config
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
@@ -87,7 +102,7 @@ func getConnection(cmd *cobra.Command) (*pgx.Conn, error) {
 	}
 
 	if connCfg == nil {
-		return nil, fmt.Errorf("connection not found: %s", connName)
+		return nil, fmt.Errorf("connection not found: %s (no .dbx.toml in current directory)", connName)
 	}
 
 	var dsn string
@@ -114,6 +129,24 @@ func getConnection(cmd *cobra.Command) (*pgx.Conn, error) {
 	}
 
 	return conn, nil
+}
+
+func findLocalDSN() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+
+	cfg, err := config.LoadProjectConfig(wd + "/.dbx.toml")
+	if err != nil {
+		return ""
+	}
+
+	for _, conn := range cfg.Connections {
+		return conn.GetDSN()
+	}
+
+	return ""
 }
 
 func runQuery(cmd *cobra.Command, args []string) error {

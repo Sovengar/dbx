@@ -180,6 +180,7 @@ mode = "vim"
 
 # Explorer
 "explorer.expand" = ["enter", "l"]
+"explorer.toggle_columns" = "space"
 "explorer.collapse" = ["backspace", "h"]
 "explorer.new_table" = "n"
 "explorer.drop" = "d"

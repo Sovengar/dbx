@@ -11,7 +11,22 @@ make test     # Run tests
 make lint     # Run linter
 ```
 
-**IMPORTANT**: After ANY code change, run `make install` to rebuild and install the binary.
+## Paso crucial tras cualquier cambio de código
+
+**Desplegar el binario** (los tests/smoke con `go run` no actualizan el
+instalado; el usuario ejecuta el bin de `~/.local/bin`, no el repo):
+
+```bash
+make install
+```
+
+Sin este paso, cualquier verificación que haga el usuario sobre la TUI usa la
+versión vieja. Ejecutarlo SIEMPRE al terminar una tarea de código, después de
+la verificación (`go build ./... && go vet ./... && go test ./...`).
+
+**No es necesario cerrar la TUI** — en Linux el binario se reemplaza en disco
+mientras el proceso sigue corriendo con la copia en memoria. La próxima vez que
+abra dbx usará la nueva versión.
 
 ## Stack
 

@@ -15,25 +15,41 @@ type TableSelectedMsg struct {
 	Table  string
 }
 
-type Explorer struct {
-	tree      *Tree
-	mouse     *MouseHandler
-	styles    *theme.Styles
-	width     int
-	height    int
-	focused   bool
-	filtering bool
+type NewTableMsg struct {
+	Schema string
 }
 
-func New(styles *theme.Styles, zones interface{}) *Explorer {
+type DropTableMsg struct {
+	Schema string
+	Table  string
+}
+
+type ViewDDLMsg struct {
+	Schema string
+	Table  string
+}
+
+type Explorer struct {
+	tree        *Tree
+	mouse       *MouseHandler
+	styles      *theme.Styles
+	keybindings map[string]string
+	width       int
+	height      int
+	focused     bool
+	filtering   bool
+}
+
+func New(styles *theme.Styles, zones interface{}, keybindings map[string]string) *Explorer {
 	var mh *MouseHandler
 	if z, ok := zones.(*interface{ New() interface{} }); ok {
 		_ = z
 	}
 	_ = mh
 	return &Explorer{
-		tree:   NewTree(styles),
-		styles: styles,
+		tree:        NewTree(styles),
+		styles:      styles,
+		keybindings: keybindings,
 	}
 }
 
@@ -75,21 +91,67 @@ func (e *Explorer) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 
 		key := msg.String()
-		if key == "enter" || key == "l" {
-			node := e.tree.Selected()
-			if node != nil && node.Type == NodeTable {
-				// DEBUG
-				f, _ := os.Create("/tmp/dbx_explorer_debug.log")
-				if f != nil {
-					schema := ""
-					if s, ok := node.Metadata["schema"].(string); ok {
-						schema = s
-					}
-					fmt.Fprintf(f, "Explorer Update: enter on table %q schema=%q\n", node.Name, schema)
-					f.Close()
-				}
-				return e.ToggleExpand(), true
+
+		if node := e.tree.Selected(); node != nil && node.Type == NodeTable {
+			schema := ""
+			if s, ok := node.Metadata["schema"].(string); ok {
+				schema = s
 			}
+
+			if key == e.keybindings["explorer.toggle_columns"] {
+				node.ToggleExpand()
+				e.tree.flattenNodes()
+				if e.tree.cursor >= len(e.tree.filtered) {
+					e.tree.cursor = len(e.tree.filtered) - 1
+				}
+				return nil, true
+			}
+
+			if key == e.keybindings["explorer.expand"] {
+				return func() tea.Msg {
+					return TableSelectedMsg{
+						Schema: schema,
+						Table:  node.Name,
+					}
+				}, true
+			}
+
+			if key == e.keybindings["explorer.drop"] {
+				return func() tea.Msg {
+					return DropTableMsg{
+						Schema: schema,
+						Table:  node.Name,
+					}
+				}, true
+			}
+
+			if key == e.keybindings["explorer.view_ddl"] {
+				return func() tea.Msg {
+					return ViewDDLMsg{
+						Schema: schema,
+						Table:  node.Name,
+					}
+				}, true
+			}
+		}
+
+		if key == e.keybindings["explorer.new"] {
+			schema := ""
+			if node := e.tree.Selected(); node != nil {
+				if s, ok := node.Metadata["schema"].(string); ok {
+					schema = s
+				}
+			}
+			return func() tea.Msg {
+				return NewTableMsg{
+					Schema: schema,
+				}
+			}, true
+		}
+
+		if key == e.keybindings["explorer.filter"] {
+			e.StartFilter()
+			return nil, true
 		}
 
 		return e.tree.Update(msg)
@@ -155,6 +217,21 @@ func (e *Explorer) View() string {
 func (e *Explorer) StartFilter() {
 	e.filtering = true
 	e.tree.SetFilter("")
+}
+
+func (e *Explorer) IsFiltering() bool {
+	return e.filtering
+}
+
+func (e *Explorer) HandleClick(y int) bool {
+	if e.tree == nil || len(e.tree.filtered) == 0 {
+		return false
+	}
+	if y < 0 || y >= len(e.tree.filtered) {
+		return false
+	}
+	e.tree.cursor = y
+	return true
 }
 
 func (e *Explorer) ToggleExpand() tea.Cmd {

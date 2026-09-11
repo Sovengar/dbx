@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/buble/dbx/internal/theme"
 	ui "github.com/buble/dbx/internal/ui"
@@ -331,12 +333,8 @@ func truncateWithEllipsis(s string, maxWidth int) string {
 	if maxWidth <= 0 {
 		return ""
 	}
-	runes := []rune(s)
-	if len(runes) <= maxWidth {
+	if lipgloss.Width(s) <= maxWidth {
 		return s
 	}
-	if maxWidth == 1 {
-		return "…"
-	}
-	return string(runes[:maxWidth-1]) + "…"
+	return ansi.Truncate(s, maxWidth, "…")
 }
