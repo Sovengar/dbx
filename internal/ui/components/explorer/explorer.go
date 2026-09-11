@@ -1,12 +1,19 @@
 package explorer
 
 import (
+	"fmt"
+	"os"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/buble/dbx/internal/theme"
 )
+
+type TableSelectedMsg struct {
+	Schema string
+	Table  string
+}
 
 type Explorer struct {
 	tree      *Tree
@@ -66,6 +73,25 @@ func (e *Explorer) Update(msg tea.Msg) (tea.Cmd, bool) {
 			e.tree.ClearFilter()
 			return nil, true
 		}
+
+		key := msg.String()
+		if key == "enter" || key == "l" {
+			node := e.tree.Selected()
+			if node != nil && node.Type == NodeTable {
+				// DEBUG
+				f, _ := os.Create("/tmp/dbx_explorer_debug.log")
+				if f != nil {
+					schema := ""
+					if s, ok := node.Metadata["schema"].(string); ok {
+						schema = s
+					}
+					fmt.Fprintf(f, "Explorer Update: enter on table %q schema=%q\n", node.Name, schema)
+					f.Close()
+				}
+				return e.ToggleExpand(), true
+			}
+		}
+
 		return e.tree.Update(msg)
 	}
 	return nil, false
@@ -129,4 +155,47 @@ func (e *Explorer) View() string {
 func (e *Explorer) StartFilter() {
 	e.filtering = true
 	e.tree.SetFilter("")
+}
+
+func (e *Explorer) ToggleExpand() tea.Cmd {
+	node := e.tree.Selected()
+	if node == nil {
+		return nil
+	}
+
+	if node.Type == NodeTable {
+		schema := ""
+		if s, ok := node.Metadata["schema"].(string); ok {
+			schema = s
+		}
+
+		node.ToggleExpand()
+		e.tree.flattenNodes()
+		if e.tree.cursor >= len(e.tree.filtered) {
+			e.tree.cursor = len(e.tree.filtered) - 1
+		}
+
+		// DEBUG
+		f, _ := os.Create("/tmp/dbx_explorer_debug.log")
+		if f != nil {
+			fmt.Fprintf(f, "ToggleExpand Table: name=%q schema=%q\n", node.Name, schema)
+			fmt.Fprintf(f, "  node.Expanded=%v\n", node.Expanded)
+			fmt.Fprintf(f, "  children count: %d\n", len(node.Children))
+			f.Close()
+		}
+
+		return func() tea.Msg {
+			return TableSelectedMsg{
+				Schema: schema,
+				Table:  node.Name,
+			}
+		}
+	}
+
+	node.ToggleExpand()
+	e.tree.flattenNodes()
+	if e.tree.cursor >= len(e.tree.filtered) {
+		e.tree.cursor = len(e.tree.filtered) - 1
+	}
+	return nil
 }

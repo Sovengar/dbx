@@ -175,7 +175,7 @@ mode = "vim"
 "global.export" = "e"
 "global.refresh" = "r"
 "global.help" = "?"
-"global.palette" = "ctrl+p"
+"global.palette" = ":"
 "global.quit" = "q"
 
 # Explorer

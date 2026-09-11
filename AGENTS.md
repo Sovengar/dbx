@@ -42,3 +42,10 @@ pkg/client/       # Go library for agents
 - View() returns `tea.View` struct, not string
 - Mouse mode: `v.MouseMode = tea.MouseModeCellMotion`
 - Key events: `tea.KeyPressMsg`
+
+## Debug Logging
+
+- **NEVER remove debug logging** — always keep it, and add MORE when investigating bugs
+- Debug logs go to `/tmp/dbx_*.log` files (grid_debug, cell_debug, explorer_debug, app_debug, load_debug)
+- Always log: message types received, data counts (rows, columns, widths), key events, state transitions
+- Format: `fmt.Fprintf(f, "ComponentName: key=%q value=%d\n", key, value)`

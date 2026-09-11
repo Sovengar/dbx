@@ -74,7 +74,7 @@ func DefaultKeybindings() map[string]string {
 	return map[string]string{
 		"global.quit":           "q",
 		"global.help":           "?",
-		"global.palette":        "ctrl+p",
+		"global.palette":        ":",
 		"global.cycle_focus":    "tab",
 		"global.focus_explorer": "1",
 		"global.focus_grid":     "2",
@@ -123,7 +123,7 @@ func vimDefaults() map[string][]string {
 	return map[string][]string{
 		"global.quit":           {"q", "ctrl+c"},
 		"global.help":           {"?"},
-		"global.palette":        {"ctrl+p"},
+		"global.palette":        {":"},
 		"global.cycle_focus":    {"tab"},
 		"global.focus_explorer": {"1"},
 		"global.focus_grid":     {"2"},
@@ -172,7 +172,7 @@ func modernDefaults() map[string][]string {
 	return map[string][]string{
 		"global.quit":           {"q", "ctrl+c"},
 		"global.help":           {"?"},
-		"global.palette":        {"ctrl+p"},
+		"global.palette":        {":"},
 		"global.cycle_focus":    {"tab"},
 		"global.focus_explorer": {"1"},
 		"global.focus_grid":     {"2"},
@@ -221,7 +221,7 @@ func emacsDefaults() map[string][]string {
 	return map[string][]string{
 		"global.quit":           {"ctrl+x", "ctrl+c"},
 		"global.help":           {"ctrl+h"},
-		"global.palette":        {"alt+x"},
+		"global.palette":        {":"},
 		"global.cycle_focus":    {"ctrl+o"},
 		"global.focus_explorer": {"ctrl+1"},
 		"global.focus_grid":     {"ctrl+2"},

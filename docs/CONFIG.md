@@ -49,7 +49,7 @@ mode = "vim"
 # Global
 # "global.quit" = "q"
 # "global.help" = "?"
-# "global.palette" = "ctrl+p"
+# "global.palette" = ":"
 # "global.ask" = "a"
 # "global.export" = "e"
 # "global.refresh" = "r"

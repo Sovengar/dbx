@@ -38,7 +38,6 @@ These work everywhere:
 | `q` | Quit | Exit dbx |
 | `?` | Help | Show keybinds modal |
 | `:` | Palette | Open command palette |
-| `Ctrl+P` | Palette | Open command palette (alt) |
 | `Tab` | Focus Next | Cycle to next pane |
 | `Shift+Tab` | Focus Prev | Cycle to previous pane |
 | `1` | Focus Explorer | Jump to explorer pane |
