@@ -152,3 +152,37 @@ func (cr *CellRenderer) RenderEditRow(values []interface{}, widths []int, editCo
 	}
 	return strings.Join(cells, "")
 }
+
+func (cr *CellRenderer) RenderPendingRow(values []interface{}, widths []int, activeCol int) string {
+	var cells []string
+	for i, val := range values {
+		raw := cr.FormatValue(val)
+		truncated := cr.Truncate(raw, widths[i]-2)
+		cell := cr.styles.Pending.
+			PaddingLeft(1).
+			PaddingRight(1).
+			Width(widths[i]).
+			Render(truncated)
+		cells = append(cells, cell)
+	}
+	return strings.Join(cells, "")
+}
+
+func (cr *CellRenderer) RenderPendingEditRow(values []interface{}, widths []int, editCol int, editValue string, cursorPos int) string {
+	var cells []string
+	for i := range values {
+		if i == editCol {
+			cells = append(cells, cr.RenderEditCell(nil, widths[i], editValue, cursorPos))
+		} else {
+			raw := cr.FormatValue(values[i])
+			truncated := cr.Truncate(raw, widths[i]-2)
+			cell := cr.styles.Pending.
+				PaddingLeft(1).
+				PaddingRight(1).
+				Width(widths[i]).
+				Render(truncated)
+			cells = append(cells, cell)
+		}
+	}
+	return strings.Join(cells, "")
+}

@@ -155,6 +155,7 @@ type ConstraintInfo struct {
 type ForeignKeyInfo struct {
 	Name      string
 	Column    string
+	RefSchema string
 	RefTable  string
 	RefColumn string
 }
@@ -232,6 +233,7 @@ func (s *SchemaLoader) ListForeignKeys(ctx context.Context, schema, table string
 		SELECT
 			tc.constraint_name,
 			kcu.column_name,
+			ccu.table_schema AS ref_schema,
 			ccu.table_name AS ref_table,
 			ccu.column_name AS ref_column
 		FROM information_schema.table_constraints tc
@@ -255,7 +257,7 @@ func (s *SchemaLoader) ListForeignKeys(ctx context.Context, schema, table string
 	var fks []ForeignKeyInfo
 	for rows.Next() {
 		var fk ForeignKeyInfo
-		if err := rows.Scan(&fk.Name, &fk.Column, &fk.RefTable, &fk.RefColumn); err != nil {
+		if err := rows.Scan(&fk.Name, &fk.Column, &fk.RefSchema, &fk.RefTable, &fk.RefColumn); err != nil {
 			return nil, err
 		}
 		fks = append(fks, fk)

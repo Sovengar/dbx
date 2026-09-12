@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -64,6 +65,9 @@ type Model struct {
 	lastClickTime   time.Time
 	lastClickX      int
 	lastClickY      int
+	navStack        []NavigationEntry
+	prevSchema      string
+	prevTable       string
 }
 
 func NewModel(cfg *config.Config) Model {
@@ -240,7 +244,7 @@ func toConstraintInfo(data []postgres.ConstraintInfo) []constraintInfo {
 func toForeignKeyInfo(data []postgres.ForeignKeyInfo) []foreignKeyInfo {
 	result := make([]foreignKeyInfo, len(data))
 	for i, fk := range data {
-		result[i] = foreignKeyInfo{Name: fk.Name, Column: fk.Column, RefTable: fk.RefTable, RefColumn: fk.RefColumn}
+		result[i] = foreignKeyInfo{Name: fk.Name, Column: fk.Column, RefSchema: fk.RefSchema, RefTable: fk.RefTable, RefColumn: fk.RefColumn}
 	}
 	return result
 }
@@ -289,6 +293,32 @@ func (m Model) loadTableDataWithSortAndWhere(schema, table, orderBy, orderDir, w
 		}
 
 		return tableDataLoadedMsg{result: result, schema: schema, table: table, where: where}
+	}
+}
+
+func formatFKValue(val interface{}) string {
+	switch v := val.(type) {
+	case nil:
+		return "NULL"
+	case string:
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''"))
+	case int64:
+		return fmt.Sprintf("%d", v)
+	case int32:
+		return fmt.Sprintf("%d", v)
+	case int:
+		return fmt.Sprintf("%d", v)
+	case float64:
+		return fmt.Sprintf("%g", v)
+	case float32:
+		return fmt.Sprintf("%g", v)
+	case bool:
+		if v {
+			return "TRUE"
+		}
+		return "FALSE"
+	default:
+		return fmt.Sprintf("'%v'", v)
 	}
 }
 
@@ -371,6 +401,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.conn == nil || msg.schema == "" || msg.table == "" {
 			return m, nil
 		}
+		m.prevSchema = msg.schema
+		m.prevTable = msg.table
 		return m, m.loadTableData(msg.schema, msg.table)
 
 	case tableDataLoadedMsg:
@@ -380,6 +412,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.grid.SetData(msg.result, msg.schema, msg.table)
+		m.prevSchema = msg.schema
+		m.prevTable = msg.table
 		m.statusbar.SetTable(msg.schema, msg.table, msg.result.Count)
 		m.statusbar.SetFilter(msg.where)
 		m.router.FocusPane(FocusGrid)
@@ -399,7 +433,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		foreignKeys := make([]postgres.ForeignKeyInfo, len(msg.foreignKeys))
 		for i, fk := range msg.foreignKeys {
-			foreignKeys[i] = postgres.ForeignKeyInfo{Name: fk.Name, Column: fk.Column, RefTable: fk.RefTable, RefColumn: fk.RefColumn}
+			foreignKeys[i] = postgres.ForeignKeyInfo{Name: fk.Name, Column: fk.Column, RefSchema: fk.RefSchema, RefTable: fk.RefTable, RefColumn: fk.RefColumn}
 		}
 		indexes := make([]postgres.IndexInfo, len(msg.indexes))
 		for i, idx := range msg.indexes {
@@ -421,19 +455,57 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.toast.ShowSuccess("Row updated")
-		return m, m.loadTableData(msg.Schema, msg.Table)
+		return m, nil
 
-	case grid.GridInsertRowMsg:
+	case grid.GridCommitPendingMsg:
 		if m.conn == nil {
 			return m, nil
 		}
-		query := fmt.Sprintf("INSERT INTO %q.%q DEFAULT VALUES", msg.Schema, msg.Table)
-		_, err := m.conn.Exec(context.Background(), query)
-		if err != nil {
-			m.toast.ShowError(fmt.Sprintf("Insert failed: %v", err))
+		var inserted int
+		for i, query := range msg.Queries {
+			_, err := m.conn.Exec(context.Background(), query, msg.Args[i]...)
+			if err != nil {
+				m.toast.ShowError(fmt.Sprintf("Insert failed: %v", err))
+				return m, nil
+			}
+			inserted++
+		}
+		m.toast.ShowSuccess(fmt.Sprintf("%d row(s) inserted", inserted))
+		return m, m.loadTableData(msg.Schema, msg.Table)
+
+	case grid.GridDeleteRowMsg:
+		if m.conn == nil {
 			return m, nil
 		}
-		m.toast.ShowSuccess("Row inserted")
+		pkCols := m.grid.PrimaryKeyColumns()
+		query, args := grid.BuildDeleteQuery(msg.Schema, msg.Table, msg.Columns, msg.Row, pkCols)
+		_, err := m.conn.Exec(context.Background(), query, args...)
+		if err != nil {
+			m.toast.ShowError(fmt.Sprintf("Delete failed: %v", err))
+			return m, nil
+		}
+		m.grid.ClearSelection()
+		m.toast.ShowSuccess("Row deleted")
+		return m, m.loadTableData(msg.Schema, msg.Table)
+
+	case grid.GridBulkDeleteMsg:
+		if m.conn == nil {
+			return m, nil
+		}
+		pkCols := m.grid.PrimaryKeyColumns()
+		var deleted int
+		for _, row := range msg.Rows {
+			query, args := grid.BuildDeleteQuery(msg.Schema, msg.Table, msg.Columns, row, pkCols)
+			_, err := m.conn.Exec(context.Background(), query, args...)
+			if err != nil {
+				m.toast.ShowError(fmt.Sprintf("Delete failed at row %d: %v", deleted+1, err))
+				m.grid.ClearSelection()
+				return m, m.loadTableData(msg.Schema, msg.Table)
+			}
+			deleted++
+		}
+		m.grid.ClearSelection()
+		m.toast.ShowSuccess(fmt.Sprintf("%d row(s) deleted", deleted))
 		return m, m.loadTableData(msg.Schema, msg.Table)
 
 	case grid.GridFilterApplyMsg:
@@ -476,6 +548,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.preview.SetRow(nil, nil)
 		}
 		return m, nil
+
+	case grid.GridNavigateFKMsg:
+		if msg.RefTable == "" {
+			m.toast.ShowInfo("FK value is NULL — cannot navigate")
+			return m, nil
+		}
+		// Push current state to navigation stack
+		if m.prevSchema != "" && m.prevTable != "" {
+			m.navStack = append(m.navStack, NavigationEntry{
+				Schema:    m.prevSchema,
+				Table:     m.prevTable,
+				Where:     m.grid.WhereClause(),
+				CursorRow: m.grid.CursorRow(),
+				CursorCol: m.grid.CursorCol(),
+				ScrollCol: m.grid.ScrollCol(),
+			})
+		}
+		m.prevSchema = msg.RefSchema
+		m.prevTable = msg.RefTable
+		// Combine existing WHERE with FK condition
+		fkWhere := fmt.Sprintf("%q = %s", msg.RefColumn, formatFKValue(msg.FKValue))
+		existingWhere := m.grid.WhereClause()
+		combinedWhere := fkWhere
+		if existingWhere != "" {
+			combinedWhere = fmt.Sprintf("%s AND (%s)", fkWhere, existingWhere)
+		}
+		// Sync explorer to the referenced table
+		if m.explorer != nil {
+			m.explorer.SelectTable(msg.RefSchema, msg.RefTable)
+		}
+		m.router.FocusPane(FocusGrid)
+		return m, m.loadTableDataWithWhere(msg.RefSchema, msg.RefTable, combinedWhere)
+
+	case grid.GridGoBackMsg:
+		if len(m.navStack) == 0 {
+			m.toast.ShowInfo("No navigation history")
+			return m, nil
+		}
+		entry := m.navStack[len(m.navStack)-1]
+		m.navStack = m.navStack[:len(m.navStack)-1]
+		m.prevSchema = entry.Schema
+		m.prevTable = entry.Table
+		if m.explorer != nil {
+			m.explorer.SelectTable(entry.Schema, entry.Table)
+		}
+		m.router.FocusPane(FocusGrid)
+		return m, m.loadTableDataWithSortAndWhere(entry.Schema, entry.Table, "1", "", entry.Where)
 
 	case queryExecutedMsg:
 		m.queryExecuting = false
@@ -682,6 +801,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			if m.router.Focus() == FocusGrid && m.grid != nil && m.grid.IsEditing() {
+				if cmd, handled := m.grid.Update(msg); handled {
+					return m, cmd
+				}
+				return m, nil
+			}
+
 			if key == m.keybinds["global.help"] {
 				m.helpModal.Show()
 				return m, nil
@@ -697,6 +823,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.conn.Close(context.Background())
 				}
 				return m, tea.Quit
+			}
+
+			if key == m.keybinds["grid.commit_pending"] && m.grid != nil && m.grid.HasPendingRows() {
+				return m, m.grid.CommitPendingInserts()
 			}
 
 			if key == m.keybinds["global.cycle_focus"] {
@@ -831,11 +961,12 @@ func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
 				filename = fmt.Sprintf("%s_%s.csv", msg.Schema, msg.Table)
 			}
 
-			if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
+			filePath := filepath.Join(m.project.Path, filename)
+			if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 				return exportDoneMsg{err: fmt.Errorf("failed to write file: %w", err)}
 			}
 
-			return exportDoneMsg{filename: filename}
+			return exportDoneMsg{filename: filePath}
 		}
 
 		return exportDoneMsg{err: fmt.Errorf("no data to export")}
@@ -1081,7 +1212,7 @@ func (m Model) renderMainView() string {
 		}
 	}
 
-	content := statusLine + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, panes...)
+	content := statusLine + "\n" + m.renderBreadcrumbs() + lipgloss.JoinHorizontal(lipgloss.Top, panes...)
 
 	if m.editorOpen {
 		modalW := m.width * 6 / 10
@@ -1100,6 +1231,23 @@ func (m Model) renderMainView() string {
 	content += "\n" + m.statusbar.Render()
 
 	return content
+}
+
+func (m Model) renderBreadcrumbs() string {
+	if len(m.navStack) == 0 && m.prevTable == "" {
+		return ""
+	}
+
+	var parts []string
+	for _, entry := range m.navStack {
+		parts = append(parts, m.styles.TextMuted.Render(fmt.Sprintf("%s.%s", entry.Schema, entry.Table)))
+	}
+	if m.prevTable != "" {
+		parts = append(parts, m.styles.Text.Render(fmt.Sprintf("%s.%s", m.prevSchema, m.prevTable)))
+	}
+
+	bread := strings.Join(parts, m.styles.TextMuted.Render(" → "))
+	return "  " + bread + "\n"
 }
 
 func (m Model) renderExplorer(w, h int) string {

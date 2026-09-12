@@ -45,6 +45,7 @@ type constraintInfo struct {
 type foreignKeyInfo struct {
 	Name      string
 	Column    string
+	RefSchema string
 	RefTable  string
 	RefColumn string
 }
@@ -53,4 +54,13 @@ type indexInfo struct {
 	Name    string
 	Columns string
 	Unique  bool
+}
+
+type NavigationEntry struct {
+	Schema    string
+	Table     string
+	Where     string
+	CursorRow int
+	CursorCol int
+	ScrollCol int
 }

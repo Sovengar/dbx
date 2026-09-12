@@ -7,6 +7,10 @@ import (
 	"github.com/spf13/viper"
 )
 
+func SessionDir() string {
+	return filepath.Join(os.TempDir(), "dbx", "sessions")
+}
+
 func GetHomeDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -102,6 +106,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("ai.model", "mimo-v2.5")
 
 	v.SetDefault("session.enabled", true)
+	v.SetDefault("session.dir", SessionDir())
 	v.SetDefault("session.retention_days", 30)
 
 	v.SetDefault("ui.statusbar", true)

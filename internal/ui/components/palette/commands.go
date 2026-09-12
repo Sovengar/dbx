@@ -34,7 +34,7 @@ func DefaultCommands() []command {
 		{Name: "Focus Explorer", Alias: "explorer", Action: "global.focus_explorer", Section: SectionNav},
 		{Name: "Focus Grid", Alias: "grid", Action: "global.focus_grid", Section: SectionNav},
 		{Name: "Toggle Editor", Alias: "editor", Action: "global.focus_editor", Section: SectionNav},
-		{Name: "Cycle Panes", Alias: "cycle", Action: "global.cycle_focus", Section: SectionNav},
+		{Name: "Toggle Explorer", Alias: "toggle-explorer", Action: "global.cycle_focus", Section: SectionNav},
 	}
 }
 

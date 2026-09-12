@@ -1,0 +1,5 @@
+default: true
+
+# Tables are inherently wide; exempt them from line-length checks.
+MD013:
+  tables: false

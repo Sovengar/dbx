@@ -74,7 +74,7 @@ func (s *StatusBar) RenderStatus() string {
 func (s *StatusBar) renderActions() string {
 	var segments []string
 
-	segments = append(segments, "Tab panes")
+	segments = append(segments, s.keyFor("global.cycle_focus")+" Toggle explorer")
 	segments = append(segments, s.keyFor("global.help")+" help")
 	segments = append(segments, s.keyFor("global.quit")+" quit")
 	segments = append(segments, s.keyFor("global.focus_editor")+" editor")
@@ -94,7 +94,7 @@ func (s *StatusBar) renderContextual() []string {
 			lines = append(lines, "/ filter · n new · d drop · v DDL · Enter Open table data · Space View columns")
 		case "grid":
 			lines = append(lines, "1-5 tabs · / filter · n/p N/P page · F1-9 goto · s sort · f find column")
-			lines = append(lines, "Enter edit row · d delete · i insert · space select · y export · g/G first/last")
+			lines = append(lines, "Enter edit · d delete · i insert · space select · y export · o FK nav · H go back")
 		}
 	}
 

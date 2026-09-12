@@ -10,6 +10,7 @@ type Styles struct {
 	Element  lipgloss.Style
 	Selected lipgloss.Style
 	Cursor   lipgloss.Style
+	Pending  lipgloss.Style
 
 	Text       lipgloss.Style
 	TextMuted  lipgloss.Style
@@ -29,6 +30,9 @@ type Styles struct {
 
 	TabActive   lipgloss.Style
 	TabInactive lipgloss.Style
+
+	ModeEdit lipgloss.Style
+	ModeNormal lipgloss.Style
 }
 
 func NewStyles(t *Theme) *Styles {
@@ -54,6 +58,9 @@ func NewStyles(t *Theme) *Styles {
 		Cursor: lipgloss.NewStyle().
 			Background(t.BackgroundCursor).
 			Foreground(t.Foreground),
+
+		Pending: lipgloss.NewStyle().
+			Foreground(t.Pending),
 
 		Text: lipgloss.NewStyle().
 			Foreground(t.Text),
@@ -109,6 +116,18 @@ func NewStyles(t *Theme) *Styles {
 
 		TabInactive: lipgloss.NewStyle().
 			Foreground(t.TextMuted).
+			Padding(0, 1),
+
+		ModeEdit: lipgloss.NewStyle().
+			Background(t.Pending).
+			Foreground(t.Background).
+			Bold(true).
+			Padding(0, 1),
+
+		ModeNormal: lipgloss.NewStyle().
+			Background(t.Border).
+			Foreground(t.Foreground).
+			Bold(true).
 			Padding(0, 1),
 	}
 }

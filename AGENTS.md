@@ -51,6 +51,22 @@ internal/
 pkg/client/       # Go library for agents
 ```
 
+## Keybind Changes — Checklist obligatorio
+
+Cuando se añade, modifica o elimina un keybind, SIEMPRE actualizar TODOS
+estos lugares (no solo el código):
+
+1. **Código**: `internal/config/keybindings.go` — `DefaultKeybindings()` + `defaultBindings()`
+2. **Bottom bar (global)**: `internal/ui/statusbar.go` — `renderActions()` (acciones always-visible)
+3. **Bottom bar (contextual)**: `internal/ui/statusbar.go` — `renderContextual()` (acciones por pane)
+4. **Help modal `?`**: `internal/ui/modal.go` — sección correspondiente (Global/Explorer/Grid/Editor)
+5. **Palette `:`**: `internal/ui/components/palette/commands.go` — si es un action nuevo
+6. **README.md** — tabla de keybinds + tabla "Navigation & UI"
+7. **docs/KEYBINDS.md** — Action Naming Convention + Global Keybinds + Context-Sensitive Display
+
+**No olvidar**: comprobar que la tecla no choque con otra acción en el mismo
+contexto (ej: `e` no puede ser cycle panes Y export al mismo tiempo).
+
 ## Conventions
 
 - Use `charm.land/*` import paths for bubbletea, lipgloss, bubbles v2

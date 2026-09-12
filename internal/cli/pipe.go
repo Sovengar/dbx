@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/buble/dbx/internal/ai/session"
+	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/drivers/postgres"
 )
 
@@ -38,8 +39,11 @@ func runReplay(cmd *cobra.Command, args []string) error {
 	filename := args[0]
 	jsonOutput, _ := cmd.Flags().GetBool("json")
 
-	homeDir, _ := os.UserHomeDir()
-	sessionDir := homeDir + "/.config/dbx/sessions"
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	sessionDir := cfg.Session.Dir
 
 	reader := session.NewReader(sessionDir)
 	entries, err := reader.ReadFile(filename)

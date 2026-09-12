@@ -215,6 +215,26 @@ func (t *Tree) Selected() *Node {
 	return t.filtered[t.cursor]
 }
 
+func (t *Tree) FindTable(schema, table string) *Node {
+	return t.findTableRecursive(t.nodes, schema, table)
+}
+
+func (t *Tree) findTableRecursive(nodes []*Node, schema, table string) *Node {
+	for _, n := range nodes {
+		if n.Type == NodeTable && n.Name == table {
+			if s, ok := n.Metadata["schema"].(string); ok && s == schema {
+				return n
+			}
+		}
+		if len(n.Children) > 0 {
+			if found := t.findTableRecursive(n.Children, schema, table); found != nil {
+				return found
+			}
+		}
+	}
+	return nil
+}
+
 func (t *Tree) SetWidth(w int) {
 	t.width = w
 }

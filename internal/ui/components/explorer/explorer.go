@@ -234,6 +234,30 @@ func (e *Explorer) HandleClick(y int) bool {
 	return true
 }
 
+func (e *Explorer) SelectTable(schema, table string) bool {
+	if e.tree == nil {
+		return false
+	}
+	target := e.tree.FindTable(schema, table)
+	if target == nil {
+		return false
+	}
+	// Expand all ancestors so the table is visible
+	for node := target.Parent; node != nil; node = node.Parent {
+		if !node.Expanded {
+			node.Expanded = true
+		}
+	}
+	e.tree.flattenNodes()
+	for i, n := range e.tree.filtered {
+		if n == target {
+			e.tree.cursor = i
+			return true
+		}
+	}
+	return false
+}
+
 func (e *Explorer) ToggleExpand() tea.Cmd {
 	node := e.tree.Selected()
 	if node == nil {

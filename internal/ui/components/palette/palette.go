@@ -13,14 +13,15 @@ type CommandSelectedMsg struct {
 }
 
 type Palette struct {
-	styles   *theme.Styles
-	commands []command
-	filtered []scoredCommand
-	query    string
-	cursor   int
-	visible  bool
-	width    int
-	height   int
+	styles       *theme.Styles
+	commands     []command
+	filtered     []scoredCommand
+	query        string
+	cursor       int
+	scrollOffset int
+	visible      bool
+	width        int
+	height       int
 }
 
 func New(styles *theme.Styles, keybindings map[string]string) *Palette {
@@ -35,6 +36,7 @@ func (p *Palette) Show() {
 	p.visible = true
 	p.query = ""
 	p.cursor = 0
+	p.scrollOffset = 0
 	p.updateFiltered()
 }
 
@@ -57,6 +59,7 @@ func (p *Palette) SetHeight(h int) {
 
 func (p *Palette) updateFiltered() {
 	p.filtered = fuzzySort(p.query, p.commands)
+	p.scrollOffset = 0
 	if p.cursor >= len(p.filtered) {
 		p.cursor = len(p.filtered) - 1
 	}
@@ -153,6 +156,7 @@ func (p *Palette) View() string {
 		Render(p.styles.Text.Render(":" + p.query + "_"))
 
 	var listLines []string
+	var cmdLineMap []int
 	sectionOrder := []CommandSection{SectionDatabase, SectionQuery, SectionUI, SectionNav}
 
 	usedSections := make(map[CommandSection]bool)
@@ -160,10 +164,17 @@ func (p *Palette) View() string {
 		usedSections[sc.command.Section] = true
 	}
 
+	cmdIdx := 0
+	firstSection := true
 	for _, section := range sectionOrder {
 		if !usedSections[section] {
 			continue
 		}
+
+		if !firstSection {
+			listLines = append(listLines, "")
+		}
+		firstSection = false
 
 		header := p.styles.Header.Render(string(section))
 		listLines = append(listLines, "  "+header)
@@ -173,7 +184,6 @@ func (p *Palette) View() string {
 				continue
 			}
 
-			idx := len(listLines)
 			item := p.styles.Text.Render(sc.command.Name)
 
 			padLen := inputW - lipgloss.Width(sc.command.Name) - 2
@@ -181,11 +191,13 @@ func (p *Palette) View() string {
 				item += strings.Repeat(" ", padLen)
 			}
 
-			if idx-1 == p.cursor {
+			if cmdIdx == p.cursor {
 				item = p.styles.Selected.Width(inputW).Render(sc.command.Name)
 			}
 
+			cmdLineMap = append(cmdLineMap, len(listLines))
 			listLines = append(listLines, "  "+item)
+			cmdIdx++
 		}
 	}
 
@@ -194,11 +206,36 @@ func (p *Palette) View() string {
 	}
 
 	maxVisible := 12
-	if len(listLines) > maxVisible {
-		listLines = listLines[:maxVisible]
+
+	// scroll to keep cursor visible
+	if len(cmdLineMap) > 0 && p.cursor >= 0 && p.cursor < len(cmdLineMap) {
+		cursorLine := cmdLineMap[p.cursor]
+
+		if cursorLine < p.scrollOffset {
+			p.scrollOffset = cursorLine
+		}
+		if cursorLine >= p.scrollOffset+maxVisible {
+			p.scrollOffset = cursorLine - maxVisible + 1
+		}
 	}
 
-	list := strings.Join(listLines, "\n")
+	// clamp scrollOffset
+	totalLines := len(listLines)
+	if totalLines <= maxVisible {
+		p.scrollOffset = 0
+	} else if p.scrollOffset > totalLines-maxVisible {
+		p.scrollOffset = totalLines - maxVisible
+	}
+	if p.scrollOffset < 0 {
+		p.scrollOffset = 0
+	}
+
+	visible := listLines
+	if totalLines > maxVisible {
+		visible = listLines[p.scrollOffset : p.scrollOffset+maxVisible]
+	}
+
+	list := strings.Join(visible, "\n")
 
 	content := input + "\n" + list
 

@@ -15,7 +15,8 @@ Keybinds follow the **first-letter rule**:
 - `a` = **a**sk (NL→SQL)
 - `c` = **c**hange (edit)
 - `d` = **d**elete
-- `e` = **e**xport
+- `e` = **e**xplorer toggle
+- `x` = e**x**port
 - `f` = **f**ilter
 - `g` = **g**o to (first/last)
 - `i` = **i**nsert
@@ -38,13 +39,12 @@ These work everywhere:
 | `q` | Quit | Exit dbx |
 | `?` | Help | Show keybinds modal |
 | `:` | Palette | Open command palette |
-| `Tab` | Focus Next | Cycle to next pane |
-| `Shift+Tab` | Focus Prev | Cycle to previous pane |
+| `e` | Toggle Explorer | Toggle Explorer pane |
 | `1` | Focus Explorer | Jump to explorer pane |
 | `2` | Focus Grid | Jump to grid pane |
 | `3` | Focus Editor | Jump to editor pane |
 | `a` | Ask AI | Open NL→SQL prompt |
-| `e` | Export | Export current data |
+| `x` | Export | Export current data |
 | `r` | Refresh | Refresh current view |
 | `Ctrl+C` | Quit | Force quit |
 
@@ -186,7 +186,7 @@ The statusbar shows relevant keybinds based on current context:
 [Enter] Open  [d] Drop  [n] New  [v] DDL  [/] Filter  [r] Refresh
 
 [Grid-focused]
-[i] Edit  [d] Delete  [o] Insert  [y] Copy  [s] Sort  [/] Filter  [e] Export
+[i] Edit  [d] Delete  [o] Insert  [y] Copy  [s] Sort  [/] Filter  [x] Export
 
 [Editor-focused]
 [Ctrl+Enter] Run  [Ctrl+U] Clear  [Ctrl+G] External  [Tab] Complete

@@ -27,6 +27,8 @@ type Theme struct {
 	BackgroundSelected color.Color
 	BackgroundCursor   color.Color
 
+	Pending color.Color
+
 	Text       color.Color
 	TextMuted  color.Color
 	TextBright color.Color

@@ -7,10 +7,11 @@ import (
 )
 
 type Pager struct {
-	styles    *theme.Styles
-	page      int
-	totalRows int
-	pageSize  int
+	styles      *theme.Styles
+	page        int
+	totalRows   int
+	pageSize    int
+	pendingCount int
 }
 
 func NewPager(styles *theme.Styles, pageSize int) *Pager {
@@ -28,12 +29,17 @@ func (p *Pager) SetTotalRows(total int) {
 	}
 }
 
+func (p *Pager) SetPendingCount(n int) {
+	p.pendingCount = n
+}
+
 func (p *Pager) TotalPages() int {
+	total := p.totalRows + p.pendingCount
 	if p.pageSize <= 0 {
 		return 1
 	}
-	pages := p.totalRows / p.pageSize
-	if p.totalRows%p.pageSize > 0 {
+	pages := total / p.pageSize
+	if total%p.pageSize > 0 {
 		pages++
 	}
 	if pages < 1 {
@@ -90,18 +96,22 @@ func (p *Pager) GoToPage(n int) {
 }
 
 func (p *Pager) Render() string {
-	if p.totalRows == 0 {
+	total := p.totalRows + p.pendingCount
+	if total == 0 {
 		return p.styles.Help.Render("  No data")
 	}
 
 	totalPages := p.TotalPages()
 	startRow := (p.page-1)*p.pageSize + 1
 	endRow := p.page * p.pageSize
-	if endRow > p.totalRows {
-		endRow = p.totalRows
+	if endRow > total {
+		endRow = total
 	}
 
-	info := fmt.Sprintf("  %d-%d of %d · Page %d of %d", startRow, endRow, p.totalRows, p.page, totalPages)
+	info := fmt.Sprintf("  %d-%d of %d · Page %d of %d", startRow, endRow, total, p.page, totalPages)
+	if p.pendingCount > 0 {
+		info += fmt.Sprintf(" · %d pending", p.pendingCount)
+	}
 
 	return p.styles.Help.Render(info)
 }
