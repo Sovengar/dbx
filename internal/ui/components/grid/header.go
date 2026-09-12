@@ -16,12 +16,21 @@ const (
 	SortDesc
 )
 
+type KeyIcon int
+
+const (
+	KeyNone KeyIcon = iota
+	KeyPK
+	KeyFK
+)
+
 type Header struct {
 	styles    *theme.Styles
 	columns   []string
 	sortCol   int
 	sortDir   SortDirection
 	widths    []int
+	keyIcons  map[int]KeyIcon
 }
 
 func NewHeader(styles *theme.Styles) *Header {
@@ -38,6 +47,10 @@ func (h *Header) SetColumns(columns []string) {
 
 func (h *Header) SetWidths(widths []int) {
 	h.widths = widths
+}
+
+func (h *Header) SetKeyIcons(icons map[int]KeyIcon) {
+	h.keyIcons = icons
 }
 
 func (h *Header) ToggleSort(col int) SortDirection {
@@ -94,12 +107,21 @@ func (h *Header) Render() string {
 		}
 
 		label := col
+		if icon, ok := h.keyIcons[i]; ok {
+			switch icon {
+			case KeyPK:
+				label = "* " + col
+			case KeyFK:
+				label = "→ " + col
+			}
+		}
+
 		if i == h.sortCol {
 			switch h.sortDir {
 			case SortAsc:
-				label = col + " ↑"
+				label = label + " ↑"
 			case SortDesc:
-				label = col + " ↓"
+				label = label + " ↓"
 			}
 		}
 

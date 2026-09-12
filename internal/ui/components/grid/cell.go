@@ -83,6 +83,42 @@ func (cr *CellRenderer) RenderRow(values []interface{}, widths []int, activeCol 
 	return strings.Join(cells, "")
 }
 
+func (cr *CellRenderer) RenderSelectedRow(values []interface{}, widths []int, activeCol int) string {
+	var cells []string
+	for i, val := range values {
+		raw := cr.FormatValue(val)
+		truncated := cr.Truncate(raw, widths[i]-2)
+
+		cell := cr.styles.Cursor.
+			PaddingLeft(1).
+			PaddingRight(1).
+			Width(widths[i]).
+			Render(truncated)
+		cells = append(cells, cell)
+	}
+	return strings.Join(cells, "")
+}
+
+func (cr *CellRenderer) RenderCursorSelectedRow(values []interface{}, widths []int, activeCol int) string {
+	var cells []string
+	for i, val := range values {
+		raw := cr.FormatValue(val)
+		truncated := cr.Truncate(raw, widths[i]-2)
+
+		style := cr.styles.Cursor
+		if i == activeCol {
+			style = cr.styles.Selected
+		}
+		cell := style.
+			PaddingLeft(1).
+			PaddingRight(1).
+			Width(widths[i]).
+			Render(truncated)
+		cells = append(cells, cell)
+	}
+	return strings.Join(cells, "")
+}
+
 func (cr *CellRenderer) RenderEditCell(value interface{}, width int, editValue string, cursorPos int) string {
 	truncated := cr.Truncate(editValue, width-2)
 

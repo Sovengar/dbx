@@ -25,6 +25,7 @@ type Theme struct {
 	BackgroundPanel    color.Color
 	BackgroundElement  color.Color
 	BackgroundSelected color.Color
+	BackgroundCursor   color.Color
 
 	Text       color.Color
 	TextMuted  color.Color

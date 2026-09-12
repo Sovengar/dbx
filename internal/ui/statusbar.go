@@ -68,7 +68,7 @@ func (s *StatusBar) Render() string {
 }
 
 func (s *StatusBar) RenderStatus() string {
-	return s.styles.Help.Render("  " + s.renderStatus())
+	return s.styles.TextBright.Render("  " + s.renderStatus())
 }
 
 func (s *StatusBar) renderActions() string {
@@ -93,8 +93,8 @@ func (s *StatusBar) renderContextual() []string {
 		case "explorer":
 			lines = append(lines, "/ filter · n new · d drop · v DDL · Enter Open table data · Space View columns")
 		case "grid":
-			lines = append(lines, "/ filter · n/p N/P page · 0-9 goto page · s sort · f find column")
-			lines = append(lines, "Enter edit row · d delete · i insert · y yank · g/G first/last · ^D/^U half")
+			lines = append(lines, "1-5 tabs · / filter · n/p N/P page · F1-9 goto · s sort · f find column")
+			lines = append(lines, "Enter edit row · d delete · i insert · space select · y export · g/G first/last")
 		}
 	}
 

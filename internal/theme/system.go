@@ -28,6 +28,7 @@ func generateFromColors(bg, fg string) *Theme {
 		BackgroundPanel:    c("#181825"),
 		BackgroundElement:  c("#313244"),
 		BackgroundSelected: c("#45475a"),
+		BackgroundCursor:   c("#585b70"),
 
 		Text:       c(fg),
 		TextMuted:  c("#6c7086"),

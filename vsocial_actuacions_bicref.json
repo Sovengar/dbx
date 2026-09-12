@@ -1,0 +1,26 @@
+[
+  {
+    "banc": "Westdeutsche Landesbank (Europa)",
+    "codi": "0196",
+    "codibic": "WELAESMMXXX",
+    "creaciodata": "2022-12-11T15:00:00Z",
+    "creaciousuari": "SYSTEM",
+    "eliminaciodata": null,
+    "eliminaciousuari": null,
+    "id": 73,
+    "modificaciodata": "2022-12-11T15:00:00Z",
+    "modificaciousuari": "SYSTEM"
+  },
+  {
+    "banc": "Wafabank",
+    "codi": "1248",
+    "codibic": "WAFAESM1XXX",
+    "creaciodata": "2022-12-11T15:00:00Z",
+    "creaciousuari": "SYSTEM",
+    "eliminaciodata": null,
+    "eliminaciousuari": null,
+    "id": 132,
+    "modificaciodata": "2022-12-11T15:00:00Z",
+    "modificaciousuari": "SYSTEM"
+  }
+]

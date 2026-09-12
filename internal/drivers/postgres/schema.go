@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -145,6 +146,26 @@ type ColumnInfo struct {
 	Default    *string
 }
 
+type ConstraintInfo struct {
+	Name    string
+	Type    string // PRIMARY KEY, UNIQUE, CHECK, FOREIGN KEY
+	Columns string // "col1, col2"
+}
+
+type ForeignKeyInfo struct {
+	Name      string
+	Column    string
+	RefTable  string
+	RefColumn string
+}
+
+type IndexInfo struct {
+	Name    string
+	Columns string
+	Unique  bool
+	Def     string
+}
+
 func (s *SchemaLoader) ListColumns(ctx context.Context, schema, table string) ([]ColumnInfo, error) {
 	query := `
 		SELECT 
@@ -173,4 +194,104 @@ func (s *SchemaLoader) ListColumns(ctx context.Context, schema, table string) ([
 	}
 
 	return columns, rows.Err()
+}
+
+func (s *SchemaLoader) ListConstraints(ctx context.Context, schema, table string) ([]ConstraintInfo, error) {
+	query := `
+		SELECT tc.constraint_name, tc.constraint_type,
+			string_agg(DISTINCT kcu.column_name, ', ' ORDER BY kcu.column_name)
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+			ON tc.constraint_name = kcu.constraint_name
+			AND tc.table_schema = kcu.table_schema
+		WHERE tc.table_schema = $1 AND tc.table_name = $2
+		GROUP BY tc.constraint_name, tc.constraint_type
+		ORDER BY tc.constraint_name
+	`
+
+	rows, err := s.conn.Query(ctx, query, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var constraints []ConstraintInfo
+	for rows.Next() {
+		var c ConstraintInfo
+		if err := rows.Scan(&c.Name, &c.Type, &c.Columns); err != nil {
+			return nil, err
+		}
+		constraints = append(constraints, c)
+	}
+
+	return constraints, rows.Err()
+}
+
+func (s *SchemaLoader) ListForeignKeys(ctx context.Context, schema, table string) ([]ForeignKeyInfo, error) {
+	query := `
+		SELECT
+			tc.constraint_name,
+			kcu.column_name,
+			ccu.table_name AS ref_table,
+			ccu.column_name AS ref_column
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+			ON tc.constraint_name = kcu.constraint_name
+			AND tc.table_schema = kcu.table_schema
+		JOIN information_schema.constraint_column_usage ccu
+			ON tc.constraint_name = ccu.constraint_name
+			AND tc.table_schema = ccu.table_schema
+		WHERE tc.constraint_type = 'FOREIGN KEY'
+			AND tc.table_schema = $1 AND tc.table_name = $2
+		ORDER BY tc.constraint_name, kcu.ordinal_position
+	`
+
+	rows, err := s.conn.Query(ctx, query, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var fks []ForeignKeyInfo
+	for rows.Next() {
+		var fk ForeignKeyInfo
+		if err := rows.Scan(&fk.Name, &fk.Column, &fk.RefTable, &fk.RefColumn); err != nil {
+			return nil, err
+		}
+		fks = append(fks, fk)
+	}
+
+	return fks, rows.Err()
+}
+
+func (s *SchemaLoader) ListIndexes(ctx context.Context, schema, table string) ([]IndexInfo, error) {
+	query := `
+		SELECT indexname, indexdef
+		FROM pg_indexes
+		WHERE schemaname = $1 AND tablename = $2
+		ORDER BY indexname
+	`
+
+	rows, err := s.conn.Query(ctx, query, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var indexes []IndexInfo
+	for rows.Next() {
+		var idx IndexInfo
+		var def string
+		if err := rows.Scan(&idx.Name, &def); err != nil {
+			return nil, err
+		}
+		idx.Def = def
+		idx.Unique = false
+		if len(def) > 0 {
+			idx.Unique = strings.Contains(def, "UNIQUE")
+		}
+		indexes = append(indexes, idx)
+	}
+
+	return indexes, rows.Err()
 }

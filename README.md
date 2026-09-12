@@ -17,6 +17,26 @@ dbx is a terminal UI for databases, built with [Bubbletea v2](https://github.com
 - 📦 **CLI mode** — Query, export, and automate from scripts
 - 🎭 **Multiple themes** — System, dark, light, nord, gruvbox, catppuccin
 
+## Dependencies
+
+- **Go 1.22+**
+- **PostgreSQL** (via pgx)
+- **Clipboard support** (optional, for copy to clipboard):
+  - **Linux (Wayland)**: `wl-clipboard` (`wl-copy`/`wl-paste`)
+  - **Linux (X11)**: `xclip` or `xsel`
+  - **macOS**: built-in `pbcopy`
+  - **Windows**: built-in `clip.exe`
+
+```bash
+# Wayland (Hyprland, Sway, GNOME, etc.)
+sudo apt install wl-clipboard    # Ubuntu/Debian
+sudo pacman -S wl-clipboard      # Arch
+
+# X11
+sudo apt install xclip           # Ubuntu/Debian
+sudo pacman -S xclip             # Arch
+```
+
 ## Installation
 
 ```bash

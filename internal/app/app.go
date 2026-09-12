@@ -2,7 +2,12 @@ package app
 
 import (
 	"context"
+	"encoding/csv"
+	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -19,6 +24,7 @@ import (
 	"github.com/buble/dbx/internal/ui/components/grid"
 	"github.com/buble/dbx/internal/ui/components/palette"
 	"github.com/buble/dbx/internal/ui/components/picker"
+	"github.com/buble/dbx/internal/ui/components/preview"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -40,6 +46,7 @@ type Model struct {
 	explorer        *explorer.Explorer
 	grid            *grid.Grid
 	editor          *editor.SQLEditor
+	preview         *preview.Preview
 	router          *Router
 	keybindRegistry *config.KeybindRegistry
 	keybinds        map[string]string
@@ -72,8 +79,9 @@ func NewModel(cfg *config.Config) Model {
 		theme:           t,
 		styles:          t.Styles(),
 		picker:          picker.New(t.Styles()),
-		grid:            grid.New(t.Styles(), pageSize),
+		grid:            grid.New(t.Styles(), pageSize, kbs),
 		editor:          editor.NewSQLEditor(t.Styles()),
+		preview:         preview.New(t.Styles()),
 		router:          NewRouter(kbs),
 		keybindRegistry: kbr,
 		keybinds:        kbs,
@@ -189,6 +197,60 @@ type tableDataLoadedMsg struct {
 	table  string
 	where  string
 	err    error
+}
+
+func (m Model) loadMetadata(schema, table string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		loader := postgres.NewSchemaLoader(m.conn)
+
+		constraints, err := loader.ListConstraints(ctx, schema, table)
+		if err != nil {
+			return metadataLoadedMsg{err: err}
+		}
+
+		foreignKeys, err := loader.ListForeignKeys(ctx, schema, table)
+		if err != nil {
+			return metadataLoadedMsg{err: err}
+		}
+
+		indexes, err := loader.ListIndexes(ctx, schema, table)
+		if err != nil {
+			return metadataLoadedMsg{err: err}
+		}
+
+		return metadataLoadedMsg{
+			schema:      schema,
+			table:       table,
+			constraints: toConstraintInfo(constraints),
+			foreignKeys: toForeignKeyInfo(foreignKeys),
+			indexes:     toIndexInfo(indexes),
+		}
+	}
+}
+
+func toConstraintInfo(data []postgres.ConstraintInfo) []constraintInfo {
+	result := make([]constraintInfo, len(data))
+	for i, c := range data {
+		result[i] = constraintInfo{Name: c.Name, Type: c.Type, Columns: c.Columns}
+	}
+	return result
+}
+
+func toForeignKeyInfo(data []postgres.ForeignKeyInfo) []foreignKeyInfo {
+	result := make([]foreignKeyInfo, len(data))
+	for i, fk := range data {
+		result[i] = foreignKeyInfo{Name: fk.Name, Column: fk.Column, RefTable: fk.RefTable, RefColumn: fk.RefColumn}
+	}
+	return result
+}
+
+func toIndexInfo(data []postgres.IndexInfo) []indexInfo {
+	result := make([]indexInfo, len(data))
+	for i, idx := range data {
+		result[i] = indexInfo{Name: idx.Name, Columns: idx.Columns, Unique: idx.Unique}
+	}
+	return result
 }
 
 type queryExecutedMsg struct {
@@ -321,6 +383,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusbar.SetTable(msg.schema, msg.table, msg.result.Count)
 		m.statusbar.SetFilter(msg.where)
 		m.router.FocusPane(FocusGrid)
+		if m.conn != nil {
+			return m, m.loadMetadata(msg.schema, msg.table)
+		}
+		return m, nil
+
+	case metadataLoadedMsg:
+		if msg.err != nil {
+			m.toast.ShowError(fmt.Sprintf("Metadata load failed: %v", msg.err))
+			return m, nil
+		}
+		constraints := make([]postgres.ConstraintInfo, len(msg.constraints))
+		for i, c := range msg.constraints {
+			constraints[i] = postgres.ConstraintInfo{Name: c.Name, Type: c.Type, Columns: c.Columns}
+		}
+		foreignKeys := make([]postgres.ForeignKeyInfo, len(msg.foreignKeys))
+		for i, fk := range msg.foreignKeys {
+			foreignKeys[i] = postgres.ForeignKeyInfo{Name: fk.Name, Column: fk.Column, RefTable: fk.RefTable, RefColumn: fk.RefColumn}
+		}
+		indexes := make([]postgres.IndexInfo, len(msg.indexes))
+		for i, idx := range msg.indexes {
+			indexes[i] = postgres.IndexInfo{Name: idx.Name, Columns: idx.Columns, Unique: idx.Unique}
+		}
+		m.grid.SetMetadata(constraints, foreignKeys, indexes)
+		if row := m.grid.SelectedRow(); row != nil {
+			m.preview.SetRow(m.grid.Columns(), row)
+		}
 		return m, nil
 
 	case grid.CellEditCommitMsg:
@@ -359,6 +447,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.loadTableDataWithSortAndWhere(msg.Schema, msg.Table, msg.OrderBy, msg.OrderDir, msg.Where)
+
+	case grid.GridCursorMovedMsg:
+		if row := m.grid.SelectedRow(); row != nil {
+			m.preview.SetRow(m.grid.Columns(), row)
+		} else {
+			m.preview.SetRow(nil, nil)
+		}
+		return m, nil
+
+	case grid.ExportSelectedMsg:
+		return m, m.handleExport(msg)
+
+	case exportDoneMsg:
+		if msg.err != nil {
+			m.toast.ShowError(fmt.Sprintf("Export failed: %v", msg.err))
+		} else if msg.clipboard {
+			m.toast.ShowSuccess("Copied to clipboard")
+		} else {
+			m.toast.ShowSuccess(fmt.Sprintf("Exported to %s", msg.filename))
+		}
+		return m, nil
+
+	case grid.GridTabChangeMsg:
+		if row := m.grid.SelectedRow(); row != nil {
+			m.preview.SetRow(m.grid.Columns(), row)
+		} else {
+			m.preview.SetRow(nil, nil)
+		}
+		return m, nil
 
 	case queryExecutedMsg:
 		m.queryExecuting = false
@@ -431,6 +548,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else if mm.Button == tea.MouseWheelDown {
 					m.grid.Update(tea.KeyPressMsg{Code: 'j'})
 				}
+				if row := m.grid.SelectedRow(); row != nil {
+					m.preview.SetRow(m.grid.Columns(), row)
+				}
+			}
+			if m.preview != nil {
+				mm := msg.Mouse()
+				if mm.Button == tea.MouseWheelUp {
+					m.preview.ScrollUp()
+				} else if mm.Button == tea.MouseWheelDown {
+					m.preview.ScrollDown()
+				}
 			}
 		}
 		return m, nil
@@ -472,6 +600,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.grid.HandleClick(localX, localY)
+				if row := m.grid.SelectedRow(); row != nil {
+					m.preview.SetRow(m.grid.Columns(), row)
+				}
 				if cmd := m.grid.HandleHeaderClick(localX); cmd != nil {
 					return m, cmd
 				}
@@ -655,6 +786,230 @@ func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
+	return func() tea.Msg {
+		// Single row: copy to clipboard
+		if msg.Row != nil {
+			var content string
+			switch msg.Format {
+			case grid.ExportSQL:
+				content = exportRowAsSQL(msg.Schema, msg.Table, msg.Columns, msg.Row)
+			case grid.ExportJSON:
+				content = exportRowAsJSON(msg.Columns, msg.Row)
+			case grid.ExportCSV:
+				content = exportRowAsCSV(msg.Columns, msg.Row)
+			}
+
+			if err := copyToClipboard(content); err != nil {
+				return exportDoneMsg{err: fmt.Errorf("failed to copy to clipboard: %w", err)}
+			}
+			return exportDoneMsg{clipboard: true}
+		}
+
+		// Multiple rows: save to file
+		if msg.Rows != nil {
+			result := &postgres.QueryResult{
+				Columns: make([]postgres.ColumnInfo, len(msg.Columns)),
+				Rows:    msg.Rows,
+			}
+			for i, name := range msg.Columns {
+				result.Columns[i] = postgres.ColumnInfo{Name: name}
+			}
+
+			var content string
+			var filename string
+
+			switch msg.Format {
+			case grid.ExportSQL:
+				content = exportAsSQL(msg.Schema, msg.Table, result)
+				filename = fmt.Sprintf("%s_%s.sql", msg.Schema, msg.Table)
+			case grid.ExportJSON:
+				content = exportAsJSON(result)
+				filename = fmt.Sprintf("%s_%s.json", msg.Schema, msg.Table)
+			case grid.ExportCSV:
+				content = exportAsCSV(result)
+				filename = fmt.Sprintf("%s_%s.csv", msg.Schema, msg.Table)
+			}
+
+			if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
+				return exportDoneMsg{err: fmt.Errorf("failed to write file: %w", err)}
+			}
+
+			return exportDoneMsg{filename: filename}
+		}
+
+		return exportDoneMsg{err: fmt.Errorf("no data to export")}
+	}
+}
+
+func exportAsSQL(schema, table string, result *postgres.QueryResult) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("INSERT INTO %q.%q (%s) VALUES\n", schema, table, 
+		strings.Join(quoteColumns(result.Columns), ", ")))
+
+	for i, row := range result.Rows {
+		values := make([]string, len(row))
+		for j, val := range row {
+			values[j] = formatSQLValue(val)
+		}
+		sb.WriteString(fmt.Sprintf("  (%s)", strings.Join(values, ", ")))
+		if i < len(result.Rows)-1 {
+			sb.WriteString(",")
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString(";\n")
+	return sb.String()
+}
+
+func quoteColumns(columns []postgres.ColumnInfo) []string {
+	quoted := make([]string, len(columns))
+	for i, col := range columns {
+		quoted[i] = fmt.Sprintf("%q", col.Name)
+	}
+	return quoted
+}
+
+func formatSQLValue(val interface{}) string {
+	if val == nil {
+		return "NULL"
+	}
+	switch v := val.(type) {
+	case string:
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''"))
+	case int64:
+		return fmt.Sprintf("%d", v)
+	case float64:
+		return fmt.Sprintf("%g", v)
+	case bool:
+		if v {
+			return "TRUE"
+		}
+		return "FALSE"
+	default:
+		return fmt.Sprintf("'%v'", v)
+	}
+}
+
+func exportAsJSON(result *postgres.QueryResult) string {
+	rows := make([]map[string]interface{}, len(result.Rows))
+	for i, row := range result.Rows {
+		rows[i] = make(map[string]interface{})
+		for j, col := range result.Columns {
+			rows[i][col.Name] = row[j]
+		}
+	}
+
+	data, _ := json.MarshalIndent(rows, "", "  ")
+	return string(data) + "\n"
+}
+
+func exportAsCSV(result *postgres.QueryResult) string {
+	var sb strings.Builder
+	writer := csv.NewWriter(&sb)
+
+	// Header
+	headers := make([]string, len(result.Columns))
+	for i, col := range result.Columns {
+		headers[i] = col.Name
+	}
+	writer.Write(headers)
+
+	// Rows
+	for _, row := range result.Rows {
+		record := make([]string, len(row))
+		for i, val := range row {
+			record[i] = fmt.Sprintf("%v", val)
+		}
+		writer.Write(record)
+	}
+
+	writer.Flush()
+	return sb.String()
+}
+
+func exportRowAsSQL(schema, table string, columns []string, row []interface{}) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("INSERT INTO %q.%q (%s) VALUES\n", schema, table, 
+		strings.Join(quoteColumnNames(columns), ", ")))
+
+	values := make([]string, len(row))
+	for i, val := range row {
+		values[i] = formatSQLValue(val)
+	}
+	sb.WriteString(fmt.Sprintf("  (%s)\n", strings.Join(values, ", ")))
+	return sb.String()
+}
+
+func quoteColumnNames(columns []string) []string {
+	quoted := make([]string, len(columns))
+	for i, name := range columns {
+		quoted[i] = fmt.Sprintf("%q", name)
+	}
+	return quoted
+}
+
+func exportRowAsJSON(columns []string, row []interface{}) string {
+	obj := make(map[string]interface{})
+	for i, col := range columns {
+		obj[col] = row[i]
+	}
+	data, _ := json.MarshalIndent(obj, "", "  ")
+	return string(data) + "\n"
+}
+
+func exportRowAsCSV(columns []string, row []interface{}) string {
+	var sb strings.Builder
+	writer := csv.NewWriter(&sb)
+
+	writer.Write(columns)
+
+	record := make([]string, len(row))
+	for i, val := range row {
+		record[i] = fmt.Sprintf("%v", val)
+	}
+	writer.Write(record)
+
+	writer.Flush()
+	return sb.String()
+}
+
+func copyToClipboard(content string) error {
+	// Try platform-specific commands
+	var cmd *exec.Cmd
+	
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbcopy")
+	case "windows":
+		cmd = exec.Command("clip.exe")
+	default: // Linux
+		// Wayland: try wl-copy first
+		if os.Getenv("WAYLAND_DISPLAY") != "" {
+			cmd = exec.Command("wl-copy")
+			cmd.Stdin = strings.NewReader(content)
+			if err := cmd.Run(); err == nil {
+				return nil
+			}
+		}
+		// X11: try xclip, then xsel
+		cmd = exec.Command("xclip", "-selection", "clipboard")
+		if err := cmd.Run(); err == nil {
+			return nil
+		}
+		cmd = exec.Command("xsel", "--clipboard", "--input")
+	}
+	
+	cmd.Stdin = strings.NewReader(content)
+	return cmd.Run()
+}
+
+type exportDoneMsg struct {
+	filename  string
+	clipboard bool
+	err       error
+}
+
 func (m Model) View() tea.View {
 	var content string
 
@@ -710,16 +1065,20 @@ func (m Model) renderMainView() string {
 	statusLine := m.statusbar.RenderStatus()
 
 	contentHeight := m.height - 4
-	paneWidth := m.width / 3
-	focus := m.router.Focus()
+	hasTableData := m.grid.HasData()
+	showPreview := hasTableData && m.grid.ActiveTab() == 0 && m.width >= 100
 
 	var panes []string
-
-	if focus == FocusExplorer || m.editorOpen {
-		panes = append(panes, m.renderExplorer(paneWidth, contentHeight))
-		panes = append(panes, m.renderGrid(paneWidth*2, contentHeight))
+	if m.editorOpen || m.router.Focus() == FocusExplorer {
+		panes = append(panes, m.renderExplorer(m.width, contentHeight))
 	} else {
-		panes = append(panes, m.renderGrid(m.width, contentHeight))
+		if showPreview {
+			gridW := m.width * 3 / 4
+			panes = append(panes, m.renderGrid(gridW, contentHeight))
+			panes = append(panes, m.renderPreview(m.width/4, contentHeight))
+		} else {
+			panes = append(panes, m.renderGrid(m.width, contentHeight))
+		}
 	}
 
 	content := statusLine + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, panes...)
@@ -729,6 +1088,13 @@ func (m Model) renderMainView() string {
 		modalH := contentHeight * 7 / 10
 		modal := m.renderEditor(modalW, modalH)
 		content = overlay(content, modal, m.width, contentHeight)
+	}
+
+	if m.grid.IsExporting() {
+		exportView := m.grid.ExportPickerView()
+		if exportView != "" {
+			content = overlay(content, exportView, m.width, m.height)
+		}
 	}
 
 	content += "\n" + m.statusbar.Render()
@@ -775,6 +1141,16 @@ func (m Model) renderGrid(w, h int) string {
 		Width(w - 2).
 		Height(h - 2).
 		Render(m.grid.View())
+}
+
+func (m Model) renderPreview(w, h int) string {
+	m.preview.SetWidth(w)
+	m.preview.SetHeight(h)
+
+	return m.styles.Border.
+		Width(w - 2).
+		Height(h - 2).
+		Render(m.preview.Render())
 }
 
 func (m Model) renderEditor(w, h int) string {

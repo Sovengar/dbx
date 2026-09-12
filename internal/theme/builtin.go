@@ -19,6 +19,7 @@ func darkTheme() *Theme {
 		BackgroundPanel:    c("#181825"),
 		BackgroundElement:  c("#313244"),
 		BackgroundSelected: c("#45475a"),
+		BackgroundCursor:   c("#585b70"),
 
 		Text:       c("#cdd6f4"),
 		TextMuted:  c("#6c7086"),
@@ -45,6 +46,7 @@ func lightTheme() *Theme {
 		BackgroundPanel:    c("#e6e9ef"),
 		BackgroundElement:  c("#ccd0da"),
 		BackgroundSelected: c("#bcc0cc"),
+		BackgroundCursor:   c("#9ca0b0"),
 
 		Text:       c("#4c4f69"),
 		TextMuted:  c("#9ca0b0"),
@@ -71,6 +73,7 @@ func nordTheme() *Theme {
 		BackgroundPanel:    c("#242933"),
 		BackgroundElement:  c("#3b4252"),
 		BackgroundSelected: c("#434c5e"),
+		BackgroundCursor:   c("#4c566a"),
 
 		Text:       c("#d8dee9"),
 		TextMuted:  c("#616e88"),
@@ -97,6 +100,7 @@ func gruvboxTheme() *Theme {
 		BackgroundPanel:    c("#1d2021"),
 		BackgroundElement:  c("#3c3836"),
 		BackgroundSelected: c("#504945"),
+		BackgroundCursor:   c("#665c54"),
 
 		Text:       c("#ebdbb2"),
 		TextMuted:  c("#928374"),
@@ -123,6 +127,7 @@ func catppuccinTheme() *Theme {
 		BackgroundPanel:    c("#181825"),
 		BackgroundElement:  c("#313244"),
 		BackgroundSelected: c("#45475a"),
+		BackgroundCursor:   c("#585b70"),
 
 		Text:       c("#cdd6f4"),
 		TextMuted:  c("#6c7086"),

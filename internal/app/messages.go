@@ -26,3 +26,31 @@ type (
 		Pane FocusPane
 	}
 )
+
+type metadataLoadedMsg struct {
+	schema      string
+	table       string
+	constraints []constraintInfo
+	foreignKeys []foreignKeyInfo
+	indexes     []indexInfo
+	err         error
+}
+
+type constraintInfo struct {
+	Name    string
+	Type    string
+	Columns string
+}
+
+type foreignKeyInfo struct {
+	Name      string
+	Column    string
+	RefTable  string
+	RefColumn string
+}
+
+type indexInfo struct {
+	Name    string
+	Columns string
+	Unique  bool
+}
