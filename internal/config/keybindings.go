@@ -66,7 +66,6 @@ func DefaultKeybindings() map[string]string {
 		"global.focus_editor":   "E",
 		"global.ask":            "a",
 		"global.export":         "x",
-		"global.refresh":        "r",
 
 		"explorer.down":          "j",
 		"explorer.up":            "k",
@@ -79,6 +78,7 @@ func DefaultKeybindings() map[string]string {
 		"explorer.new":           "n",
 		"explorer.drop":          "d",
 		"explorer.view_ddl":      "v",
+		"explorer.refresh":       "r",
 
 		"grid.down":       "j",
 		"grid.up":         "k",
@@ -115,8 +115,18 @@ func DefaultKeybindings() map[string]string {
 		"grid.filter":     "/",
 		"grid.find_and_jump_to_column": "f",
 		"grid.commit_pending":          "ctrl+s",
+		"grid.discard_all":            "D",
 		"grid.navigate_fk":            "o",
 		"grid.go_back":                "H",
+		"grid.focus_preview":          "tab",
+
+		"grid-preview.scroll_up":      "k",
+		"grid-preview.scroll_down":    "j",
+		"grid-preview.first":          "g",
+		"grid-preview.last":           "G",
+		"grid-preview.half_up":        "ctrl+u",
+		"grid-preview.half_down":      "ctrl+d",
+		"grid-preview.toggle_explorer": "e",
 
 		"editor.execute":      "ctrl+enter",
 		"editor.clear":        "ctrl+u",
@@ -137,7 +147,6 @@ func defaultBindings() map[string][]string {
 		"global.focus_editor":   {"E"},
 		"global.ask":            {"a"},
 		"global.export":         {"x"},
-		"global.refresh":        {"r"},
 
 		"explorer.down":          {"j", "down"},
 		"explorer.up":            {"k", "up"},
@@ -150,6 +159,7 @@ func defaultBindings() map[string][]string {
 		"explorer.new":           {"n"},
 		"explorer.drop":          {"d"},
 		"explorer.view_ddl":      {"v"},
+		"explorer.refresh":       {"r"},
 
 		"grid.down":       {"j", "down"},
 		"grid.up":         {"k", "up"},
@@ -186,8 +196,18 @@ func defaultBindings() map[string][]string {
 		"grid.filter":     {"/"},
 		"grid.find_and_jump_to_column": {"f"},
 		"grid.commit_pending":          {"ctrl+s"},
+		"grid.discard_all":            {"D"},
 		"grid.navigate_fk":            {"o"},
 		"grid.go_back":                {"H"},
+		"grid.focus_preview":          {"tab"},
+
+		"grid-preview.scroll_up":      {"k", "up"},
+		"grid-preview.scroll_down":    {"j", "down"},
+		"grid-preview.first":          {"g"},
+		"grid-preview.last":           {"G"},
+		"grid-preview.half_up":        {"ctrl+u"},
+		"grid-preview.half_down":      {"ctrl+d"},
+		"grid-preview.toggle_explorer": {"e"},
 
 		"editor.execute":      {"ctrl+enter", "ctrl+r"},
 		"editor.clear":        {"ctrl+u"},

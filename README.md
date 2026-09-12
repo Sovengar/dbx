@@ -8,16 +8,19 @@ dbx is a terminal UI for databases designed for both humans and AI agents.
 
 ### Grid
 
+> **Draft model**: All edits, inserts, and deletes are staged locally (with color feedback) and committed atomically with `Ctrl+S`. Press `D` to discard.
+
 | Action                   | Behavior                                                                                          |
 | ------------------------ | ------------------------------------------------------------------------------------------------- |
 | Yank one row (`y`)       | Copies the row in the selected format (SQL, JSON, CSV) to clipboard                               |
 | Yank multiple rows (`y`) | Exports to file in the same directory as `.dbx.toml` (`<schema>_<table>.<ext>`)                   |
 | Sort (`s`)               | Cycles ASC → DESC → none on current column (server-side `ORDER BY`)                               |
 | Filter (`/`)             | Inline WHERE clause with autocomplete for columns, operators, and values                          |
-| Edit cell (`enter`)      | Inline editing with type-aware parsing (int, float, bool), commit with `enter`                    |
-| Insert row (`i`)         | Staged insert: creates a pending row in the grid (shown in INSERT mode)                           |
-| Commit pending (`Ctrl+s`) | Executes INSERT for all pending rows to the database                                             |
-| Delete row (`d`)         | Deletes the selected row                                                                          |
+| Edit cell (`enter`)      | Inline editing with type-aware parsing (int, float, bool), stores draft locally (blue cell)       |
+| Insert row (`i`)         | Staged insert: creates a pending row in the grid (shown in green)                                 |
+| Delete row (`d`)         | Stages row for deletion (red), press `d` again to confirm                                         |
+| Commit all (`Ctrl+S`)    | Commits ALL drafts (inserts + updates + deletes) atomically, then reloads the table               |
+| Discard all (`D`)        | Discards all pending changes, restores original values (press twice to confirm)                   |
 | Multi-select (`space`)   | Toggles row selection for bulk operations                                                         |
 | FK navigate (`o`)        | Follow foreign key: loads referenced table with FK filter AND existing WHERE, syncs explorer     |
 | Go back (`H`)            | Return to previous table in navigation history, restores cursor and filter                       |
@@ -30,10 +33,24 @@ dbx is a terminal UI for databases designed for both humans and AI agents.
 
 The grid has two modes displayed in the bottom-left corner:
 
-- **NORMAL** — Default mode. Navigate with `hjkl`, `G`/`g`, `Ctrl+u`/`Ctrl+d`. Press `i` to start insert mode, `enter` to edit a cell, `d` to delete, `y` to yank.
-- **INSERT** — Active when inserting a new row. Press `i` to create a staged pending row (shown in green). Navigate columns with `Tab` (wraps). Press `enter` to commit the cell value locally and move on. Press `Esc` to discard all pending rows. Press `Ctrl+s` to execute INSERT statements for all pending rows.
+- **NORMAL** — Default mode. Navigate with `hjkl`, `G`/`g`, `Ctrl+u`/`Ctrl+d`.
+- **EDIT** — Active when editing a cell. Type to modify, `enter`/`tab` to confirm cell and move, `Esc` to cancel edit.
 
-Pending rows are visually distinct (green tint) and stored locally until committed with `Ctrl+s`. No database changes occur until you commit.
+#### Draft-based Editing
+
+All changes (edits, inserts, deletes) are staged locally before being committed to the database:
+
+| Color  | Meaning                     |
+| ------ | --------------------------- |
+| 🟢 Green  | Pending insert row          |
+| 🔵 Blue   | Modified cell (edit draft)  |
+| 🔴 Red    | Row marked for deletion     |
+
+- **`Ctrl+S`** — Commits all drafts (INSERTs + UPDATEs + DELETEs) atomically, then reloads the table.
+- **`D`** — Discard all pending changes. Press twice to confirm. Restores original values.
+- **`Esc`** — Exits edit mode but does **NOT** discard drafts. Drafts persist with their colors.
+
+No database changes occur until you commit with `Ctrl+S`.
 
 ### Explorer
 
@@ -68,6 +85,7 @@ Pending rows are visually distinct (green tint) and stored locally until committ
 | Action                | Behavior                                                             |
 | --------------------- | -------------------------------------------------------------------- |
 | Focus cycling (`e`)  | Toggle Explorer pane                                                  |
+| Grid Preview (`Tab`) | Focus preview pane (full-width), Tab to return                        |
 | Breadcrumbs           | Navigation history path above grid (`schema.table → schema.table`)   |
 | Command palette (`:`) | Fuzzy search for any command (refresh, export, execute, focus, etc.) |
 | Help (`?`)            | Overlay showing all keybinds, scrollable                             |
@@ -113,27 +131,85 @@ dbx ask "show me all active users"
 
 ## Keybinds
 
-dbx uses an **action-based keybind system**:
+### Global
 
-| Key | Action                           |
-| --- | -------------------------------- |
-| `a` | Ask AI (Natural language to SQL) |
-| `c` | Change (edit cell)               |
-| `d` | Delete (row or table)            |
-| `x` | Export data                      |
-| `f` | Filter                           |
-| `g` | Go to (first/last)               |
-| `H` | Go back (navigation history)     |
-| `i` | Insert                           |
-| `n` | Next page                        |
-| `o` | Open FK reference                |
-| `p` | Previous page                    |
-| `q` | Quit                             |
-| `r` | Refresh                          |
-| `s` | Sort                             |
-| `u` | Update                           |
-| `v` | View DDL                         |
-| `y` | Yank (copy)                      |
+| Key | Action                     |
+| --- | -------------------------- |
+| `q` | Quit                       |
+| `?` | Help                       |
+| `:` | Command palette            |
+| `e` | Toggle explorer            |
+| `E` | Toggle editor              |
+| `a` | Ask AI (NL→SQL)            |
+| `x` | Export                     |
+
+### Explorer
+
+| Key | Action                     |
+| --- | -------------------------- |
+| `j`/`k` | Navigate down/up      |
+| `g`/`G` | First/last node        |
+| `Enter`/`l` | Open table data   |
+| `Backspace`/`h` | Collapse / parent |
+| `/` | Filter tables              |
+| `n` | New table                  |
+| `d` | Drop table                 |
+| `v` | View DDL                   |
+| `r` | Refresh schema             |
+
+### Grid — NORMAL mode
+
+| Key | Action                     |
+| --- | -------------------------- |
+| `j`/`k` | Row down/up           |
+| `h`/`l` | Column left/right     |
+| `g`/`G` | First/last row        |
+| `Ctrl+U`/`Ctrl+D` | Half page up/down |
+| `n`/`p` or `]`/`[` | Next/prev page |
+| `P`/`N` | First/last page       |
+| `F1`-`F9` | Go to page          |
+| `1`-`5` | Tabs (records/columns/constraints/FK/indexes) |
+| `Tab` | Focus preview pane         |
+| `enter` | Enter EDIT mode          |
+| `d` | Delete row                |
+| `i` | Insert row                |
+| `space` | Select row              |
+| `s` | Sort column               |
+| `/` | Filter (WHERE)            |
+| `f` | Find column               |
+| `y` | Export (SQL/JSON/CSV)     |
+| `o` | Open FK reference         |
+| `H` | Go back                   |
+| `r` | Refresh data              |
+| `Ctrl+S` | Commit pending        |
+| `D` | Discard drafts            |
+
+### Grid — EDIT mode
+
+| Key | Action                     |
+| --- | -------------------------- |
+| `Esc` | Cancel edit              |
+| `Enter`/`Tab` | Commit cell, next col |
+| `Up`/`Down` | Prev/next row       |
+
+### Grid Preview
+
+| Key | Action                     |
+| --- | -------------------------- |
+| `Tab` | Focus preview (from grid) |
+| `j`/`k` | Scroll down/up        |
+| `g`/`G` | First/last line       |
+| `Ctrl+U`/`Ctrl+D` | Half page up/down |
+| `e` | Focus explorer             |
+
+### Editor
+
+| Key | Action                     |
+| --- | -------------------------- |
+| `Ctrl+Enter` | Execute query     |
+| `Ctrl+U` | Clear editor          |
+| `Tab` | Autocomplete              |
+| `Ctrl+P`/`Ctrl+N` | History prev/next |
 
 Press `?` anywhere to see all keybinds.
 

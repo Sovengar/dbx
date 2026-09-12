@@ -40,6 +40,8 @@ func (r *Router) FocusByName(name string) FocusPane {
 		r.focus = FocusExplorer
 	case "grid":
 		r.focus = FocusGrid
+	case "grid-preview":
+		r.focus = FocusGridPreview
 	}
 	return r.focus
 }

@@ -23,7 +23,8 @@ type scoredCommand struct {
 
 func DefaultCommands() []command {
 	return []command{
-		{Name: "Refresh Schema", Alias: "refresh", Action: "global.refresh", Section: SectionDatabase},
+		{Name: "Refresh Schema", Alias: "refresh", Action: "explorer.refresh", Section: SectionDatabase},
+		{Name: "Refresh Data", Alias: "refresh-data", Action: "grid.refresh", Section: SectionDatabase},
 		{Name: "Export Table", Alias: "export", Action: "global.export", Section: SectionDatabase},
 
 		{Name: "Execute Query", Alias: "execute", Action: "editor.execute", Section: SectionQuery},
@@ -35,6 +36,10 @@ func DefaultCommands() []command {
 		{Name: "Focus Grid", Alias: "grid", Action: "global.focus_grid", Section: SectionNav},
 		{Name: "Toggle Editor", Alias: "editor", Action: "global.focus_editor", Section: SectionNav},
 		{Name: "Toggle Explorer", Alias: "toggle-explorer", Action: "global.cycle_focus", Section: SectionNav},
+		{Name: "Focus Grid Preview", Alias: "preview", Action: "grid.focus_preview", Section: SectionNav},
+		{Name: "Preview Scroll Up", Alias: "preview-up", Action: "grid-preview.scroll_up", Section: SectionNav},
+		{Name: "Preview Scroll Down", Alias: "preview-down", Action: "grid-preview.scroll_down", Section: SectionNav},
+		{Name: "Preview → Explorer", Alias: "preview-explorer", Action: "grid-preview.toggle_explorer", Section: SectionNav},
 	}
 }
 

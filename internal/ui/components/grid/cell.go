@@ -186,3 +186,82 @@ func (cr *CellRenderer) RenderPendingEditRow(values []interface{}, widths []int,
 	}
 	return strings.Join(cells, "")
 }
+
+func (cr *CellRenderer) RenderDraftInsertRow(values []interface{}, widths []int) string {
+	var cells []string
+	for i, val := range values {
+		raw := cr.FormatValue(val)
+		truncated := cr.Truncate(raw, widths[i]-2)
+		cell := cr.styles.DraftInsert.
+			PaddingLeft(1).
+			PaddingRight(1).
+			Width(widths[i]).
+			Render(truncated)
+		cells = append(cells, cell)
+	}
+	return strings.Join(cells, "")
+}
+
+func (cr *CellRenderer) RenderDraftInsertEditRow(values []interface{}, widths []int, editCol int, editValue string, cursorPos int) string {
+	var cells []string
+	for i := range values {
+		if i == editCol {
+			cells = append(cells, cr.RenderEditCell(nil, widths[i], editValue, cursorPos))
+		} else {
+			raw := cr.FormatValue(values[i])
+			truncated := cr.Truncate(raw, widths[i]-2)
+			cell := cr.styles.DraftInsert.
+				PaddingLeft(1).
+				PaddingRight(1).
+				Width(widths[i]).
+				Render(truncated)
+			cells = append(cells, cell)
+		}
+	}
+	return strings.Join(cells, "")
+}
+
+func (cr *CellRenderer) RenderDraftDeleteRow(values []interface{}, widths []int) string {
+	var cells []string
+	for i, val := range values {
+		raw := cr.FormatValue(val)
+		truncated := cr.Truncate(raw, widths[i]-2)
+		cell := cr.styles.DraftDelete.
+			PaddingLeft(1).
+			PaddingRight(1).
+			Width(widths[i]).
+			Render(truncated)
+		cells = append(cells, cell)
+	}
+	return strings.Join(cells, "")
+}
+
+func (cr *CellRenderer) RenderDraftUpdateRow(values []interface{}, widths []int, draftCols map[int]bool, activeCol int) string {
+	var cells []string
+	for i, val := range values {
+		raw := cr.FormatValue(val)
+		truncated := cr.Truncate(raw, widths[i]-2)
+		var cell string
+		if draftCols[i] {
+			cell = cr.styles.DraftUpdate.
+				PaddingLeft(1).
+				PaddingRight(1).
+				Width(widths[i]).
+				Render(truncated)
+		} else if i == activeCol {
+			cell = cr.styles.Selected.
+				PaddingLeft(1).
+				PaddingRight(1).
+				Width(widths[i]).
+				Render(truncated)
+		} else {
+			cell = cr.styles.Text.
+				PaddingLeft(1).
+				PaddingRight(1).
+				Width(widths[i]).
+				Render(truncated)
+		}
+		cells = append(cells, cell)
+	}
+	return strings.Join(cells, "")
+}

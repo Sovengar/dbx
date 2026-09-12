@@ -29,6 +29,8 @@ type ViewDDLMsg struct {
 	Table  string
 }
 
+type ExplorerRefreshMsg struct{}
+
 type Explorer struct {
 	tree        *Tree
 	mouse       *MouseHandler
@@ -152,6 +154,12 @@ func (e *Explorer) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if key == e.keybindings["explorer.filter"] {
 			e.StartFilter()
 			return nil, true
+		}
+
+		if key == e.keybindings["explorer.refresh"] {
+			return func() tea.Msg {
+				return ExplorerRefreshMsg{}
+			}, true
 		}
 
 		return e.tree.Update(msg)

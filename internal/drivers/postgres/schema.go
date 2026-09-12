@@ -20,6 +20,7 @@ func NewSchemaLoader(conn *pgx.Conn) *SchemaLoader {
 
 func (s *SchemaLoader) LoadDatabase(ctx context.Context, dbName string) (*explorer.Node, error) {
 	dbNode := explorer.NewNode(dbName, explorer.NodeDatabase, dbName)
+	dbNode.Expanded = true
 
 	schemas, err := s.ListSchemas(ctx)
 	if err != nil {
@@ -36,6 +37,7 @@ func (s *SchemaLoader) LoadDatabase(ctx context.Context, dbName string) (*explor
 			explorer.NodeSchema,
 			schema,
 		)
+		schemaNode.Expanded = true
 
 		tables, err := s.ListTables(ctx, schema)
 		if err != nil {

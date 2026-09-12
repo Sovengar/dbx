@@ -23,6 +23,7 @@ import (
 	"github.com/buble/dbx/internal/ui/components/editor"
 	"github.com/buble/dbx/internal/ui/components/explorer"
 	"github.com/buble/dbx/internal/ui/components/grid"
+	"github.com/buble/dbx/internal/ui/components/gridpreview"
 	"github.com/buble/dbx/internal/ui/components/palette"
 	"github.com/buble/dbx/internal/ui/components/picker"
 	"github.com/buble/dbx/internal/ui/components/preview"
@@ -48,6 +49,7 @@ type Model struct {
 	grid            *grid.Grid
 	editor          *editor.SQLEditor
 	preview         *preview.Preview
+	gridPreview     *gridpreview.GridPreview
 	router          *Router
 	keybindRegistry *config.KeybindRegistry
 	keybinds        map[string]string
@@ -86,6 +88,7 @@ func NewModel(cfg *config.Config) Model {
 		grid:            grid.New(t.Styles(), pageSize, kbs),
 		editor:          editor.NewSQLEditor(t.Styles()),
 		preview:         preview.New(t.Styles()),
+		gridPreview:     gridpreview.New(t.Styles(), kbs),
 		router:          NewRouter(kbs),
 		keybindRegistry: kbr,
 		keybinds:        kbs,
@@ -361,11 +364,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickToast()
 
 	case projectsScannedMsg:
-		m.picker.SetProjects(msg.projects)
 		if len(msg.projects) == 0 {
 			m.state = StateError
 			m.err = fmt.Errorf("no .dbx.toml files found in ~/dev")
+			return m, nil
 		}
+		if len(msg.projects) == 1 {
+			m.state = StateLoading
+			m.project = &msg.projects[0]
+			m.toast.ShowInfo(fmt.Sprintf("Connecting to %s...", msg.projects[0].Name))
+			return m, m.connectToDB(msg.projects[0])
+		}
+		m.picker.SetProjects(msg.projects)
 		return m, nil
 
 	case dbConnectedMsg:
@@ -442,19 +452,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.grid.SetMetadata(constraints, foreignKeys, indexes)
 		if row := m.grid.SelectedRow(); row != nil {
 			m.preview.SetRow(m.grid.Columns(), row)
+			m.syncGridPreview()
 		}
-		return m, nil
-
-	case grid.CellEditCommitMsg:
-		if m.conn == nil {
-			return m, nil
-		}
-		_, err := m.conn.Exec(context.Background(), msg.Query, msg.Args...)
-		if err != nil {
-			m.toast.ShowError(fmt.Sprintf("Update failed: %v", err))
-			return m, nil
-		}
-		m.toast.ShowSuccess("Row updated")
 		return m, nil
 
 	case grid.GridCommitPendingMsg:
@@ -473,39 +472,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.toast.ShowSuccess(fmt.Sprintf("%d row(s) inserted", inserted))
 		return m, m.loadTableData(msg.Schema, msg.Table)
 
-	case grid.GridDeleteRowMsg:
+	case grid.GridCommitAllMsg:
 		if m.conn == nil {
 			return m, nil
 		}
-		pkCols := m.grid.PrimaryKeyColumns()
-		query, args := grid.BuildDeleteQuery(msg.Schema, msg.Table, msg.Columns, msg.Row, pkCols)
-		_, err := m.conn.Exec(context.Background(), query, args...)
-		if err != nil {
-			m.toast.ShowError(fmt.Sprintf("Delete failed: %v", err))
-			return m, nil
-		}
-		m.grid.ClearSelection()
-		m.toast.ShowSuccess("Row deleted")
-		return m, m.loadTableData(msg.Schema, msg.Table)
-
-	case grid.GridBulkDeleteMsg:
-		if m.conn == nil {
-			return m, nil
-		}
-		pkCols := m.grid.PrimaryKeyColumns()
-		var deleted int
-		for _, row := range msg.Rows {
-			query, args := grid.BuildDeleteQuery(msg.Schema, msg.Table, msg.Columns, row, pkCols)
-			_, err := m.conn.Exec(context.Background(), query, args...)
+		var executed int
+		for i, query := range msg.Queries {
+			_, err := m.conn.Exec(context.Background(), query, msg.Args[i]...)
 			if err != nil {
-				m.toast.ShowError(fmt.Sprintf("Delete failed at row %d: %v", deleted+1, err))
-				m.grid.ClearSelection()
-				return m, m.loadTableData(msg.Schema, msg.Table)
+				m.toast.ShowError(fmt.Sprintf("Commit failed at query %d: %v", i+1, err))
+				return m, nil
 			}
-			deleted++
+			executed++
 		}
-		m.grid.ClearSelection()
-		m.toast.ShowSuccess(fmt.Sprintf("%d row(s) deleted", deleted))
+		m.toast.ShowSuccess(fmt.Sprintf("%d change(s) committed", executed))
 		return m, m.loadTableData(msg.Schema, msg.Table)
 
 	case grid.GridFilterApplyMsg:
@@ -523,8 +503,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case grid.GridCursorMovedMsg:
 		if row := m.grid.SelectedRow(); row != nil {
 			m.preview.SetRow(m.grid.Columns(), row)
+			m.syncGridPreview()
 		} else {
 			m.preview.SetRow(nil, nil)
+			m.syncGridPreview()
 		}
 		return m, nil
 
@@ -544,8 +526,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case grid.GridTabChangeMsg:
 		if row := m.grid.SelectedRow(); row != nil {
 			m.preview.SetRow(m.grid.Columns(), row)
+			m.syncGridPreview()
 		} else {
 			m.preview.SetRow(nil, nil)
+			m.syncGridPreview()
 		}
 		return m, nil
 
@@ -596,6 +580,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.router.FocusPane(FocusGrid)
 		return m, m.loadTableDataWithSortAndWhere(entry.Schema, entry.Table, "1", "", entry.Where)
 
+	case grid.GridRefreshConfirmMsg:
+		m.toast.ShowSuccess("Query refreshed")
+		return m, m.loadTableDataWithSortAndWhere(msg.Schema, msg.Table, msg.OrderBy, msg.OrderDir, msg.Where)
+
 	case queryExecutedMsg:
 		m.queryExecuting = false
 		if msg.err != nil {
@@ -641,6 +629,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusbar.SetEditorOpen(true)
 		return m, nil
 
+	case explorer.ExplorerRefreshMsg:
+		if m.project != nil && m.conn != nil {
+			m.toast.ShowSuccess("Schema refreshed")
+			return m, m.loadSchema(m.conn, *m.project)
+		}
+		return m, nil
+
 	case picker.ConnectionSelectedMsg:
 		m.state = StateLoading
 		m.project = &msg.Project
@@ -669,6 +664,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if row := m.grid.SelectedRow(); row != nil {
 					m.preview.SetRow(m.grid.Columns(), row)
+					m.syncGridPreview()
 				}
 			}
 			if m.preview != nil {
@@ -721,6 +717,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.grid.HandleClick(localX, localY)
 				if row := m.grid.SelectedRow(); row != nil {
 					m.preview.SetRow(m.grid.Columns(), row)
+					m.syncGridPreview()
 				}
 				if cmd := m.grid.HandleHeaderClick(localX); cmd != nil {
 					return m, cmd
@@ -825,11 +822,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 
-			if key == m.keybinds["grid.commit_pending"] && m.grid != nil && m.grid.HasPendingRows() {
-				return m, m.grid.CommitPendingInserts()
+			if key == m.keybinds["grid.commit_pending"] && m.grid != nil && m.grid.HasDrafts() {
+				return m, m.grid.CommitAllDrafts()
 			}
 
 			if key == m.keybinds["global.cycle_focus"] {
+				if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
+					m.router.FocusPane(FocusExplorer)
+					m.gridPreview.Blur()
+					return m, nil
+				}
 				m.router.CycleFocus()
 				return m, nil
 			}
@@ -853,6 +855,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.statusbar.SetEditorOpen(m.editorOpen)
 				return m, nil
+			}
+
+			if key == m.keybinds["grid.focus_preview"] && m.router.Focus() == FocusGrid && !m.grid.IsEditing() && !m.grid.IsWhereFiltering() {
+				m.router.FocusPane(FocusGridPreview)
+				if m.gridPreview != nil {
+					m.gridPreview.Focus()
+					m.syncGridPreview()
+				}
+				return m, nil
+			}
+
+			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
+				if key == m.keybinds["grid.focus_preview"] {
+					m.router.FocusPane(FocusGrid)
+					m.gridPreview.Blur()
+					return m, nil
+				}
+				if cmd, handled := m.gridPreview.Update(msg); handled {
+					return m, cmd
+				}
 			}
 
 			if m.router.Focus() == FocusExplorer && m.explorer != nil {
@@ -897,9 +919,44 @@ func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 		m.statusbar.SetEditorOpen(m.editorOpen)
 	case "global.help":
 		m.helpModal.Show()
-	case "global.refresh":
+	case "grid.focus_preview":
+		if m.router.Focus() == FocusGrid && m.grid.HasData() {
+			m.router.FocusPane(FocusGridPreview)
+			if m.gridPreview != nil {
+				m.gridPreview.Focus()
+				m.syncGridPreview()
+			}
+		}
+	case "grid-preview.scroll_up":
+		if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
+			m.gridPreview.Update(tea.KeyPressMsg{Code: 'k'})
+		}
+	case "grid-preview.scroll_down":
+		if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
+			m.gridPreview.Update(tea.KeyPressMsg{Code: 'j'})
+		}
+	case "grid-preview.toggle_explorer":
+		if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
+			m.router.FocusPane(FocusExplorer)
+			m.gridPreview.Blur()
+		}
+	case "explorer.refresh":
 		if m.project != nil && m.conn != nil {
+			m.toast.ShowSuccess("Schema refreshed")
 			return m, m.loadSchema(m.conn, *m.project)
+		}
+	case "grid.refresh":
+		if m.router.Focus() == FocusGrid && m.grid.HasData() {
+			if m.grid.HasDrafts() {
+				m.grid.SetRefreshPending(true)
+				return m, nil
+			}
+			m.toast.ShowSuccess("Query refreshed")
+			return m, m.loadTableDataWithSortAndWhere(
+				m.prevSchema, m.prevTable,
+				m.grid.SortColumn(), m.grid.SortDirection(),
+				m.grid.WhereClause(),
+			)
 		}
 	case "editor.execute":
 		if !m.editorOpen {
@@ -1200,7 +1257,9 @@ func (m Model) renderMainView() string {
 	showPreview := hasTableData && m.grid.ActiveTab() == 0 && m.width >= 100
 
 	var panes []string
-	if m.editorOpen || m.router.Focus() == FocusExplorer {
+	if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
+		panes = append(panes, m.renderGridPreview(m.width, contentHeight))
+	} else if m.editorOpen || m.router.Focus() == FocusExplorer {
 		panes = append(panes, m.renderExplorer(m.width, contentHeight))
 	} else {
 		if showPreview {
@@ -1299,6 +1358,33 @@ func (m Model) renderPreview(w, h int) string {
 		Width(w - 2).
 		Height(h - 2).
 		Render(m.preview.Render())
+}
+
+func (m Model) renderGridPreview(w, h int) string {
+	m.gridPreview.SetWidth(w)
+	m.gridPreview.SetHeight(h)
+
+	m.grid.Blur()
+	m.gridPreview.Focus()
+
+	border := m.styles.BorderActive
+	content := m.gridPreview.Render()
+
+	return border.
+		Width(w - 2).
+		Height(h - 2).
+		Render(content)
+}
+
+func (m Model) syncGridPreview() {
+	if m.gridPreview == nil || !m.gridPreview.IsFocused() {
+		return
+	}
+	columns := m.grid.Columns()
+	row := m.grid.SelectedRow()
+	if columns != nil && row != nil {
+		m.gridPreview.SetRow(columns, row)
+	}
 }
 
 func (m Model) renderEditor(w, h int) string {

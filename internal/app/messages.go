@@ -6,6 +6,7 @@ const (
 	FocusExplorer FocusPane = iota
 	FocusGrid
 	FocusEditor
+	FocusGridPreview
 )
 
 func (f FocusPane) String() string {
@@ -16,6 +17,8 @@ func (f FocusPane) String() string {
 		return "grid"
 	case FocusEditor:
 		return "editor"
+	case FocusGridPreview:
+		return "grid-preview"
 	default:
 		return "unknown"
 	}

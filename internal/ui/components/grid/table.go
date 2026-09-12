@@ -24,6 +24,25 @@ type GridCommitPendingMsg struct {
 	Args    [][]interface{}
 }
 
+type GridCommitAllMsg struct {
+	Schema  string
+	Table   string
+	Queries []string
+	Args    [][]interface{}
+}
+
+type PendingUpdate struct {
+	RowIdx   int
+	ColIdx   int
+	OldValue interface{}
+	NewValue interface{}
+}
+
+type PendingDelete struct {
+	RowIdx int
+	Row    []interface{}
+}
+
 type GridFilterApplyMsg struct {
 	Schema     string
 	Table      string
@@ -66,6 +85,14 @@ type GridNavigateFKMsg struct {
 }
 
 type GridGoBackMsg struct{}
+
+type GridRefreshConfirmMsg struct {
+	Schema   string
+	Table    string
+	OrderBy  string
+	OrderDir string
+	Where    string
+}
 
 type GridTabChangeMsg struct {
 	Tab int
@@ -112,6 +139,10 @@ type Grid struct {
 	inserting       bool            // true = has pending rows not yet committed to DB
 	pendingRow      int             // index in pendingRows
 	pendingCol      int             // active column in pendingRow
+	pendingUpdates  []PendingUpdate
+	pendingDeletes  []PendingDelete
+	discardPending  bool // awaiting second 'D' to confirm discard
+	refreshPending  bool // awaiting second 'r' to confirm refresh
 }
 
 func New(styles *theme.Styles, pageSize int, keybinds map[string]string) *Grid {
@@ -147,6 +178,9 @@ func (g *Grid) SetData(result *postgres.QueryResult, schema, table string) {
 	g.inserting = false
 	g.pendingRow = 0
 	g.pendingCol = 0
+	g.pendingUpdates = nil
+	g.pendingDeletes = nil
+	g.discardPending = false
 	g.pager.SetPendingCount(0)
 	if isNewTable {
 		g.header.ClearSort()
@@ -547,6 +581,16 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		g.deletePending = false
 	}
 
+	// Cancel discard pending on any key except D
+	if key != "D" {
+		g.discardPending = false
+	}
+
+	// Cancel refresh pending on any key except r
+	if key != g.keybinds["grid.refresh"] {
+		g.refreshPending = false
+	}
+
 	switch key {
 	case "j", "down":
 		g.moveDown()
@@ -633,6 +677,16 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if key == g.keybinds["grid.select_row"] {
 		g.toggleRowSelection()
 		return func() tea.Msg { return GridCursorMovedMsg{} }, true
+	}
+
+	// Handle discard drafts keybinding
+	if key == "D" {
+		return g.handleDiscardKey()
+	}
+
+	// Handle refresh keybinding
+	if key == g.keybinds["grid.refresh"] {
+		return g.handleRefreshKey()
 	}
 
 	return nil, false
@@ -723,6 +777,14 @@ func (g *Grid) FilterText() string {
 
 func (g *Grid) WhereClause() string {
 	return g.whereClause
+}
+
+func (g *Grid) SortColumn() string {
+	return g.header.SortColumn()
+}
+
+func (g *Grid) SortDirection() string {
+	return g.header.SortDirection()
 }
 
 func (g *Grid) TotalRows() int {
@@ -860,15 +922,18 @@ func (g *Grid) startDelete() (tea.Cmd, bool) {
 	if len(g.selectedRows) > 0 {
 		if g.deletePending {
 			g.deletePending = false
-			rows := g.SelectedRows()
-			return func() tea.Msg {
-				return GridBulkDeleteMsg{
-					Schema:  g.schema,
-					Table:   g.tableName,
-					Rows:    rows,
-					Columns: g.columns,
+			for i := range g.selectedRows {
+				if i >= 0 && i < len(g.data.Rows) {
+					rowCopy := make([]interface{}, len(g.data.Rows[i]))
+					copy(rowCopy, g.data.Rows[i])
+					g.pendingDeletes = append(g.pendingDeletes, PendingDelete{
+						RowIdx: i,
+						Row:    rowCopy,
+					})
 				}
-			}, true
+			}
+			g.selectedRows = make(map[int]bool)
+			return nil, true
 		}
 		g.deletePending = true
 		return nil, true
@@ -879,14 +944,13 @@ func (g *Grid) startDelete() (tea.Cmd, bool) {
 	if row == nil {
 		return nil, false
 	}
-	return func() tea.Msg {
-		return GridDeleteRowMsg{
-			Schema:  g.schema,
-			Table:   g.tableName,
-			Row:     row,
-			Columns: g.columns,
-		}
-	}, true
+	rowCopy := make([]interface{}, len(row))
+	copy(rowCopy, row)
+	g.pendingDeletes = append(g.pendingDeletes, PendingDelete{
+		RowIdx: g.cursorRow + g.pager.Offset(),
+		Row:    rowCopy,
+	})
+	return nil, true
 }
 
 func (g *Grid) cancelDeletePending() {
@@ -895,6 +959,114 @@ func (g *Grid) cancelDeletePending() {
 
 func (g *Grid) IsDeletePending() bool {
 	return g.deletePending
+}
+
+func (g *Grid) HasDrafts() bool {
+	return len(g.pendingUpdates) > 0 || len(g.pendingDeletes) > 0 || len(g.pendingRows) > 0
+}
+
+func (g *Grid) DraftCount() int {
+	return len(g.pendingUpdates) + len(g.pendingDeletes) + len(g.pendingRows)
+}
+
+func (g *Grid) handleDiscardKey() (tea.Cmd, bool) {
+	if !g.HasDrafts() {
+		return nil, false
+	}
+
+	if g.discardPending {
+		g.discardPending = false
+		g.DiscardAllDrafts()
+		return nil, true
+	}
+
+	g.discardPending = true
+	return nil, true
+}
+
+func (g *Grid) DiscardAllDrafts() {
+	for _, update := range g.pendingUpdates {
+		if update.RowIdx >= 0 && update.RowIdx < len(g.data.Rows) {
+			g.data.Rows[update.RowIdx][update.ColIdx] = update.OldValue
+		}
+	}
+
+	g.pendingUpdates = nil
+	g.pendingDeletes = nil
+	g.pendingRows = nil
+	g.inserting = false
+	g.deletePending = false
+	g.discardPending = false
+	g.selectedRows = make(map[int]bool)
+	g.pager.SetPendingCount(0)
+}
+
+func (g *Grid) IsDiscardPending() bool {
+	return g.discardPending
+}
+
+func (g *Grid) handleRefreshKey() (tea.Cmd, bool) {
+	if g.data == nil || len(g.columns) == 0 {
+		return nil, false
+	}
+
+	if g.refreshPending {
+		g.refreshPending = false
+		return func() tea.Msg {
+			return GridRefreshConfirmMsg{
+				Schema:   g.schema,
+				Table:    g.tableName,
+				OrderBy:  g.SortColumn(),
+				OrderDir: g.SortDirection(),
+				Where:    g.whereClause,
+			}
+		}, true
+	}
+
+	if g.HasDrafts() {
+		g.refreshPending = true
+		return nil, true
+	}
+
+	return func() tea.Msg {
+		return GridRefreshConfirmMsg{
+			Schema:   g.schema,
+			Table:    g.tableName,
+			OrderBy:  g.SortColumn(),
+			OrderDir: g.SortDirection(),
+			Where:    g.whereClause,
+		}
+	}, true
+}
+
+func (g *Grid) IsRefreshPending() bool {
+	return g.refreshPending
+}
+
+func (g *Grid) SetRefreshPending(v bool) {
+	g.refreshPending = v
+}
+
+func (g *Grid) isRowDeleted(rowIdx int) bool {
+	for _, d := range g.pendingDeletes {
+		if d.RowIdx == rowIdx {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *Grid) isCellModified(rowIdx, colIdx int) bool {
+	for _, u := range g.pendingUpdates {
+		if u.RowIdx == rowIdx && u.ColIdx == colIdx {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *Grid) isRowPendingInsert(rowIdx int) bool {
+	return rowIdx >= len(g.data.Rows)
 }
 
 func (g *Grid) PrimaryKeyColumns() []string {
@@ -1112,48 +1284,30 @@ func (g *Grid) commitEdit() tea.Cmd {
 		return nil
 	}
 	row := g.data.Rows[g.editRow]
-	colName := g.columns[g.editCol]
 
 	newVal := g.parseEditValue(g.editValue, row[g.editCol])
+
+	found := false
+	for i, u := range g.pendingUpdates {
+		if u.RowIdx == g.editRow && u.ColIdx == g.editCol {
+			g.pendingUpdates[i].NewValue = newVal
+			found = true
+			break
+		}
+	}
+	if !found {
+		g.pendingUpdates = append(g.pendingUpdates, PendingUpdate{
+			RowIdx:   g.editRow,
+			ColIdx:   g.editCol,
+			OldValue: row[g.editCol],
+			NewValue: newVal,
+		})
+	}
 	g.data.Rows[g.editRow][g.editCol] = newVal
-
-	var whereParts []string
-	var args []interface{}
-	argIdx := 1
-	for i, val := range row {
-		if i == g.editCol {
-			continue
-		}
-		whereParts = append(whereParts, fmt.Sprintf("%q = $%d", g.columns[i], argIdx))
-		args = append(args, val)
-		argIdx++
-	}
-	args = append(args, newVal)
-
-	query := fmt.Sprintf("UPDATE %q.%q SET %q = $%d WHERE %s",
-		g.schema, g.tableName, colName, argIdx, strings.Join(whereParts, " AND "))
-
-	f, _ := os.OpenFile("/tmp/dbx_grid_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if f != nil {
-		fmt.Fprintf(f, "commitEdit: query=%s\n", query)
-		f.Close()
-	}
-
-	return func() tea.Msg {
-		return CellEditCommitMsg{
-			Schema: g.schema,
-			Table:  g.tableName,
-			Query:  query,
-			Args:   args,
-		}
-	}
+	return nil
 }
 
-func (g *Grid) CommitPendingInserts() tea.Cmd {
-	if len(g.pendingRows) == 0 {
-		return nil
-	}
-
+func (g *Grid) CommitAllDrafts() tea.Cmd {
 	var queries []string
 	var allArgs [][]interface{}
 
@@ -1180,24 +1334,59 @@ func (g *Grid) CommitPendingInserts() tea.Cmd {
 		allArgs = append(allArgs, args)
 	}
 
+	for _, update := range g.pendingUpdates {
+		if update.RowIdx < 0 || update.RowIdx >= len(g.data.Rows) {
+			continue
+		}
+		row := g.data.Rows[update.RowIdx]
+		colName := g.columns[update.ColIdx]
+		var whereParts []string
+		var args []interface{}
+		argIdx := 1
+		for i, val := range row {
+			whereParts = append(whereParts, fmt.Sprintf("%q = $%d", g.columns[i], argIdx))
+			args = append(args, val)
+			argIdx++
+		}
+		args = append(args, update.NewValue)
+		q := fmt.Sprintf("UPDATE %q.%q SET %q = $%d WHERE %s",
+			g.schema, g.tableName, colName, argIdx, strings.Join(whereParts, " AND "))
+		queries = append(queries, q)
+		allArgs = append(allArgs, args)
+	}
+
+	pkCols := g.PrimaryKeyColumns()
+	for _, del := range g.pendingDeletes {
+		q, args := BuildDeleteQuery(g.schema, g.tableName, g.columns, del.Row, pkCols)
+		queries = append(queries, q)
+		allArgs = append(allArgs, args)
+	}
+
+	if len(queries) == 0 {
+		return nil
+	}
+
 	schema := g.schema
 	table := g.tableName
 	q := queries
 	a := allArgs
 	g.pendingRows = nil
+	g.pendingUpdates = nil
+	g.pendingDeletes = nil
 	g.inserting = false
+	g.discardPending = false
 	g.pager.SetPendingCount(0)
 
 	f, _ := os.OpenFile("/tmp/dbx_grid_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if f != nil {
 		for i, query := range q {
-			fmt.Fprintf(f, "CommitPending[%d]: %s args=%v\n", i, query, a[i])
+			fmt.Fprintf(f, "CommitAll[%d]: %s args=%v\n", i, query, a[i])
 		}
 		f.Close()
 	}
 
 	return func() tea.Msg {
-		return GridCommitPendingMsg{Schema: schema, Table: table, Queries: q, Args: a}
+		return GridCommitAllMsg{Schema: schema, Table: table, Queries: q, Args: a}
 	}
 }
 
@@ -1473,8 +1662,18 @@ func (g *Grid) renderRecordsView() string {
 		isSelected := visibleCount == g.cursorRow
 		isMultiSelected := g.selectedRows[i]
 		isEditing := g.editing && visibleCount == (g.editRow-offset) && g.editRow >= offset && g.editRow < endRow
+		isDraftDelete := g.isRowDeleted(i)
+		draftCols := make(map[int]bool)
+		if !isDraftDelete {
+			for j := range visCols {
+				actualColIdx := g.scrollCol + j
+				draftCols[j] = g.isCellModified(i, actualColIdx)
+			}
+		}
 		var rendered string
-		if isEditing {
+		if isDraftDelete {
+			rendered = g.cells.RenderDraftDeleteRow(visValues, visWidths)
+		} else if isEditing {
 			editColLocal := g.editCol - g.scrollCol
 			if editColLocal >= 0 && editColLocal < len(visWidths) {
 				rendered = g.cells.RenderEditRow(visValues, visWidths, editColLocal, g.editValue, g.editCursor)
@@ -1487,11 +1686,21 @@ func (g *Grid) renderRecordsView() string {
 			rendered = g.cells.RenderCursorSelectedRow(visValues, visWidths, activeCol)
 		} else if isSelected {
 			activeCol := g.cursorCol - g.scrollCol
-			rendered = g.cells.RenderRow(visValues, visWidths, activeCol)
+			hasDrafts := len(g.pendingUpdates) > 0
+			if hasDrafts {
+				rendered = g.cells.RenderDraftUpdateRow(visValues, visWidths, draftCols, activeCol)
+			} else {
+				rendered = g.cells.RenderRow(visValues, visWidths, activeCol)
+			}
 		} else if isMultiSelected {
 			rendered = g.cells.RenderSelectedRow(visValues, visWidths, -1)
 		} else {
-			rendered = g.cells.RenderRow(visValues, visWidths, -1)
+			hasDrafts := len(g.pendingUpdates) > 0
+			if hasDrafts {
+				rendered = g.cells.RenderDraftUpdateRow(visValues, visWidths, draftCols, -1)
+			} else {
+				rendered = g.cells.RenderRow(visValues, visWidths, -1)
+			}
 		}
 		rows = append(rows, rendered)
 		visibleCount++
@@ -1511,12 +1720,12 @@ func (g *Grid) renderRecordsView() string {
 		if isPendingEditing {
 			editColLocal := g.pendingCol - g.scrollCol
 			if editColLocal >= 0 && editColLocal < len(visWidths) {
-				rendered = g.cells.RenderPendingEditRow(visValues, visWidths, editColLocal, g.editValue, g.editCursor)
+				rendered = g.cells.RenderDraftInsertEditRow(visValues, visWidths, editColLocal, g.editValue, g.editCursor)
 			} else {
-				rendered = g.cells.RenderPendingRow(visValues, visWidths, -1)
+				rendered = g.cells.RenderDraftInsertRow(visValues, visWidths)
 			}
 		} else {
-			rendered = g.cells.RenderPendingRow(visValues, visWidths, -1)
+			rendered = g.cells.RenderDraftInsertRow(visValues, visWidths)
 		}
 		rows = append(rows, rendered)
 		visibleCount++
@@ -1541,6 +1750,12 @@ func (g *Grid) renderRecordsView() string {
 	var prefix string
 	if g.deletePending {
 		prefix = g.styles.Help.Render(fmt.Sprintf("  Press d again to confirm deleting %d row(s)", len(g.selectedRows))) + "\n"
+	} else if g.refreshPending {
+		prefix = g.styles.Help.Render("  Press r again to refresh (unsaved changes will be lost)") + "\n"
+	} else if g.discardPending {
+		prefix = g.styles.Help.Render(fmt.Sprintf("  Press D again to discard %d change(s)", g.DraftCount())) + "\n"
+	} else if g.HasDrafts() {
+		prefix = g.styles.Help.Render(fmt.Sprintf("  %d pending change(s) — Ctrl+S to save, D to discard", g.DraftCount())) + "\n"
 	}
 
 	var result string

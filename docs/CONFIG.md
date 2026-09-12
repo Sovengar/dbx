@@ -52,7 +52,6 @@ mode = "vim"
 # "global.palette" = ":"
 # "global.ask" = "a"
 # "global.export" = "e"
-# "global.refresh" = "r"
 
 # Explorer
 # "explorer.expand" = ["enter", "l"]
@@ -62,6 +61,7 @@ mode = "vim"
 # "explorer.drop" = "d"
 # "explorer.ddl" = "v"
 # "explorer.filter" = "f"
+# "explorer.refresh" = "r"
 
 # Grid
 # "grid.edit" = ["enter", "i"]

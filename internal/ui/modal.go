@@ -115,7 +115,6 @@ func (m *HelpModal) View() string {
 	lines = append(lines, m.renderKeybind("global.palette", "Command Palette"))
 	lines = append(lines, m.renderKeybind("global.cycle_focus", "Toggle Explorer"))
 	lines = append(lines, m.renderKeybind("global.focus_editor", "Toggle Editor"))
-	lines = append(lines, m.renderKeybind("global.refresh", "Refresh"))
 	lines = append(lines, m.renderKeybind("global.export", "Export"))
 	lines = append(lines, "")
 
@@ -131,6 +130,7 @@ func (m *HelpModal) View() string {
 	lines = append(lines, m.renderKeybind("explorer.new", "New Table"))
 	lines = append(lines, m.renderKeybind("explorer.drop", "Drop Table"))
 	lines = append(lines, m.renderKeybind("explorer.view_ddl", "View DDL"))
+	lines = append(lines, m.renderKeybind("explorer.refresh", "Refresh Schema"))
 	lines = append(lines, "")
 
 	lines = append(lines, m.styles.Header.Render("Grid"))
@@ -155,6 +155,17 @@ func (m *HelpModal) View() string {
 	lines = append(lines, m.renderKeybind("grid.sort", "Sort Column"))
 	lines = append(lines, m.renderKeybind("grid.find_and_jump_to_column", "Find & Jump to Column"))
 	lines = append(lines, m.renderKeybind("grid.filter", "Filter Rows"))
+	lines = append(lines, m.renderKeybind("grid.focus_preview", "Focus Preview"))
+	lines = append(lines, "")
+
+	lines = append(lines, m.styles.Header.Render("Grid Preview"))
+	lines = append(lines, m.renderKeybind("grid-preview.scroll_up", "Scroll Up"))
+	lines = append(lines, m.renderKeybind("grid-preview.scroll_down", "Scroll Down"))
+	lines = append(lines, m.renderKeybind("grid-preview.first", "First Line"))
+	lines = append(lines, m.renderKeybind("grid-preview.last", "Last Line"))
+	lines = append(lines, m.renderKeybind("grid-preview.half_up", "Half Page Up"))
+	lines = append(lines, m.renderKeybind("grid-preview.half_down", "Half Page Down"))
+	lines = append(lines, m.renderKeybind("grid-preview.toggle_explorer", "Focus Explorer"))
 	lines = append(lines, "")
 
 	lines = append(lines, m.styles.Header.Render("Editor"))
