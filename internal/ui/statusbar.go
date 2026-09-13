@@ -1,27 +1,18 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/buble/dbx/internal/theme"
 )
-
-var spinnerChars = [9]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"}
 
 type StatusBar struct {
 	styles            *theme.Styles
 	keybinds          map[string]string
 	width             int
 	focus             string
-	tableName         string
-	schema            string
-	rows              int
 	editorOpen        bool
-	whereClause       string
 	autocompleteReady bool
-	spinnerActive     bool
-	spinnerFrame      int
 }
 
 func NewStatusBar(styles *theme.Styles, keybinds map[string]string) *StatusBar {
@@ -31,23 +22,10 @@ func NewStatusBar(styles *theme.Styles, keybinds map[string]string) *StatusBar {
 	}
 }
 
-func (s *StatusBar) SetWidth(w int)                { s.width = w }
-func (s *StatusBar) SetFocus(f string)             { s.focus = f }
-func (s *StatusBar) SetEditorOpen(open bool)       { s.editorOpen = open }
-func (s *StatusBar) SetAutocompleteReady(r bool)   { s.autocompleteReady = r }
-func (s *StatusBar) SetActiveSpinner(active bool)  { s.spinnerActive = active; s.spinnerFrame = 0 }
-func (s *StatusBar) TickSpinner()                  { s.spinnerFrame = (s.spinnerFrame + 1) % len(spinnerChars) }
-func (s *StatusBar) SetFilter(where string)        { s.whereClause = where }
-func (s *StatusBar) SetTable(schema, name string, rows int) {
-	s.schema = schema
-	s.tableName = name
-	s.rows = rows
-}
-
-func (s *StatusBar) SetTableName(schema, name string) {
-	s.schema = schema
-	s.tableName = name
-}
+func (s *StatusBar) SetWidth(w int)              { s.width = w }
+func (s *StatusBar) SetFocus(f string)           { s.focus = f }
+func (s *StatusBar) SetEditorOpen(open bool)     { s.editorOpen = open }
+func (s *StatusBar) SetAutocompleteReady(r bool) { s.autocompleteReady = r }
 
 func (s *StatusBar) keyFor(action string) string {
 	if k, ok := s.keybinds[action]; ok {
@@ -73,14 +51,6 @@ func (s *StatusBar) Render() string {
 	}
 
 	return strings.Join(parts, "\n")
-}
-
-func (s *StatusBar) RenderStatus() string {
-	status := s.renderStatus()
-	if s.spinnerActive {
-		return s.styles.Info.Render("  "+spinnerChars[s.spinnerFrame]+" ") + s.styles.TextBright.Render(status)
-	}
-	return s.styles.TextBright.Render("  " + status)
 }
 
 func (s *StatusBar) renderActions() string {
@@ -124,32 +94,4 @@ func (s *StatusBar) renderContextual() []string {
 	}
 
 	return lines
-}
-
-func (s *StatusBar) renderStatus() string {
-	var segments []string
-
-	segments = append(segments, "dbx")
-
-	if s.focus != "" {
-		segments = append(segments, fmt.Sprintf("[%s]", s.focus))
-	}
-
-	if s.tableName != "" {
-		if s.schema != "" {
-			segments = append(segments, fmt.Sprintf("%s.%s", s.schema, s.tableName))
-		} else {
-			segments = append(segments, s.tableName)
-		}
-	}
-
-	if s.rows > 0 {
-		segments = append(segments, fmt.Sprintf("%d rows", s.rows))
-	}
-
-	if s.whereClause != "" {
-		segments = append(segments, fmt.Sprintf("WHERE %s", s.whereClause))
-	}
-
-	return strings.Join(segments, " · ")
 }

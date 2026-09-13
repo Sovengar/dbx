@@ -108,7 +108,8 @@ Schema tree navigation:
 | `grid.sort` | `s` | Cycle sort (asc/desc/none) |
 | `grid.filter` | `/` | Filter by column (WHERE) |
 | `grid.find_and_jump_to_column` | `f` | Jump to column by name |
-| `grid.yank` | `y` | Export (SQL/JSON/CSV) |
+| `grid.yank` | `y` | Yank to Clipboard / File |
+| `grid.export` | `x` | Export (SQL/JSON/CSV) |
 | `grid.navigate_fk` | `o` | Open referenced table |
 | `grid.go_back` | `H` | Return to previous table |
 | `grid.refresh` | `r` | Refresh data (re-execute query) |
@@ -261,8 +262,9 @@ The statusbar shows relevant keybinds based on current context:
 / filter · n new · d drop · v DDL · Enter Open table data · Space Collapse schema · Tab Preview
 
 [Grid-focused]
-/ filter · n/p N/P page · F1-9 goto · s sort · f find column
-Enter edit · d delete · i insert · space select · y export · o FK nav · H go back
+/ filter · r refresh · n/p N/P page · F1-9 goto · s sort · f find column
+Enter edit · d delete · i insert · space select · y yank · x export · o FK nav
+Ctrl+S save · D discard · H go back
 
 [Grid Preview-focused]
 Tab/Esc back · j/k navigate · Enter expand FK · g/G first/last · e explorer · / jq

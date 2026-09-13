@@ -120,7 +120,9 @@ type Grid struct {
 	editRow     int
 	editCol     int
 	editValue   string
+	editStartValue string
 	editCursor  int
+	displayDraftCount int
 	filtering   bool
 	filter      string
 	whereFilter  *WhereFilter
@@ -142,18 +144,20 @@ type Grid struct {
 	commitPending   bool
 	refreshPending  bool
 	activeTab       int
+	yankMaxRows     int
 }
 
 func New(styles *theme.Styles, pageSize int, keybinds map[string]string) *Grid {
 	g := &Grid{
-		styles:   styles,
-		header:   NewHeader(styles),
-		cells:    NewCellRenderer(styles),
-		pager:    NewPager(styles, pageSize),
+		styles:      styles,
+		header:      NewHeader(styles),
+		cells:       NewCellRenderer(styles),
+		pager:       NewPager(styles, pageSize),
 		exportPicker: NewExportPicker(styles),
-		keybinds: keybinds,
-		widths:   make([]int, 0),
+		keybinds:    keybinds,
+		widths:      make([]int, 0),
 		selectedRows: make(map[int]bool),
+		yankMaxRows: 10,
 	}
 	g.mouse = NewMouseHandler(g)
 	return g
@@ -492,7 +496,7 @@ func (g *Grid) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, false
 	}
 
-	if g.data == nil || len(g.data.Rows) == 0 {
+	if g.data == nil {
 		return nil, false
 	}
 
@@ -540,6 +544,43 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 
+	// Keys that work regardless of whether there are rows
+	switch key {
+	case "i":
+		return g.startInsertRow()
+	case g.keybinds["grid.go_back"]:
+		return func() tea.Msg { return GridGoBackMsg{} }, true
+	case "s":
+		return g.toggleSort(), true
+	case "/":
+		g.startWhereFilter()
+		return nil, true
+	case "f":
+		g.startColumnFind()
+		return nil, true
+	}
+
+	// Cancel discard pending on any key except D
+	if key != "D" {
+		g.discardPending = false
+	}
+
+	// Cancel commit pending on any key except ctrl+s
+	if key != g.keybinds["grid.commit_pending"] {
+		g.commitPending = false
+	}
+
+	// Cancel refresh pending on any key except r
+	if key != g.keybinds["grid.refresh"] {
+		g.refreshPending = false
+	}
+
+	// Keys that require existing rows
+	hasRows := len(g.data.Rows) > 0
+	if !hasRows {
+		return nil, false
+	}
+
 	// Goto page F1-F9 — must be before 0-9 digit handler
 	for i := 1; i <= 9; i++ {
 		action := fmt.Sprintf("grid.goto_page_%d", i)
@@ -561,21 +602,6 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 	g.pendingDigits = ""
-
-	// Cancel discard pending on any key except D
-	if key != "D" {
-		g.discardPending = false
-	}
-
-	// Cancel commit pending on any key except ctrl+s
-	if key != g.keybinds["grid.commit_pending"] {
-		g.commitPending = false
-	}
-
-	// Cancel refresh pending on any key except r
-	if key != g.keybinds["grid.refresh"] {
-		g.refreshPending = false
-	}
 
 	switch key {
 	case "j", "down":
@@ -618,14 +644,6 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		g.pager.PrevPage()
 		g.clampCursor()
 		return g.cursorMovedCmd(), true
-	case "s":
-		return g.toggleSort(), true
-	case "/":
-		g.startWhereFilter()
-		return nil, true
-	case "f":
-		g.startColumnFind()
-		return nil, true
 	case "enter":
 		if g.inserting {
 			g.editing = true
@@ -641,12 +659,8 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 		g.startEdit()
 		return nil, true
-	case "i":
-		return g.startInsertRow()
 	case g.keybinds["grid.navigate_fk"]:
 		return g.navigateFK()
-	case g.keybinds["grid.go_back"]:
-		return func() tea.Msg { return GridGoBackMsg{} }, true
 	}
 
 	// Handle yank via keybinding
@@ -801,10 +815,12 @@ func (g *Grid) startEdit() {
 		return
 	}
 
+	g.displayDraftCount = g.DraftCount()
 	g.editing = true
 	g.editRow = g.cursorRow
 	g.editCol = g.cursorCol
 	g.editValue = fmt.Sprintf("%v", g.data.Rows[g.editRow][g.editCol])
+	g.editStartValue = g.editValue
 	g.editCursor = len(g.editValue)
 }
 
@@ -813,6 +829,7 @@ func (g *Grid) startInsertRow() (tea.Cmd, bool) {
 		return nil, false
 	}
 
+	g.displayDraftCount = g.DraftCount()
 	newRow := make([]interface{}, len(g.columns))
 	g.pendingRows = append(g.pendingRows, newRow)
 	g.pager.SetPendingCount(len(g.pendingRows))
@@ -825,6 +842,7 @@ func (g *Grid) startInsertRow() (tea.Cmd, bool) {
 	g.editRow = len(g.data.Rows) + g.pendingRow
 	g.editCol = 0
 	g.editValue = ""
+	g.editStartValue = ""
 	g.editCursor = 0
 
 	// DEBUG
@@ -888,23 +906,43 @@ func (g *Grid) startYank() (tea.Cmd, bool) {
 		return nil, false
 	}
 
+	count := len(g.selectedRows)
+	fileMode := count >= g.yankMaxRows
+
 	var row []interface{}
 	var rows [][]interface{}
 
-	if len(g.selectedRows) > 0 {
+	if count > 1 {
+		// Multiple selected rows
 		for i := range g.selectedRows {
 			if i >= 0 && i < len(g.data.Rows) {
 				rows = append(rows, g.data.Rows[i])
 			}
 		}
+	} else if count == 1 {
+		// Single selected row
+		for i := range g.selectedRows {
+			if i >= 0 && i < len(g.data.Rows) {
+				row = g.data.Rows[i]
+			}
+		}
 	} else {
+		// Cursor row
 		if g.cursorRow >= 0 && g.cursorRow < len(g.data.Rows) {
 			row = g.data.Rows[g.cursorRow]
 		}
 	}
 
-	g.exportPicker.ShowYankMode(g.schema, g.tableName, row, rows, g.columns)
+	if fileMode {
+		g.exportPicker.ShowFileMode(g.schema, g.tableName, row, rows, g.columns)
+	} else {
+		g.exportPicker.ShowYankMode(g.schema, g.tableName, row, rows, g.columns)
+	}
 	return nil, true
+}
+
+func (g *Grid) StartExport() (tea.Cmd, bool) {
+	return g.startExport()
 }
 
 func (g *Grid) startExport() (tea.Cmd, bool) {
@@ -915,19 +953,27 @@ func (g *Grid) startExport() (tea.Cmd, bool) {
 	var row []interface{}
 	var rows [][]interface{}
 
-	if len(g.selectedRows) > 0 {
+	if len(g.selectedRows) > 1 {
+		// Export selected rows to file via picker
 		for i := range g.selectedRows {
 			if i >= 0 && i < len(g.data.Rows) {
 				rows = append(rows, g.data.Rows[i])
 			}
 		}
-	} else {
-		if g.cursorRow >= 0 && g.cursorRow < len(g.data.Rows) {
-			row = g.data.Rows[g.cursorRow]
+		g.exportPicker.ShowFileMode(g.schema, g.tableName, nil, rows, g.columns)
+	} else if len(g.selectedRows) == 1 {
+		// Single selected row: export via picker (clipboard or file)
+		for i := range g.selectedRows {
+			if i >= 0 && i < len(g.data.Rows) {
+				row = g.data.Rows[i]
+			}
 		}
+		g.exportPicker.Show(g.schema, g.tableName, row, nil, g.columns)
+	} else {
+		// No selection: export ALL rows to file
+		g.exportPicker.ShowFileMode(g.schema, g.tableName, nil, g.data.Rows, g.columns)
 	}
 
-	g.exportPicker.ShowFileMode(g.schema, g.tableName, row, rows, g.columns)
 	return nil, true
 }
 
@@ -1182,6 +1228,19 @@ func (g *Grid) SelectionCount() int {
 	return len(g.selectedRows)
 }
 
+func (g *Grid) SetYankMaxRows(n int) {
+	if n > 0 {
+		g.yankMaxRows = n
+	}
+}
+
+func (g *Grid) AllRows() [][]interface{} {
+	if g.data == nil {
+		return nil
+	}
+	return g.data.Rows
+}
+
 func (g *Grid) IsInserting() bool    { return g.inserting }
 func (g *Grid) HasPendingRows() bool { return len(g.pendingRows) > 0 }
 func (g *Grid) PendingCount() int    { return len(g.pendingRows) }
@@ -1192,6 +1251,13 @@ func (g *Grid) handleEditKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 
 	switch key {
 	case "esc":
+		if g.editValue != g.editStartValue {
+			g.commitEdit()
+			g.editing = false
+			g.editValue = ""
+			g.inserting = false
+			return nil, true
+		}
 		g.editing = false
 		g.editValue = ""
 		if g.inserting {
@@ -1675,6 +1741,12 @@ func (g *Grid) renderRecordsView() string {
 		visibleCount++
 	}
 
+	if visibleCount == 0 && contentHeight > 0 {
+		emptyMsg := g.styles.Help.Render("  Empty table — press i to insert a row")
+		rows = append(rows, emptyMsg)
+		visibleCount++
+	}
+
 	for i := visibleCount; i < contentHeight; i++ {
 		rows = append(rows, "")
 	}
@@ -1703,7 +1775,11 @@ func (g *Grid) renderRecordsView() string {
 	} else if g.discardPending {
 		prefix = g.styles.Help.Render(fmt.Sprintf("  Press D again to discard %d change(s)", g.DraftCount())) + "\n"
 	} else if g.HasDrafts() {
-		prefix = g.styles.Help.Render(fmt.Sprintf("  %d pending change(s) — Ctrl+S to save, D to discard", g.DraftCount())) + "\n"
+		count := g.DraftCount()
+		if g.editing {
+			count = g.displayDraftCount
+		}
+		prefix = g.styles.Help.Render(fmt.Sprintf("  %d pending change(s) — Ctrl+S to save, D to discard", count)) + "\n"
 	}
 
 	var result string

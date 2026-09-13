@@ -66,6 +66,7 @@ type UIConfig struct {
 	StatusBarHelp bool `mapstructure:"statusbar_help"`
 	HistorySize   int  `mapstructure:"history_size"`
 	PageSize      int  `mapstructure:"page_size"`
+	YankMaxRows   int  `mapstructure:"yank_max_rows"`
 }
 
 func Load() (*Config, error) {
@@ -113,4 +114,5 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("ui.statusbar_help", true)
 	v.SetDefault("ui.history_size", 100)
 	v.SetDefault("ui.page_size", 100)
+	v.SetDefault("ui.yank_max_rows", 10)
 }

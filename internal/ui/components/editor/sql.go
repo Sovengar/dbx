@@ -75,6 +75,23 @@ func (e *SQLEditor) SetContent(s string) {
 	e.modified = false
 }
 
+func (e *SQLEditor) SetCursorPos(row, col int) {
+	if row < 0 {
+		row = 0
+	}
+	if row >= len(e.lines) {
+		row = len(e.lines) - 1
+	}
+	if col < 0 {
+		col = 0
+	}
+	if col > len(e.lines[row]) {
+		col = len(e.lines[row])
+	}
+	e.cursorRow = row
+	e.cursorCol = col
+}
+
 func (e *SQLEditor) Update(msg tea.Msg) (tea.Cmd, bool) {
 	if !e.focused {
 		return nil, false

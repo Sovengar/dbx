@@ -92,12 +92,18 @@ func NewModel(cfg *config.Config) Model {
 	if cfg.UI.PageSize > 0 {
 		pageSize = cfg.UI.PageSize
 	}
+	yankMaxRows := 10
+	if cfg.UI.YankMaxRows > 0 {
+		yankMaxRows = cfg.UI.YankMaxRows
+	}
+	g := grid.New(t.Styles(), pageSize, kbs)
+	g.SetYankMaxRows(yankMaxRows)
 	return Model{
 		config:          cfg,
 		theme:           t,
 		styles:          t.Styles(),
 		picker:          picker.New(t.Styles()),
-		grid:            grid.New(t.Styles(), pageSize, kbs),
+		grid:            g,
 		editor:          editor.NewSQLEditor(t.Styles()),
 		gridSidebarPreview: gridsidebarpreview.New(t.Styles()),
 		gridPreview:     gridpreview.New(t.Styles(), kbs),
@@ -110,6 +116,7 @@ func NewModel(cfg *config.Config) Model {
 		toast:           ui.NewToastManager(t.Styles()),
 		statusbar:       ui.NewStatusBar(t.Styles(), kbs),
 		state:           StatePicker,
+		yankMaxRows:     yankMaxRows,
 	}
 }
 
@@ -195,6 +202,34 @@ func (m Model) loadSchema(conn *pgx.Conn, project config.FoundProject) tea.Cmd {
 		}
 
 		return schemaLoadedMsg{root: result.Root, dbName: dbName, schemaDetail: result.Schemas}
+	}
+}
+
+func (m Model) loadSchemaWithTarget(conn *pgx.Conn, project config.FoundProject, targetSchema, targetTable string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		loader := postgres.NewSchemaLoader(conn)
+
+		dbName := project.Connection.DSN
+		if idx := strings.LastIndex(dbName, "/"); idx >= 0 {
+			dbName = dbName[idx+1:]
+		}
+		if idx := strings.Index(dbName, "?"); idx >= 0 {
+			dbName = dbName[:idx]
+		}
+
+		result, err := loader.LoadDatabase(ctx, dbName)
+		if err != nil {
+			return schemaLoadedMsg{err: fmt.Errorf("failed to load schema: %w", err)}
+		}
+
+		return schemaLoadedMsg{
+			root:         result.Root,
+			dbName:       dbName,
+			schemaDetail: result.Schemas,
+			targetSchema: targetSchema,
+			targetTable:  targetTable,
+		}
 	}
 }
 
@@ -345,11 +380,98 @@ func (m Model) isDDL(sql string) bool {
 	return false
 }
 
+func extractDDLTableName(sql string) (schema, table string) {
+	upper := strings.ToUpper(strings.TrimSpace(sql))
+
+	keyword := ""
+	switch {
+	case strings.HasPrefix(upper, "CREATE TABLE"):
+		keyword = "CREATE TABLE"
+	case strings.HasPrefix(upper, "DROP TABLE"):
+		keyword = "DROP TABLE"
+	case strings.HasPrefix(upper, "ALTER TABLE"):
+		keyword = "ALTER TABLE"
+	case strings.HasPrefix(upper, "TRUNCATE TABLE"):
+		keyword = "TRUNCATE TABLE"
+	}
+
+	if keyword == "" {
+		return "", ""
+	}
+
+	rest := strings.TrimSpace(sql[len(keyword):])
+
+	upperRest := strings.ToUpper(rest)
+	switch {
+	case strings.HasPrefix(upperRest, "IF NOT EXISTS "):
+		rest = rest[len("IF NOT EXISTS "):]
+	case strings.HasPrefix(upperRest, "IF EXISTS "):
+		rest = rest[len("IF EXISTS "):]
+	}
+
+	rest = strings.TrimSpace(rest)
+
+	if len(rest) > 0 && rest[0] == '"' {
+		end := strings.Index(rest[1:], "\"")
+		if end >= 0 {
+			table = rest[1 : end+1]
+			rest = strings.TrimSpace(rest[end+2:])
+			if len(rest) > 0 && rest[0] == '.' {
+				schema = table
+				table = ""
+				rest = strings.TrimSpace(rest[1:])
+				if len(rest) > 0 && rest[0] == '"' {
+					end2 := strings.Index(rest[1:], "\"")
+					if end2 >= 0 {
+						table = rest[1 : end2+1]
+					}
+				}
+			}
+			return schema, table
+		}
+	}
+
+	endIdx := 0
+	for endIdx < len(rest) {
+		c := rest[endIdx]
+		if c == ' ' || c == '.' || c == '(' || c == '\t' || c == '\n' {
+			break
+		}
+		endIdx++
+	}
+	first := rest[:endIdx]
+	rest = strings.TrimSpace(rest[endIdx:])
+
+	if len(rest) > 0 && rest[0] == '.' {
+		schema = first
+		rest = strings.TrimSpace(rest[1:])
+		endIdx = 0
+		for endIdx < len(rest) {
+			c := rest[endIdx]
+			if c == ' ' || c == '(' || c == '\t' || c == '\n' || c == ';' {
+				break
+			}
+			endIdx++
+		}
+		table = rest[:endIdx]
+	} else {
+		table = first
+	}
+
+	if schema == "" {
+		schema = "public"
+	}
+
+	return schema, table
+}
+
 type schemaLoadedMsg struct {
 	root         *explorer.Node
 	dbName       string
 	schemaDetail []postgres.SchemaDetail
 	err          error
+	targetSchema string
+	targetTable  string
 }
 
 type tableSelectedMsg struct {
@@ -650,6 +772,61 @@ func (m *Model) syncGridSidebarPreviewForCursor() tea.Cmd {
 	return nil
 }
 
+func preprocessSQL(sql string) string {
+	trimmed := strings.TrimSpace(sql)
+	upper := strings.ToUpper(trimmed)
+
+	if strings.HasPrefix(upper, "SELECT ") || strings.HasPrefix(upper, "WITH ") ||
+		strings.HasPrefix(upper, "INSERT ") || strings.HasPrefix(upper, "UPDATE ") ||
+		strings.HasPrefix(upper, "DELETE ") || strings.HasPrefix(upper, "EXPLAIN ") ||
+		strings.HasPrefix(upper, "ALTER ") || strings.HasPrefix(upper, "CREATE ") ||
+		strings.HasPrefix(upper, "DROP ") || strings.HasPrefix(upper, "GRANT ") ||
+		strings.HasPrefix(upper, "REVOKE ") {
+		return sql
+	}
+
+	if idx := findLastTopLevelSELECT(trimmed); idx > 0 {
+		selectClause := strings.TrimSpace(trimmed[idx:])
+		remainder := strings.TrimSpace(trimmed[:idx])
+		return selectClause + " " + remainder
+	}
+
+	if strings.HasPrefix(upper, "FROM ") {
+		return "SELECT * " + trimmed
+	}
+
+	return sql
+}
+
+func findLastTopLevelSELECT(s string) int {
+	upper := strings.ToUpper(s)
+	depth := 0
+	lastPos := -1
+	for i := 0; i < len(s)-5; i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		default:
+			if depth == 0 && i+6 <= len(s) && upper[i:i+6] == "SELECT" {
+				if i > 0 && isASCIILetter(s[i-1]) {
+					continue
+				}
+				if i+6 < len(s) && isASCIILetter(s[i+6]) {
+					continue
+				}
+				lastPos = i
+			}
+		}
+	}
+	return lastPos
+}
+
+func isASCIILetter(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '_'
+}
+
 func (m Model) executeQuery(sql string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -740,6 +917,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = StateMain
 		m.toast.ShowSuccess("Schema loaded")
 		m.spinnerActive = true
+
+		if msg.targetTable != "" {
+			m.router.FocusPane(FocusExplorer)
+			m.explorer.SelectTable(msg.targetSchema, msg.targetTable)
+		}
+
 		return m, tea.Batch(m.loadAutocompleteData(), tickSpinner())
 
 	case autocompleteDataLoadedMsg:
@@ -863,7 +1046,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.toast.ShowError(fmt.Sprintf("Export failed: %v", msg.err))
 		} else if msg.clipboard {
-			m.toast.ShowSuccess("Copied to clipboard")
+			if msg.yankCount > 0 {
+				m.toast.ShowSuccess(fmt.Sprintf("Copied %d rows to clipboard", msg.yankCount))
+			} else {
+				m.toast.ShowSuccess("Copied to clipboard")
+			}
 		} else {
 			m.toast.ShowSuccess(fmt.Sprintf("Exported to %s", msg.filename))
 		}
@@ -1001,14 +1188,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editorOpen = false
 		m.editor.Blur()
 		m.statusbar.SetEditorOpen(false)
-		m.grid.SetData(msg.result, "", "query")
 		m.editor.PushHistory(msg.sql)
-		m.router.FocusPane(FocusGrid)
-		m.toast.ShowSuccess(fmt.Sprintf("Query returned %d rows", msg.result.Count))
 
 		if m.isDDL(msg.sql) && m.conn != nil && m.project != nil {
-			return m, m.loadSchema(m.conn, *m.project)
+			schema, table := extractDDLTableName(msg.sql)
+			m.router.FocusPane(FocusExplorer)
+			m.toast.ShowSuccess("DDL executed")
+			return m, m.loadSchemaWithTarget(m.conn, *m.project, schema, table)
 		}
+
+		m.grid.SetData(msg.result, "", "query")
+		m.router.FocusPane(FocusGrid)
+		m.toast.ShowSuccess(fmt.Sprintf("Query returned %d rows", msg.result.Count))
 		return m, nil
 
 	case explorer.TableSelectedMsg:
@@ -1019,9 +1210,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if schema == "" {
 			schema = "public"
 		}
+		prefix := fmt.Sprintf("CREATE TABLE %s.", schema)
+		content := prefix + "new_table (\n    id SERIAL PRIMARY KEY\n);"
 		m.editorOpen = true
 		m.editor.Focus()
-		m.editor.SetContent(fmt.Sprintf("CREATE TABLE %s.new_table (\n    id SERIAL PRIMARY KEY,\n    name VARCHAR(255) NOT NULL\n);", schema))
+		m.editor.SetContent(content)
+		m.editor.SetCursorPos(0, len(prefix))
 		m.statusbar.SetEditorOpen(true)
 		return m, nil
 
@@ -1173,8 +1367,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 
-				if key == "ctrl+enter" || key == "ctrl+r" {
-					sql := m.editor.Content()
+			if key == "ctrl+enter" || key == "ctrl+r" {
+				sql := preprocessSQL(m.editor.Content())
 					if sql != "" && m.conn != nil && !m.queryExecuting {
 						m.queryExecuting = true
 						return m, m.executeQuery(sql)
@@ -1405,6 +1599,12 @@ func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 				m.grid.WhereClause(),
 			)
 		}
+	case "global.export", "grid.export":
+		if m.router.Focus() == FocusGrid && m.grid.HasData() {
+			if cmd, handled := m.grid.StartExport(); handled {
+				return m, cmd
+			}
+		}
 	case "editor.execute":
 		if !m.editorOpen {
 			m.editorOpen = true
@@ -1440,7 +1640,7 @@ func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
 			return exportDoneMsg{clipboard: true}
 		}
 
-		// Multiple rows: save to file
+		// Multiple rows: copy to clipboard or save to file
 		if msg.Rows != nil {
 			result := &postgres.QueryResult{
 				Columns: make([]postgres.ColumnInfo, len(msg.Columns)),
@@ -1451,17 +1651,31 @@ func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
 			}
 
 			var content string
-			var filename string
-
 			switch msg.Format {
 			case grid.ExportSQL:
 				content = exportAsSQL(msg.Schema, msg.Table, result)
-				filename = fmt.Sprintf("%s_%s.sql", msg.Schema, msg.Table)
 			case grid.ExportJSON:
 				content = exportAsJSON(result)
-				filename = fmt.Sprintf("%s_%s.json", msg.Schema, msg.Table)
 			case grid.ExportCSV:
 				content = exportAsCSV(result)
+			}
+
+			// YankMode: always clipboard
+			if msg.YankMode {
+				if err := copyToClipboard(content); err != nil {
+					return exportDoneMsg{err: fmt.Errorf("failed to copy to clipboard: %w", err)}
+				}
+				return exportDoneMsg{clipboard: true, yankCount: len(msg.Rows)}
+			}
+
+			// Export mode: save to file
+			var filename string
+			switch msg.Format {
+			case grid.ExportSQL:
+				filename = fmt.Sprintf("%s_%s.sql", msg.Schema, msg.Table)
+			case grid.ExportJSON:
+				filename = fmt.Sprintf("%s_%s.json", msg.Schema, msg.Table)
+			case grid.ExportCSV:
 				filename = fmt.Sprintf("%s_%s.csv", msg.Schema, msg.Table)
 			}
 
@@ -1642,6 +1856,7 @@ func copyToClipboard(content string) error {
 type exportDoneMsg struct {
 	filename  string
 	clipboard bool
+	yankCount int
 	err       error
 }
 
@@ -1779,16 +1994,20 @@ func (m Model) renderBreadcrumbs(selSchema, selTable string, rowCount int) strin
 
 func (m Model) renderTopLine(selSchema, selTable string, rowCount int) string {
 	breadcrumb := m.renderBreadcrumbs(selSchema, selTable, rowCount)
-	if breadcrumb == "" {
-		return ""
-	}
-	breadInline := strings.TrimRight(breadcrumb, "\n")
 
 	if m.spinnerActive {
 		spinner := m.styles.Info.Render(spinnerChars[m.spinnerFrame])
+		if breadcrumb == "" {
+			return "  " + spinner + "\n"
+		}
+		breadInline := strings.TrimRight(breadcrumb, "\n")
 		return "  " + spinner + m.styles.TextMuted.Render(" · ") + breadInline + "\n"
 	}
-	return breadInline + "\n"
+
+	if breadcrumb == "" {
+		return ""
+	}
+	return strings.TrimRight(breadcrumb, "\n") + "\n"
 }
 
 func (m Model) renderExplorer(w, h int) string {

@@ -198,6 +198,9 @@ statusbar_help = true
 # Default page size for grids
 page_size = 100
 
+# Maximum rows to yank to file (clipboard if below threshold)
+yank_max_rows = 10
+
 # Maximum page size
 max_page_size = 10000
 
