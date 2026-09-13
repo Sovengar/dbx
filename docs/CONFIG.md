@@ -268,9 +268,6 @@ highlight_style = "both"
 # Edit mode: "inline", "modal"
 edit_mode = "inline"
 
-# Confirm before delete
-confirm_delete = true
-
 # ─── Editor ────────────────────────────────────────────────────
 [editor]
 # Syntax highlighting

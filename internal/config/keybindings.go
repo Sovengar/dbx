@@ -114,6 +114,8 @@ func DefaultKeybindings() map[string]string {
 		"grid.navigate_fk":            "o",
 		"grid.go_back":                "H",
 		"grid.focus_preview":          "tab",
+		"grid.refresh":                "r",
+		"grid.export":                 "x",
 
 		"explorer.tab_overview":     "1",
 		"explorer.tab_columns":      "2",
@@ -199,6 +201,8 @@ func defaultBindings() map[string][]string {
 		"grid.navigate_fk":            {"o"},
 		"grid.go_back":                {"H"},
 		"grid.focus_preview":          {"tab"},
+		"grid.refresh":                {"r"},
+		"grid.export":                 {"x"},
 
 		"explorer.tab_overview":     {"1"},
 		"explorer.tab_columns":      {"2"},

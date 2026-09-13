@@ -52,7 +52,7 @@ Schema tree navigation:
 | `explorer.up` | `k`, `↑` | Select previous node |
 | `explorer.expand` | `Enter`, `l`, `→` | Expand node |
 | `explorer.collapse` | `Backspace`, `h`, `←` | Collapse / go to parent |
-| `explorer.toggle_columns` | `Space` | Collapse schema of selected table |
+| `explorer.toggle_columns` | `Space` | Toggle expand: collapse schema (on table) or toggle schema (on schema) |
 | `explorer.first` | `g` | Jump to first node |
 | `explorer.last` | `G` | Jump to last node |
 | `explorer.filter` | `/` | Filter tables |
@@ -112,7 +112,7 @@ Schema tree navigation:
 | `grid.navigate_fk` | `o` | Open referenced table |
 | `grid.go_back` | `H` | Return to previous table |
 | `grid.refresh` | `r` | Refresh data (re-execute query) |
-| `grid.commit_pending` | `Ctrl+S` | Commit pending inserts |
+| `grid.commit_pending` | `Ctrl+S` | Commit all drafts (double-confirm when deletes pending) |
 | `grid.discard_all` | `D` | Discard all draft changes |
 
 ### EDIT mode

@@ -102,11 +102,7 @@ func (p *Preview) Render() string {
 		return ""
 	}
 
-	title := p.styles.Header.Render("Preview")
-	if p.fkRefTable != "" {
-		title = p.styles.Header.Render(fmt.Sprintf("Preview → %s", p.fkRefTable))
-	}
-	contentHeight := p.height - 6
+	contentHeight := p.height - 4
 
 	if len(p.lines) == 0 {
 		return p.styles.Text.Render("  No data")
@@ -123,8 +119,7 @@ func (p *Preview) Render() string {
 		rendered = append(rendered, p.highlightJSON(line))
 	}
 
-	content := strings.Join(rendered, "\n")
-	return title + "\n" + content
+	return strings.Join(rendered, "\n")
 }
 
 func (p *Preview) highlightJSON(line string) string {

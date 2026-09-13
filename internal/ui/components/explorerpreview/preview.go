@@ -165,9 +165,7 @@ func (e *ExplorerPreview) View() string {
 }
 
 func (e *ExplorerPreview) renderERE() string {
-	title := e.styles.Header.Render(fmt.Sprintf("Entity-Relationship Diagram — %s", e.tableName))
-	empty := e.styles.TextMuted.Render("\n  Entity-Relationship diagram — coming soon\n")
-	return title + "\n" + empty
+	return e.styles.TextMuted.Render("  Entity-Relationship diagram — coming soon")
 }
 
 func (e *ExplorerPreview) renderOverview() string {
@@ -176,11 +174,6 @@ func (e *ExplorerPreview) renderOverview() string {
 	}
 
 	var lines []string
-
-	// Header
-	title := e.styles.Header.Render(fmt.Sprintf("Overview — %s.%s", e.schema, e.tableName))
-	lines = append(lines, title)
-	lines = append(lines, "")
 
 	// Table info
 	lines = append(lines, e.styles.Primary.Render("  Table"))
@@ -232,7 +225,6 @@ func (e *ExplorerPreview) renderColumns() string {
 		return e.styles.Text.Render("  No columns loaded")
 	}
 
-	title := e.styles.Header.Render(fmt.Sprintf("Columns — %s", e.tableName))
 	header := e.styles.Header.Render(fmt.Sprintf("  %-30s %-20s %-10s %s", strings.ToUpper("Name"), strings.ToUpper("Type"), strings.ToUpper("Nullable"), strings.ToUpper("Default")))
 
 	var rows []string
@@ -245,7 +237,7 @@ func (e *ExplorerPreview) renderColumns() string {
 		rows = append(rows, line)
 	}
 
-	return title + "\n" + header + "\n" + strings.Join(rows, "\n")
+	return header + "\n" + strings.Join(rows, "\n")
 }
 
 func (e *ExplorerPreview) renderConstraints() string {
@@ -253,7 +245,6 @@ func (e *ExplorerPreview) renderConstraints() string {
 		return e.styles.Text.Render("  No constraints loaded")
 	}
 
-	title := e.styles.Header.Render(fmt.Sprintf("Constraints — %s", e.tableName))
 	header := e.styles.Header.Render(fmt.Sprintf("  %-30s %-20s %s", strings.ToUpper("Name"), strings.ToUpper("Type"), strings.ToUpper("Columns")))
 
 	var rows []string
@@ -262,7 +253,7 @@ func (e *ExplorerPreview) renderConstraints() string {
 		rows = append(rows, line)
 	}
 
-	return title + "\n" + header + "\n" + strings.Join(rows, "\n")
+	return header + "\n" + strings.Join(rows, "\n")
 }
 
 func (e *ExplorerPreview) renderForeignKeys() string {
@@ -270,7 +261,6 @@ func (e *ExplorerPreview) renderForeignKeys() string {
 		return e.styles.Text.Render("  No foreign keys loaded")
 	}
 
-	title := e.styles.Header.Render(fmt.Sprintf("Foreign Keys — %s", e.tableName))
 	header := e.styles.Header.Render(fmt.Sprintf("  %-30s %-20s %-20s %s", strings.ToUpper("Name"), strings.ToUpper("Column"), strings.ToUpper("Ref Table"), strings.ToUpper("Ref Column")))
 
 	var rows []string
@@ -279,7 +269,7 @@ func (e *ExplorerPreview) renderForeignKeys() string {
 		rows = append(rows, line)
 	}
 
-	return title + "\n" + header + "\n" + strings.Join(rows, "\n")
+	return header + "\n" + strings.Join(rows, "\n")
 }
 
 func (e *ExplorerPreview) renderIndexes() string {
@@ -287,7 +277,6 @@ func (e *ExplorerPreview) renderIndexes() string {
 		return e.styles.Text.Render("  No indexes loaded")
 	}
 
-	title := e.styles.Header.Render(fmt.Sprintf("Indexes — %s", e.tableName))
 	header := e.styles.Header.Render(fmt.Sprintf("  %-30s %-10s %s", strings.ToUpper("Name"), strings.ToUpper("Unique"), strings.ToUpper("Definition")))
 
 	var rows []string
@@ -300,7 +289,7 @@ func (e *ExplorerPreview) renderIndexes() string {
 		rows = append(rows, line)
 	}
 
-	return title + "\n" + header + "\n" + strings.Join(rows, "\n")
+	return header + "\n" + strings.Join(rows, "\n")
 }
 
 func formatTime(t *time.Time) string {

@@ -36,6 +36,8 @@ type Styles struct {
 
 	ModeEdit lipgloss.Style
 	ModeNormal lipgloss.Style
+
+	FilterIndicator lipgloss.Style
 }
 
 func NewStyles(t *Theme) *Styles {
@@ -145,6 +147,12 @@ func NewStyles(t *Theme) *Styles {
 		ModeNormal: lipgloss.NewStyle().
 			Background(t.Border).
 			Foreground(t.Foreground).
+			Bold(true).
+			Padding(0, 1),
+
+		FilterIndicator: lipgloss.NewStyle().
+			Background(t.BackgroundElement).
+			Foreground(t.Primary).
 			Bold(true).
 			Padding(0, 1),
 	}

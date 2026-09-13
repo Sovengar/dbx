@@ -77,7 +77,12 @@ type Model struct {
 	gridSidebarFKPreviewCursor int
 	schemaDetail               []postgres.SchemaDetail
 	dbName                     string
+	yankMaxRows                int
+	spinnerActive              bool
+	spinnerFrame               int
 }
+
+var spinnerChars = [9]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"}
 
 func NewModel(cfg *config.Config) Model {
 	t := theme.Resolve(cfg.Theme.Mode)
@@ -684,8 +689,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickToast()
 
 	case spinnerTickMsg:
-		if m.statusbar != nil {
-			m.statusbar.TickSpinner()
+		if m.spinnerActive {
+			m.spinnerFrame = (m.spinnerFrame + 1) % len(spinnerChars)
 		}
 		return m, tickSpinner()
 
@@ -720,7 +725,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.state = StateError
 			m.err = msg.err
-			m.statusbar.SetActiveSpinner(false)
+			m.spinnerActive = false
 			m.toast.ShowError(fmt.Sprintf("Schema load failed: %v", msg.err))
 			return m, nil
 		}
@@ -734,11 +739,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dbName = msg.dbName
 		m.state = StateMain
 		m.toast.ShowSuccess("Schema loaded")
-		m.statusbar.SetActiveSpinner(true)
+		m.spinnerActive = true
 		return m, tea.Batch(m.loadAutocompleteData(), tickSpinner())
 
 	case autocompleteDataLoadedMsg:
-		m.statusbar.SetActiveSpinner(false)
+		m.spinnerActive = false
 		if msg.schemaExport != nil {
 			m.editor.SetSchema(msg.schemaExport)
 			m.statusbar.SetAutocompleteReady(true)
@@ -764,8 +769,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prevSchema = msg.schema
 		m.prevTable = msg.table
 		m.explorerPreview.SetData(msg.schema, msg.table, nil, nil, nil, nil, nil)
-		m.statusbar.SetTable(msg.schema, msg.table, msg.result.Count)
-		m.statusbar.SetFilter(msg.where)
 		m.router.FocusPane(FocusGrid)
 		if m.conn != nil {
 			return m, m.loadMetadata(msg.schema, msg.table)
@@ -1000,7 +1003,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusbar.SetEditorOpen(false)
 		m.grid.SetData(msg.result, "", "query")
 		m.editor.PushHistory(msg.sql)
-		m.statusbar.SetTable("", "query", msg.result.Count)
 		m.router.FocusPane(FocusGrid)
 		m.toast.ShowSuccess(fmt.Sprintf("Query returned %d rows", msg.result.Count))
 
@@ -1238,8 +1240,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 
-			if key == m.keybinds["grid.commit_pending"] && m.grid != nil && m.grid.HasDrafts() {
-				return m, m.grid.CommitAllDrafts()
+			if key == m.keybinds["grid.commit_pending"] && m.router.Focus() == FocusGrid && m.grid != nil {
+				if cmd, handled := m.grid.Update(msg); handled {
+					return m, cmd
+				}
 			}
 
 			if key == m.keybinds["global.cycle_focus"] {
@@ -1681,19 +1685,20 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) renderMainView() string {
+	var selSchema, selTable string
+	var rowCount int
 	if m.explorer != nil {
 		if selected := m.explorer.Selected(); selected != nil && selected.Type == explorer.NodeTable {
-			schema := ""
 			if s, ok := selected.Metadata["schema"].(string); ok {
-				schema = s
+				selSchema = s
 			}
-			m.statusbar.SetTable(schema, selected.Name, selected.RowCount())
+			selTable = selected.Name
+			rowCount = selected.RowCount()
 		}
 	}
 
 	m.statusbar.SetFocus(m.router.Context())
-	statusLine := m.statusbar.RenderStatus()
-	breadcrumbs := m.renderBreadcrumbs()
+	topLine := m.renderTopLine(selSchema, selTable, rowCount)
 
 	countLines := func(s string) int {
 		if s == "" {
@@ -1705,7 +1710,7 @@ func (m Model) renderMainView() string {
 		}
 		return len(lines)
 	}
-	statusBarLines := 4 + countLines(statusLine) + countLines(breadcrumbs)
+	statusBarLines := 4 + countLines(topLine)
 	contentHeight := m.height - statusBarLines
 	if contentHeight < 1 {
 		contentHeight = 1
@@ -1730,7 +1735,7 @@ func (m Model) renderMainView() string {
 		}
 	}
 
-	content := statusLine + "\n" + breadcrumbs + lipgloss.JoinHorizontal(lipgloss.Top, panes...)
+	content := topLine + lipgloss.JoinHorizontal(lipgloss.Top, panes...)
 
 	if m.editorOpen {
 		modalW := m.width * 6 / 10
@@ -1751,8 +1756,8 @@ func (m Model) renderMainView() string {
 	return content
 }
 
-func (m Model) renderBreadcrumbs() string {
-	if len(m.navStack) == 0 && m.prevTable == "" {
+func (m Model) renderBreadcrumbs(selSchema, selTable string, rowCount int) string {
+	if len(m.navStack) == 0 && selTable == "" {
 		return ""
 	}
 
@@ -1760,12 +1765,30 @@ func (m Model) renderBreadcrumbs() string {
 	for _, entry := range m.navStack {
 		parts = append(parts, m.styles.TextMuted.Render(fmt.Sprintf("%s.%s", entry.Schema, entry.Table)))
 	}
-	if m.prevTable != "" {
-		parts = append(parts, m.styles.Text.Render(fmt.Sprintf("%s.%s", m.prevSchema, m.prevTable)))
+	if selTable != "" {
+		entry := fmt.Sprintf("%s.%s", selSchema, selTable)
+		if rowCount > 0 {
+			entry += fmt.Sprintf(" · %d rows", rowCount)
+		}
+		parts = append(parts, m.styles.Text.Render(entry))
 	}
 
 	bread := strings.Join(parts, m.styles.TextMuted.Render(" → "))
 	return "  " + bread + "\n"
+}
+
+func (m Model) renderTopLine(selSchema, selTable string, rowCount int) string {
+	breadcrumb := m.renderBreadcrumbs(selSchema, selTable, rowCount)
+	if breadcrumb == "" {
+		return ""
+	}
+	breadInline := strings.TrimRight(breadcrumb, "\n")
+
+	if m.spinnerActive {
+		spinner := m.styles.Info.Render(spinnerChars[m.spinnerFrame])
+		return "  " + spinner + m.styles.TextMuted.Render(" · ") + breadInline + "\n"
+	}
+	return breadInline + "\n"
 }
 
 func (m Model) renderExplorer(w, h int) string {
@@ -1868,20 +1891,23 @@ func (m Model) syncGridPreview() {
 func (m Model) renderEditor(w, h int) string {
 	popupLines := 0
 	if m.editor.AutocompleteVisible() {
-		popupLines = 10
+		count := m.editor.AutocompleteItemCount()
+		if count > 15 {
+			count = 15
+		}
+		popupLines = count + 2
 	}
 
 	m.editor.SetWidth(w - 4)
-	m.editor.SetHeight(h - 6 - popupLines)
+	m.editor.SetHeight(h - 4 - popupLines)
 	m.editor.Focus()
 
 	title := m.styles.Header.Render("SQL Editor")
-	hint := m.styles.Help.Render("Tab autocomplete · Ctrl+Enter execute · Ctrl+U clear · Ctrl+P/N history · Esc close")
 	content := m.editor.View()
 
 	return m.styles.BorderActive.
 		Width(w - 2).
-		Render(title + "\n" + content + "\n" + hint)
+		Render(title + "\n" + content)
 }
 
 func overlay(base, box string, width, height int) string {

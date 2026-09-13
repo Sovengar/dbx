@@ -5,8 +5,10 @@ import (
 	"os"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/buble/dbx/internal/ai/context"
 	"github.com/buble/dbx/internal/theme"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type CompletionKind int
@@ -114,7 +116,7 @@ type AutocompleteState struct {
 
 func NewAutocompleteState() *AutocompleteState {
 	return &AutocompleteState{
-		maxItems: 8,
+		maxItems: 15,
 	}
 }
 
@@ -228,7 +230,6 @@ func (a *AutocompleteState) rebuildContextItems() {
 				a.contextItems = append(a.contextItems, item)
 			}
 		}
-		autocompleteDebugLog("rebuildContextItems: CompletionSchema → %d items (total all=%d)", len(a.contextItems), len(a.all))
 	case CompletionTable:
 		if a.currentCtx.schema != "" {
 			for _, item := range a.all {
@@ -287,12 +288,14 @@ func (a *AutocompleteState) rebuildContextItems() {
 			}
 		}
 	}
+	autocompleteDebugLog("rebuildContextItems: kind=%d → %d contextItems (from %d total)", a.currentCtx.kind, len(a.contextItems), len(a.all))
 }
 
 func (a *AutocompleteState) applyFilter() {
 	if a.prefix == "" {
 		a.filtered = make([]CompletionItem, len(a.contextItems))
 		copy(a.filtered, a.contextItems)
+		autocompleteDebugLog("applyFilter: empty prefix, showing all %d contextItems", len(a.contextItems))
 		return
 	}
 
@@ -303,6 +306,7 @@ func (a *AutocompleteState) applyFilter() {
 			result = append(result, item)
 		}
 	}
+	autocompleteDebugLog("applyFilter: prefix=%q matched %d of %d contextItems", q, len(result), len(a.contextItems))
 	a.filtered = result
 }
 
@@ -328,42 +332,58 @@ func (a *AutocompleteState) detectContext(line string, col int) completionContex
 
 	dotIdx := strings.LastIndex(before, ".")
 	if dotIdx >= 0 {
-		qualifier := extractIdentifierBefore(before, dotIdx)
 		afterDot := before[dotIdx+1:]
-
-		if qualifier == "" {
-			autocompleteDebugLog("detectContext: dot empty qualifier, prefix=%q", afterDot)
-			return completionContext{
-				kind:   CompletionKeyword,
-				prefix: afterDot,
+		afterDotUpper := strings.ToUpper(strings.TrimSpace(afterDot))
+		dotHasKeywordAfter := false
+		dotKeywords := []string{"WHERE", "AND", "OR", "ON", "HAVING", "FROM", "JOIN", "SELECT", "ORDER", "GROUP", "SET", "INTO", "VALUES", "LIMIT", "OFFSET"}
+		for _, kw := range dotKeywords {
+			if strings.HasPrefix(afterDotUpper, kw+" ") || afterDotUpper == kw {
+				dotHasKeywordAfter = true
+				break
+			}
+			if strings.Contains(afterDotUpper, " "+kw+" ") || strings.HasSuffix(afterDotUpper, " "+kw) {
+				dotHasKeywordAfter = true
+				break
 			}
 		}
 
-		dot2 := strings.LastIndex(qualifier, ".")
-		if dot2 >= 0 {
-			schema := qualifier[:dot2]
-			table := qualifier[dot2+1:]
-			autocompleteDebugLog("detectContext: double-dot schema=%q table=%q prefix=%q", schema, table, afterDot)
+		if !dotHasKeywordAfter {
+			qualifier := extractIdentifierBefore(before, dotIdx)
+
+			if qualifier == "" {
+				autocompleteDebugLog("detectContext: dot empty qualifier, prefix=%q", afterDot)
+				return completionContext{
+					kind:   CompletionKeyword,
+					prefix: afterDot,
+				}
+			}
+
+			dot2 := strings.LastIndex(qualifier, ".")
+			if dot2 >= 0 {
+				schema := qualifier[:dot2]
+				table := qualifier[dot2+1:]
+				autocompleteDebugLog("detectContext: double-dot schema=%q table=%q prefix=%q", schema, table, afterDot)
+				return completionContext{
+					kind:   CompletionColumn,
+					prefix: afterDot,
+					schema: schema,
+					table:  table,
+				}
+			}
+
+			if a.isKnownSchema(qualifier) || a.hasTablesInSchema(qualifier) {
+				return completionContext{
+					kind:   CompletionTable,
+					prefix: afterDot,
+					schema: qualifier,
+				}
+			}
+
 			return completionContext{
 				kind:   CompletionColumn,
 				prefix: afterDot,
-				schema: schema,
-				table:  table,
+				table:  qualifier,
 			}
-		}
-
-		if a.isKnownSchema(qualifier) || a.hasTablesInSchema(qualifier) {
-			return completionContext{
-				kind:   CompletionTable,
-				prefix: afterDot,
-				schema: qualifier,
-			}
-		}
-
-		return completionContext{
-			kind:   CompletionColumn,
-			prefix: afterDot,
-			table:  qualifier,
 		}
 	}
 
@@ -398,7 +418,8 @@ func (a *AutocompleteState) detectContext(line string, col int) completionContex
 		"VALUES": true, "RETURNING": true, "AS": true,
 	}
 
-	if currentWord != "" && !isFullSQLKeyword(currentWord) && isSQLKeywordPrefix(currentWord) && !contextKeywords[lastKeyword] {
+	if currentWord != "" && !isFullSQLKeyword(currentWord) && isSQLKeywordPrefix(currentWord) && !contextKeywords[lastKeyword] && !hasTrailingSpace {
+		autocompleteDebugLog("detectContext: keywordPrefixCheck HIT → CompletionKeyword prefix=%q", currentWord)
 		return completionContext{
 			kind:   CompletionKeyword,
 			prefix: currentWord,
@@ -418,25 +439,42 @@ func (a *AutocompleteState) detectContext(line string, col int) completionContex
 
 	switch lastKeyword {
 	case "WHERE", "AND", "OR", "ON", "HAVING":
+		if !hasTrailingSpace && currentWord == lastKeyword {
+			return completionContext{
+				kind:   CompletionKeyword,
+				prefix: currentWord,
+			}
+		}
 		if isOperatorContext(upperTrimmed) {
 			autocompleteDebugLog("detectContext: WHERE → operator ctx → values")
+			return completionContext{
+				kind:   CompletionValue,
+				prefix: "",
+			}
+		}
+		if isColumnContext(upperTrimmed, a.all) && hasTrailingSpace {
+			autocompleteDebugLog("detectContext: WHERE → column ctx → operators")
+			return completionContext{
+				kind:   CompletionOperator,
+				prefix: "",
+			}
+		}
+		if hasOperatorBefore(upperTrimmed) {
+			autocompleteDebugLog("detectContext: WHERE → has operator before → values")
 			return completionContext{
 				kind:   CompletionValue,
 				prefix: currentWord,
 			}
 		}
-		if isColumnContext(upperTrimmed) {
-			autocompleteDebugLog("detectContext: WHERE → column ctx → operators")
-			return completionContext{
-				kind:   CompletionOperator,
-				prefix: currentWord,
-			}
-		}
 		schema, table := a.findTableInFROM(upperTrimmed)
-		autocompleteDebugLog("detectContext: WHERE → default columns, schema=%q table=%q", schema, table)
+		prefix := currentWord
+		if isFullSQLKeyword(prefix) {
+			prefix = ""
+		}
+		autocompleteDebugLog("detectContext: WHERE → default columns, schema=%q table=%q prefix=%q", schema, table, prefix)
 		return completionContext{
 			kind:   CompletionColumn,
-			prefix: currentWord,
+			prefix: prefix,
 			schema: schema,
 			table:  table,
 		}
@@ -480,6 +518,9 @@ func (a *AutocompleteState) detectContext(line string, col int) completionContex
 			kind:   CompletionKeyword,
 			prefix: currentWord,
 		}
+
+	case "NULL", "TRUE", "FALSE":
+		return completionContext{kind: CompletionEmpty}
 
 	default:
 		return completionContext{
@@ -579,7 +620,7 @@ func isOperatorContext(upperTrimmed string) bool {
 	return false
 }
 
-func isColumnContext(upperTrimmed string) bool {
+func isColumnContext(upperTrimmed string, allItems []CompletionItem) bool {
 	tokens := strings.Fields(upperTrimmed)
 	if len(tokens) < 2 {
 		return false
@@ -595,7 +636,34 @@ func isColumnContext(upperTrimmed string) bool {
 		return false
 	}
 
-	return true
+	for _, item := range allItems {
+		if item.Kind == CompletionColumn && strings.EqualFold(item.Name, last) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hasOperatorBefore(upperTrimmed string) bool {
+	tokens := strings.Fields(upperTrimmed)
+	operators := map[string]bool{
+		"=": true, "!=": true, "<>": true, "<": true, "<=": true,
+		">": true, ">=": true, "LIKE": true, "ILIKE": true,
+		"IN": true, "IS": true, "BETWEEN": true,
+	}
+	for i := len(tokens) - 2; i >= 0; i-- {
+		if operators[tokens[i]] {
+			return true
+		}
+		if i > 0 {
+			twoWord := tokens[i-1] + " " + tokens[i]
+			if twoWord == "IS NOT" || twoWord == "NOT IN" || twoWord == "NOT LIKE" || twoWord == "NOT ILIKE" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func extractLastSQLKeyword(s string) string {
@@ -621,6 +689,16 @@ func extractLastSQLKeyword(s string) string {
 		switch threeWord {
 		case "LEFT OUTER JOIN", "RIGHT OUTER JOIN", "FULL OUTER JOIN":
 			return threeWord
+		}
+	}
+
+	if sqlKeywordSet[last] || isSQLKeywordPrefix(last) {
+		return last
+	}
+
+	for i := len(parts) - 2; i >= 0; i-- {
+		if sqlKeywordSet[parts[i]] {
+			return parts[i]
 		}
 	}
 
@@ -730,9 +808,9 @@ func (a *AutocompleteState) Render(styles *theme.Styles, width int) string {
 		}
 	}
 
-	popupW := maxNameLen + 20
-	if popupW < 30 {
-		popupW = 30
+	popupW := maxNameLen + 25
+	if popupW < 40 {
+		popupW = 40
 	}
 	if popupW > width-4 {
 		popupW = width - 4
@@ -764,31 +842,51 @@ func (a *AutocompleteState) Render(styles *theme.Styles, width int) string {
 		name := item.Label()
 		kind := item.KindLabel()
 
-		if len(name) > popupW-kindW-4 {
-			name = name[:popupW-kindW-6] + ".."
+		nameMaxW := popupW - kindW - 4
+		if nameMaxW < 10 {
+			nameMaxW = 10
+		}
+		nameW := lipgloss.Width(name)
+		if nameW > nameMaxW {
+			name = ansi.Truncate(name, nameMaxW, "..")
+			nameW = lipgloss.Width(name)
+		}
+		namePad := nameMaxW - nameW
+		if namePad > 0 {
+			name += strings.Repeat(" ", namePad)
+		}
+
+		kindWDisplay := lipgloss.Width(kind)
+		if kindWDisplay > kindW {
+			kind = ansi.Truncate(kind, kindW, "..")
+			kindWDisplay = lipgloss.Width(kind)
+		}
+		kindPad := kindW - kindWDisplay
+		if kindPad > 0 {
+			kind += strings.Repeat(" ", kindPad)
 		}
 
 		var nameStyled string
 		switch item.Kind {
 		case CompletionKeyword:
-			nameStyled = styles.Primary.Render(fmt.Sprintf("%-*s", popupW-kindW-4, name))
+			nameStyled = styles.Primary.Render(name)
 		case CompletionFunction:
-			nameStyled = styles.Info.Render(fmt.Sprintf("%-*s", popupW-kindW-4, name))
+			nameStyled = styles.Info.Render(name)
 		case CompletionSchema:
-			nameStyled = styles.Warning.Render(fmt.Sprintf("%-*s", popupW-kindW-4, name))
+			nameStyled = styles.Warning.Render(name)
 		case CompletionTable:
-			nameStyled = styles.Success.Render(fmt.Sprintf("%-*s", popupW-kindW-4, name))
+			nameStyled = styles.Success.Render(name)
 		case CompletionColumn:
-			nameStyled = styles.TextBright.Render(fmt.Sprintf("%-*s", popupW-kindW-4, name))
+			nameStyled = styles.TextBright.Render(name)
 		case CompletionOperator:
-			nameStyled = styles.Warning.Render(fmt.Sprintf("%-*s", popupW-kindW-4, name))
+			nameStyled = styles.Warning.Render(name)
 		case CompletionValue:
-			nameStyled = styles.Info.Render(fmt.Sprintf("%-*s", popupW-kindW-4, name))
+			nameStyled = styles.Info.Render(name)
 		default:
-			nameStyled = fmt.Sprintf("%-*s", popupW-kindW-4, name)
+			nameStyled = name
 		}
 
-		kindStyled := styles.TextMuted.Render(fmt.Sprintf("%-*s", kindW, kind))
+		kindStyled := styles.TextMuted.Render(kind)
 
 		line := "  " + nameStyled + kindStyled
 		if i == a.selected {

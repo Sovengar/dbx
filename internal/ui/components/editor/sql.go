@@ -52,6 +52,7 @@ func (e *SQLEditor) Focus()          { e.focused = true }
 func (e *SQLEditor) Blur()           { e.focused = false }
 func (e *SQLEditor) AutocompleteVisible() bool { return e.autocomplete.Visible() }
 func (e *SQLEditor) AutocompleteReady() bool   { return e.schemaLoaded }
+func (e *SQLEditor) AutocompleteItemCount() int { return len(e.autocomplete.filtered) }
 
 func (e *SQLEditor) Content() string {
 	return strings.Join(e.lines, "\n")
@@ -289,11 +290,15 @@ func (e *SQLEditor) clampCol() {
 
 func (e *SQLEditor) triggerAutocomplete() {
 	if !e.schemaLoaded {
+		autocompleteDebugLog("triggerAutocomplete: SCHEMA NOT LOADED, skipping")
 		return
 	}
 	line := e.lines[e.cursorRow]
+	autocompleteDebugLog("triggerAutocomplete: line=%q cursorCol=%d cursorRow=%d", line, e.cursorCol, e.cursorRow)
 	ctx := e.autocomplete.detectContext(line, e.cursorCol)
+	autocompleteDebugLog("triggerAutocomplete: context kind=%d prefix=%q schema=%q table=%q", ctx.kind, ctx.prefix, ctx.schema, ctx.table)
 	e.autocomplete.UpdateContext(ctx)
+	autocompleteDebugLog("triggerAutocomplete: after UpdateContext visible=%v filtered=%d", e.autocomplete.Visible(), len(e.autocomplete.filtered))
 }
 
 func (e *SQLEditor) updateAutocompleteAfterEdit() {
@@ -304,7 +309,9 @@ func (e *SQLEditor) updateAutocompleteAfterEdit() {
 	line := e.lines[e.cursorRow]
 	autocompleteDebugLog("updateAutocompleteAfterEdit: line=%q cursorCol=%d", line, e.cursorCol)
 	ctx := e.autocomplete.detectContext(line, e.cursorCol)
+	autocompleteDebugLog("updateAutocompleteAfterEdit: context kind=%d prefix=%q schema=%q table=%q", ctx.kind, ctx.prefix, ctx.schema, ctx.table)
 	e.autocomplete.UpdateContext(ctx)
+	autocompleteDebugLog("updateAutocompleteAfterEdit: after UpdateContext visible=%v filtered=%d contextItems=%d", e.autocomplete.Visible(), len(e.autocomplete.filtered), len(e.autocomplete.contextItems))
 }
 
 func (e *SQLEditor) acceptCompletion(item *CompletionItem) {
@@ -324,11 +331,29 @@ func (e *SQLEditor) acceptCompletion(item *CompletionItem) {
 		wordStart--
 	}
 
+	word := strings.ToUpper(before[wordStart:])
+	if isFullSQLKeyword(word) || item.Kind == CompletionOperator || item.Kind == CompletionValue {
+		wordStart = len(before)
+	}
+
 	completion := item.Label()
-	e.lines[e.cursorRow] = before[:wordStart] + completion + after
-	e.cursorCol = wordStart + len(completion)
-	e.autocomplete.Cancel()
+	suffix := completionSuffix(item)
+	e.lines[e.cursorRow] = before[:wordStart] + completion + suffix + after
+	e.cursorCol = wordStart + len(completion) + len(suffix)
 	e.modified = true
+	e.triggerAutocomplete()
+}
+
+func completionSuffix(item *CompletionItem) string {
+	if strings.HasSuffix(item.Name, "()") {
+		return ""
+	}
+	switch item.Kind {
+	case CompletionSchema:
+		return "."
+	default:
+		return " "
+	}
 }
 
 func (e *SQLEditor) historyPrev() {

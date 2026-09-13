@@ -19,12 +19,13 @@ const (
 )
 
 type ExportSelectedMsg struct {
-	Format ExportFormat
-	Schema string
-	Table  string
-	Row    []interface{} // nil for mass export
-	Rows   [][]interface{} // nil for single row export
-	Columns []string
+	Format   ExportFormat
+	Schema   string
+	Table    string
+	Row      []interface{}   // nil for mass export
+	Rows     [][]interface{} // nil for single row export
+	Columns  []string
+	YankMode bool // true = yank (clipboard), false = export (file or clipboard based on row count)
 }
 
 type ExportPicker struct {
@@ -39,6 +40,8 @@ type ExportPicker struct {
 	row       []interface{}   // single row for clipboard export
 	rows      [][]interface{} // multiple rows for file export
 	columns   []string
+	fileMode  bool // true = save to file, false = copy to clipboard
+	yankMode  bool // true = yank (always clipboard), false = normal export
 }
 
 type exportOption struct {
@@ -59,6 +62,22 @@ func NewExportPicker(styles *theme.Styles) *ExportPicker {
 	}
 }
 
+func (ep *ExportPicker) updateDescriptions() {
+	if ep.yankMode {
+		ep.options[0].description = "Copy INSERT to clipboard"
+		ep.options[1].description = "Copy JSON to clipboard"
+		ep.options[2].description = "Copy CSV to clipboard"
+	} else if ep.fileMode {
+		ep.options[0].description = "Save INSERT to file"
+		ep.options[1].description = "Save JSON to file"
+		ep.options[2].description = "Save CSV to file"
+	} else {
+		ep.options[0].description = "Copy INSERT to clipboard"
+		ep.options[1].description = "Copy JSON to clipboard"
+		ep.options[2].description = "Copy CSV to clipboard"
+	}
+}
+
 func (ep *ExportPicker) Show(schema, table string, row []interface{}, rows [][]interface{}, columns []string) {
 	ep.visible = true
 	ep.cursor = 0
@@ -67,6 +86,32 @@ func (ep *ExportPicker) Show(schema, table string, row []interface{}, rows [][]i
 	ep.row = row
 	ep.rows = rows
 	ep.columns = columns
+	ep.fileMode = false
+	ep.yankMode = false
+}
+
+func (ep *ExportPicker) ShowFileMode(schema, table string, row []interface{}, rows [][]interface{}, columns []string) {
+	ep.visible = true
+	ep.cursor = 0
+	ep.schema = schema
+	ep.table = table
+	ep.row = row
+	ep.rows = rows
+	ep.columns = columns
+	ep.fileMode = true
+	ep.yankMode = false
+}
+
+func (ep *ExportPicker) ShowYankMode(schema, table string, row []interface{}, rows [][]interface{}, columns []string) {
+	ep.visible = true
+	ep.cursor = 0
+	ep.schema = schema
+	ep.table = table
+	ep.row = row
+	ep.rows = rows
+	ep.columns = columns
+	ep.fileMode = false
+	ep.yankMode = true
 }
 
 func (ep *ExportPicker) Hide() {
@@ -115,12 +160,13 @@ func (ep *ExportPicker) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		ep.visible = false
 		return func() tea.Msg {
 			return ExportSelectedMsg{
-				Format:  selected.format,
-				Schema:  ep.schema,
-				Table:   ep.table,
-				Row:     ep.row,
-				Rows:    ep.rows,
-				Columns: ep.columns,
+				Format:   selected.format,
+				Schema:   ep.schema,
+				Table:    ep.table,
+				Row:      ep.row,
+				Rows:     ep.rows,
+				Columns:  ep.columns,
+				YankMode: ep.yankMode,
 			}
 		}, true
 	case "esc", "q":
@@ -135,10 +181,18 @@ func (ep *ExportPicker) View() string {
 		return ""
 	}
 
+	ep.updateDescriptions()
+
 	var lines []string
 
 	// Title
-	title := ep.styles.Header.Render(fmt.Sprintf("Export %s.%s", ep.schema, ep.table))
+	action := "Export"
+	if ep.yankMode {
+		action = "Yank"
+	} else if ep.fileMode {
+		action = "Export to file"
+	}
+	title := ep.styles.Header.Render(fmt.Sprintf("%s %s.%s", action, ep.schema, ep.table))
 	lines = append(lines, title)
 	lines = append(lines, "")
 

@@ -88,53 +88,66 @@ func (e *Explorer) Update(msg tea.Msg) (tea.Cmd, bool) {
 
 		key := msg.String()
 
-		if node := e.tree.Selected(); node != nil && node.Type == NodeTable {
-			schema := ""
-			if s, ok := node.Metadata["schema"].(string); ok {
-				schema = s
-			}
-
+		if node := e.tree.Selected(); node != nil {
 			if key == e.keybindings["explorer.toggle_columns"] {
-				if node.Parent != nil && node.Parent.Type == NodeSchema {
-					schemaNode := node.Parent
-					schemaNode.Expanded = false
-					e.tree.flattenNodes()
-					for i, n := range e.tree.filtered {
-						if n == schemaNode {
-							e.tree.cursor = i
-							break
+				if node.Type == NodeTable {
+					if node.Parent != nil && node.Parent.Type == NodeSchema {
+						schemaNode := node.Parent
+						schemaNode.Expanded = false
+						e.tree.flattenNodes()
+						for i, n := range e.tree.filtered {
+							if n == schemaNode {
+								e.tree.cursor = i
+								break
+							}
 						}
+						e.tree.clampOffset()
+					}
+					return nil, true
+				}
+				if node.Type == NodeSchema {
+					node.ToggleExpand()
+					e.tree.flattenNodes()
+					if e.tree.cursor >= len(e.tree.filtered) {
+						e.tree.cursor = len(e.tree.filtered) - 1
 					}
 					e.tree.clampOffset()
+					return nil, true
 				}
-				return nil, true
 			}
 
-			if key == e.keybindings["explorer.expand"] {
-				return func() tea.Msg {
-					return TableSelectedMsg{
-						Schema: schema,
-						Table:  node.Name,
-					}
-				}, true
-			}
+			if node.Type == NodeTable {
+				schema := ""
+				if s, ok := node.Metadata["schema"].(string); ok {
+					schema = s
+				}
 
-			if key == e.keybindings["explorer.drop"] {
-				return func() tea.Msg {
-					return DropTableMsg{
-						Schema: schema,
-						Table:  node.Name,
-					}
-				}, true
-			}
+				if key == e.keybindings["explorer.expand"] {
+					return func() tea.Msg {
+						return TableSelectedMsg{
+							Schema: schema,
+							Table:  node.Name,
+						}
+					}, true
+				}
 
-			if key == e.keybindings["explorer.view_ddl"] {
-				return func() tea.Msg {
-					return ViewDDLMsg{
-						Schema: schema,
-						Table:  node.Name,
-					}
-				}, true
+				if key == e.keybindings["explorer.drop"] {
+					return func() tea.Msg {
+						return DropTableMsg{
+							Schema: schema,
+							Table:  node.Name,
+						}
+					}, true
+				}
+
+				if key == e.keybindings["explorer.view_ddl"] {
+					return func() tea.Msg {
+						return ViewDDLMsg{
+							Schema: schema,
+							Table:  node.Name,
+						}
+					}, true
+				}
 			}
 		}
 
@@ -195,10 +208,6 @@ func (e *Explorer) handleFilterKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 func (e *Explorer) View() string {
 	var s strings.Builder
 
-	title := e.styles.Header.Render("Explorer")
-	s.WriteString(title)
-	s.WriteString("\n")
-
 	if e.filtering {
 		filter := e.styles.Text.Render("Filter: " + e.tree.filter + "_")
 		s.WriteString(filter)
@@ -209,8 +218,7 @@ func (e *Explorer) View() string {
 		s.WriteString("\n")
 	}
 
-	content := e.tree.View()
-	s.WriteString(content)
+	s.WriteString(e.tree.View())
 
 	output := s.String()
 

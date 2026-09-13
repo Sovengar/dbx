@@ -18,8 +18,8 @@ dbx is a terminal UI for databases designed for both humans and AI agents.
 | Filter (`/`)             | Inline WHERE clause with autocomplete for columns, operators, and values                          |
 | Edit cell (`enter`)      | Inline editing with type-aware parsing (int, float, bool), stores draft locally (blue cell)       |
 | Insert row (`i`)         | Staged insert: creates a pending row in the grid (shown in green)                                 |
-| Delete row (`d`)         | Stages row for deletion (red), press `d` again to confirm                                         |
-| Commit all (`Ctrl+S`)    | Commits ALL drafts (inserts + updates + deletes) atomically, then reloads the table               |
+| Delete row (`d`)         | Stages row for deletion (red)                                                                      |
+| Commit all (`Ctrl+S`)    | Commits ALL drafts atomically. When deletes are pending, press twice to confirm                   |
 | Discard all (`D`)        | Discards all pending changes, restores original values (press twice to confirm)                   |
 | Multi-select (`space`)   | Toggles row selection for bulk operations                                                         |
 | FK navigate (`o`)        | Follow foreign key: loads referenced table with FK filter AND existing WHERE, syncs explorer     |
@@ -59,7 +59,7 @@ No database changes occur until you commit with `Ctrl+S`.
 | ------------------------ | ---------------------------------------------------- |
 | Open table (`enter`)     | Loads table data into grid                           |
 | Preview table (`Tab`)    | Opens explorer-preview with table details (full-screen) |
-| Collapse schema (`space`) | Collapse the schema of the selected table           |
+| Toggle schema (`space`)   | Collapse schema (on table) or toggle schema (on schema) |
 | Filter (`/`)             | Fuzzy filter across all table names                  |
 | New table (`n`)          | Opens editor pre-filled with `CREATE TABLE` template |
 | Drop table (`d`)         | Opens editor pre-filled with `DROP TABLE`            |
