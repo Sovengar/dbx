@@ -28,6 +28,8 @@ dbx is a terminal UI for databases designed for both humans and AI agents.
 | Pagination               | `n`/`p` next/prev page, `N`/`P` first/last page, `F1`–`F9` jump, digit keys for multi-digit pages |
 | Tabs                     | `1`–`5` switch between Records, Columns, Constraints, Foreign Keys, Indexes                       |
 | Preview                  | Right panel shows selected row as highlighted JSON, autoclosed when width < 100                   |
+| Preview FK cell          | If the cursor is on a FK cell, the preview shows the referenced row instead of the current one     |
+| JQ Filter (`/`)          | Filter/navigate JSON in preview with jq expressions, autocomplete, persistent history             |
 
 #### Grid Modes
 
@@ -84,9 +86,11 @@ No database changes occur until you commit with `Ctrl+S`.
 
 | Action                | Behavior                                                             |
 | --------------------- | -------------------------------------------------------------------- |
+| Top bar               | Shows active pane, `schema.table`, row count, WHERE filter, breadcrumbs |
+| Bottom bar            | Global keybinds (always visible) + contextual keybinds per pane      |
 | Focus cycling (`e`)  | Toggle Explorer pane                                                  |
 | Grid Preview (`Tab`) | Focus preview pane (full-width), Tab to return                        |
-| Breadcrumbs           | Navigation history path above grid (`schema.table → schema.table`)   |
+| JQ Filter (`/`)     | Filter JSON in preview with jq expressions, autocomplete, history    |
 | Command palette (`:`) | Fuzzy search for any command (refresh, export, execute, focus, etc.) |
 | Help (`?`)            | Overlay showing all keybinds, scrollable                             |
 | Mouse                 | Click, double-click, scroll wheel, header click to sort              |
@@ -197,10 +201,15 @@ dbx ask "show me all active users"
 | Key | Action                     |
 | --- | -------------------------- |
 | `Tab` | Focus preview (from grid) |
-| `j`/`k` | Scroll down/up        |
+| `Esc` | Back to grid              |
+| `j`/`k` or `↑`/`↓` | Navigate down/up (cursor) |
+| `Enter` | Expand FK / Collapse     |
 | `g`/`G` | First/last line       |
 | `Ctrl+U`/`Ctrl+D` | Half page up/down |
 | `e` | Focus explorer             |
+| `/` | JQ filter (autocomplete)   |
+| `Ctrl+P`/`Ctrl+N` | JQ history prev/next |
+| `Ctrl+Space` | Toggle autocomplete  |
 
 ### Editor
 

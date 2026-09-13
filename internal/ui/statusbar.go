@@ -96,7 +96,7 @@ func (s *StatusBar) renderContextual() []string {
 			lines = append(lines, "1-5 tabs · / filter · n/p N/P page · F1-9 goto · s sort · f find column")
 			lines = append(lines, "Enter edit · d delete · i insert · space select · y export · o FK nav · H go back")
 		case "grid-preview":
-			lines = append(lines, "Tab back · j/k scroll · g/G first/last · e explorer")
+			lines = append(lines, "Tab/Esc back · j/k navigate · Enter expand FK · g/G first/last · e explorer · / jq")
 		}
 	}
 

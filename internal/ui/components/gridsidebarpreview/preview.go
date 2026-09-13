@@ -1,4 +1,4 @@
-package preview
+package gridsidebarpreview
 
 import (
 	"encoding/json"
@@ -9,11 +9,12 @@ import (
 )
 
 type Preview struct {
-	styles *theme.Styles
-	lines  []string
-	width  int
-	height int
-	scrollY int
+	styles     *theme.Styles
+	lines      []string
+	width      int
+	height     int
+	scrollY    int
+	fkRefTable string
 }
 
 func New(styles *theme.Styles) *Preview {
@@ -47,6 +48,32 @@ func (p *Preview) ScrollDown() {
 }
 
 func (p *Preview) SetRow(columns []string, row []interface{}) {
+	p.fkRefTable = ""
+	if row == nil || len(columns) == 0 {
+		p.lines = nil
+		return
+	}
+
+	data := make(map[string]interface{})
+	for i, col := range columns {
+		if i < len(row) {
+			data[col] = row[i]
+		}
+	}
+
+	jsonBytes, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		p.lines = []string{fmt.Sprintf("Error: %v", err)}
+		return
+	}
+
+	raw := string(jsonBytes)
+	p.lines = strings.Split(raw, "\n")
+	p.scrollY = 0
+}
+
+func (p *Preview) SetFKRow(columns []string, row []interface{}, refTable string) {
+	p.fkRefTable = refTable
 	if row == nil || len(columns) == 0 {
 		p.lines = nil
 		return
@@ -76,6 +103,9 @@ func (p *Preview) Render() string {
 	}
 
 	title := p.styles.Header.Render("Preview")
+	if p.fkRefTable != "" {
+		title = p.styles.Header.Render(fmt.Sprintf("Preview → %s", p.fkRefTable))
+	}
 	contentHeight := p.height - 6
 
 	if len(p.lines) == 0 {

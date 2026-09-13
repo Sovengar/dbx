@@ -26,7 +26,7 @@ import (
 	"github.com/buble/dbx/internal/ui/components/gridpreview"
 	"github.com/buble/dbx/internal/ui/components/palette"
 	"github.com/buble/dbx/internal/ui/components/picker"
-	"github.com/buble/dbx/internal/ui/components/preview"
+	"github.com/buble/dbx/internal/ui/components/gridsidebarpreview"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -48,7 +48,7 @@ type Model struct {
 	explorer        *explorer.Explorer
 	grid            *grid.Grid
 	editor          *editor.SQLEditor
-	preview         *preview.Preview
+	gridSidebarPreview *gridsidebarpreview.Preview
 	gridPreview     *gridpreview.GridPreview
 	router          *Router
 	keybindRegistry *config.KeybindRegistry
@@ -70,6 +70,8 @@ type Model struct {
 	navStack        []NavigationEntry
 	prevSchema      string
 	prevTable       string
+	gridSidebarFKPreviewCache  map[string][]gridSidebarFKPreviewCacheEntry
+	gridSidebarFKPreviewCursor int
 }
 
 func NewModel(cfg *config.Config) Model {
@@ -87,7 +89,7 @@ func NewModel(cfg *config.Config) Model {
 		picker:          picker.New(t.Styles()),
 		grid:            grid.New(t.Styles(), pageSize, kbs),
 		editor:          editor.NewSQLEditor(t.Styles()),
-		preview:         preview.New(t.Styles()),
+		gridSidebarPreview: gridsidebarpreview.New(t.Styles()),
 		gridPreview:     gridpreview.New(t.Styles(), kbs),
 		router:          NewRouter(kbs),
 		keybindRegistry: kbr,
@@ -325,6 +327,124 @@ func formatFKValue(val interface{}) string {
 	}
 }
 
+const maxGridSidebarFKPreviewCacheSize = 50
+
+type gridSidebarFKPreviewCacheEntry struct {
+	value   interface{}
+	columns []string
+	row     []interface{}
+}
+
+func gridSidebarFKPreviewCacheKey(schema, table, column string) string {
+	return schema + "." + table + "." + column
+}
+
+func (m *Model) lookupGridSidebarFKPreviewCache(key string, value interface{}) *gridSidebarFKPreviewCacheEntry {
+	entries, ok := m.gridSidebarFKPreviewCache[key]
+	if !ok {
+		return nil
+	}
+	for i := range entries {
+		if fmt.Sprintf("%v", entries[i].value) == fmt.Sprintf("%v", value) {
+			return &entries[i]
+		}
+	}
+	return nil
+}
+
+func (m *Model) storeGridSidebarFKPreviewCache(key string, value interface{}, columns []string, row []interface{}) {
+	if m.gridSidebarFKPreviewCache == nil {
+		m.gridSidebarFKPreviewCache = make(map[string][]gridSidebarFKPreviewCacheEntry)
+	}
+	entry := gridSidebarFKPreviewCacheEntry{value: value, columns: columns, row: row}
+	m.gridSidebarFKPreviewCache[key] = append(m.gridSidebarFKPreviewCache[key], entry)
+	if len(m.gridSidebarFKPreviewCache[key]) > maxGridSidebarFKPreviewCacheSize {
+		m.gridSidebarFKPreviewCache[key] = m.gridSidebarFKPreviewCache[key][len(m.gridSidebarFKPreviewCache[key])-maxGridSidebarFKPreviewCacheSize:]
+	}
+}
+
+func (m Model) findFKForColumn(colName string) *postgres.ForeignKeyInfo {
+	fks := m.grid.ForeignKeys()
+	for i := range fks {
+		if fks[i].Column == colName {
+			return &fks[i]
+		}
+	}
+	return nil
+}
+
+func (m Model) fetchGridSidebarFKPreview(fkInfo *postgres.ForeignKeyInfo, fkValue interface{}, token int) tea.Cmd {
+	refSchema := fkInfo.RefSchema
+	if refSchema == "" {
+		refSchema = m.prevSchema
+	}
+	fkWhere := fmt.Sprintf("%q = %s", fkInfo.RefColumn, formatFKValue(fkValue))
+	refTable := fkInfo.RefTable
+	cacheKey := gridSidebarFKPreviewCacheKey(m.prevSchema, m.grid.TableName(), fkInfo.Column)
+	return func() tea.Msg {
+		loader := postgres.NewSchemaLoader(m.conn)
+		opts := postgres.SelectOptions{
+			Schema: refSchema,
+			Where:  fkWhere,
+			Limit:  1,
+		}
+		result, err := loader.Select(context.Background(), refTable, opts)
+		if err != nil {
+			return GridSidebarFKPreviewLookupResultMsg{Err: err, Token: token}
+		}
+		if result == nil || len(result.Rows) == 0 {
+			return GridSidebarFKPreviewLookupResultMsg{Err: fmt.Errorf("referenced row not found"), Token: token}
+		}
+		columns := make([]string, len(result.Columns))
+		for i, col := range result.Columns {
+			columns[i] = col.Name
+		}
+		return GridSidebarFKPreviewLookupResultMsg{
+			Columns:  columns,
+			Row:      result.Rows[0],
+			CacheKey: cacheKey,
+			CacheVal: fkValue,
+			RefTable: refTable,
+			Token:    token,
+		}
+	}
+}
+
+func (m *Model) syncGridSidebarPreviewForCursor() tea.Cmd {
+	if m.conn == nil || m.grid == nil {
+		return nil
+	}
+	row := m.grid.SelectedRow()
+	if row == nil {
+		m.gridSidebarPreview.SetRow(nil, nil)
+		m.syncGridPreview()
+		return nil
+	}
+	columns := m.grid.Columns()
+	cursorCol := m.grid.CursorCol()
+
+	if cursorCol >= 0 && cursorCol < len(columns) {
+		fkInfo := m.findFKForColumn(columns[cursorCol])
+		if fkInfo != nil && cursorCol < len(row) && row[cursorCol] != nil {
+			fkValue := row[cursorCol]
+			key := gridSidebarFKPreviewCacheKey(m.prevSchema, m.grid.TableName(), fkInfo.Column)
+			if cached := m.lookupGridSidebarFKPreviewCache(key, fkValue); cached != nil {
+				m.gridSidebarPreview.SetFKRow(cached.columns, cached.row, fkInfo.RefTable)
+				if m.gridPreview != nil && m.gridPreview.IsFocused() {
+					m.gridPreview.SetRow(cached.columns, cached.row)
+				}
+				return nil
+			}
+			m.gridSidebarFKPreviewCursor++
+			return m.fetchGridSidebarFKPreview(fkInfo, fkValue, m.gridSidebarFKPreviewCursor)
+		}
+	}
+
+	m.gridSidebarPreview.SetRow(columns, row)
+	m.syncGridPreview()
+	return nil
+}
+
 func (m Model) executeQuery(sql string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -451,8 +571,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.grid.SetMetadata(constraints, foreignKeys, indexes)
 		if row := m.grid.SelectedRow(); row != nil {
-			m.preview.SetRow(m.grid.Columns(), row)
-			m.syncGridPreview()
+			cmd := m.syncGridSidebarPreviewForCursor()
+			return m, cmd
 		}
 		return m, nil
 
@@ -501,14 +621,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.loadTableDataWithSortAndWhere(msg.Schema, msg.Table, msg.OrderBy, msg.OrderDir, msg.Where)
 
 	case grid.GridCursorMovedMsg:
-		if row := m.grid.SelectedRow(); row != nil {
-			m.preview.SetRow(m.grid.Columns(), row)
-			m.syncGridPreview()
-		} else {
-			m.preview.SetRow(nil, nil)
-			m.syncGridPreview()
-		}
-		return m, nil
+		cmd := m.syncGridSidebarPreviewForCursor()
+		return m, cmd
 
 	case grid.ExportSelectedMsg:
 		return m, m.handleExport(msg)
@@ -524,14 +638,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case grid.GridTabChangeMsg:
-		if row := m.grid.SelectedRow(); row != nil {
-			m.preview.SetRow(m.grid.Columns(), row)
-			m.syncGridPreview()
-		} else {
-			m.preview.SetRow(nil, nil)
-			m.syncGridPreview()
-		}
-		return m, nil
+		cmd := m.syncGridSidebarPreviewForCursor()
+		return m, cmd
 
 	case grid.GridNavigateFKMsg:
 		if msg.RefTable == "" {
@@ -564,6 +672,74 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.router.FocusPane(FocusGrid)
 		return m, m.loadTableDataWithWhere(msg.RefSchema, msg.RefTable, combinedWhere)
+
+	case gridpreview.GridPreviewExpandFKMsg:
+		if msg.RefTable == "" || m.conn == nil {
+			return m, nil
+		}
+		refSchema := msg.RefSchema
+		if refSchema == "" {
+			refSchema = m.prevSchema
+		}
+		fkWhere := fmt.Sprintf("%q = %s", msg.RefColumn, formatFKValue(msg.Value))
+		return m, func() tea.Msg {
+			loader := postgres.NewSchemaLoader(m.conn)
+			opts := postgres.SelectOptions{
+				Schema: refSchema,
+				Where:  fkWhere,
+				Limit:  1,
+			}
+			result, err := loader.Select(context.Background(), msg.RefTable, opts)
+			if err != nil {
+				return gridpreview.GridPreviewExpandFKResultMsg{Err: err}
+			}
+			if result == nil || len(result.Rows) == 0 {
+				return gridpreview.GridPreviewExpandFKResultMsg{Err: fmt.Errorf("no row found")}
+			}
+			rowMap := make(map[string]interface{})
+			for i, col := range result.Columns {
+				if i < len(result.Rows[0]) {
+					rowMap[col.Name] = result.Rows[0][i]
+				}
+			}
+			refFKs, _ := loader.ListForeignKeys(context.Background(), refSchema, msg.RefTable)
+			return gridpreview.GridPreviewExpandFKResultMsg{
+				Column:      msg.Column,
+				Path:        msg.Path,
+				Row:         rowMap,
+				ForeignKeys: refFKs,
+			}
+		}
+
+	case gridpreview.GridPreviewExpandFKResultMsg:
+		if msg.Err != nil {
+			m.toast.ShowError(fmt.Sprintf("FK expand: %v", msg.Err))
+			return m, nil
+		}
+		if m.gridPreview != nil {
+			m.gridPreview.ExpandFK(msg.Column, msg.Path, msg.Row, msg.ForeignKeys)
+		}
+		return m, nil
+
+	case GridSidebarFKPreviewLookupResultMsg:
+		if msg.Token != m.gridSidebarFKPreviewCursor {
+			return m, nil
+		}
+		if msg.Err != nil {
+			if row := m.grid.SelectedRow(); row != nil {
+				m.gridSidebarPreview.SetRow(m.grid.Columns(), row)
+				m.syncGridPreview()
+			}
+			return m, nil
+		}
+		if msg.CacheKey != "" {
+			m.storeGridSidebarFKPreviewCache(msg.CacheKey, msg.CacheVal, msg.Columns, msg.Row)
+		}
+		m.gridSidebarPreview.SetFKRow(msg.Columns, msg.Row, msg.RefTable)
+		if m.gridPreview != nil && m.gridPreview.IsFocused() {
+			m.gridPreview.SetRow(msg.Columns, msg.Row)
+		}
+		return m, nil
 
 	case grid.GridGoBackMsg:
 		if len(m.navStack) == 0 {
@@ -662,17 +838,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else if mm.Button == tea.MouseWheelDown {
 					m.grid.Update(tea.KeyPressMsg{Code: 'j'})
 				}
-				if row := m.grid.SelectedRow(); row != nil {
-					m.preview.SetRow(m.grid.Columns(), row)
-					m.syncGridPreview()
+				cmd := m.syncGridSidebarPreviewForCursor()
+				if cmd != nil {
+					return m, cmd
 				}
 			}
-			if m.preview != nil {
+			if m.gridSidebarPreview != nil {
 				mm := msg.Mouse()
 				if mm.Button == tea.MouseWheelUp {
-					m.preview.ScrollUp()
+					m.gridSidebarPreview.ScrollUp()
 				} else if mm.Button == tea.MouseWheelDown {
-					m.preview.ScrollDown()
+					m.gridSidebarPreview.ScrollDown()
 				}
 			}
 		}
@@ -715,9 +891,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.grid.HandleClick(localX, localY)
-				if row := m.grid.SelectedRow(); row != nil {
-					m.preview.SetRow(m.grid.Columns(), row)
-					m.syncGridPreview()
+				cmd := m.syncGridSidebarPreviewForCursor()
+				if cmd != nil {
+					return m, cmd
 				}
 				if cmd := m.grid.HandleHeaderClick(localX); cmd != nil {
 					return m, cmd
@@ -815,6 +991,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil && m.gridPreview.IsJQMode() {
+				if cmd, handled := m.gridPreview.Update(msg); handled {
+					return m, cmd
+				}
+				return m, nil
+			}
+
 			if key == m.keybinds["global.quit"] {
 				if m.conn != nil {
 					m.conn.Close(context.Background())
@@ -867,7 +1050,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
-				if key == m.keybinds["grid.focus_preview"] {
+				if key == m.keybinds["grid.focus_preview"] || key == "esc" {
 					m.router.FocusPane(FocusGrid)
 					m.gridPreview.Blur()
 					return m, nil
@@ -927,11 +1110,11 @@ func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 				m.syncGridPreview()
 			}
 		}
-	case "grid-preview.scroll_up":
+	case "grid-preview.cursor_up":
 		if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
 			m.gridPreview.Update(tea.KeyPressMsg{Code: 'k'})
 		}
-	case "grid-preview.scroll_down":
+	case "grid-preview.cursor_down":
 		if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
 			m.gridPreview.Update(tea.KeyPressMsg{Code: 'j'})
 		}
@@ -1212,10 +1395,9 @@ func (m Model) View() tea.View {
 		content = m.renderMainView()
 	}
 
-	toastLines := m.toast.ViewLines()
-	for i := len(toastLines) - 1; i >= 0; i-- {
-		toastBox := m.styles.Border.Width(30).Render(toastLines[i])
-		content = overlayBottomRight(content, toastBox, m.width, m.height, i)
+	renderedToasts := m.toast.RenderedToasts()
+	for i := len(renderedToasts) - 1; i >= 0; i-- {
+		content = overlayBottomRight(content, renderedToasts[i], m.width, m.height, i)
 	}
 
 	if m.helpModal.IsVisible() {
@@ -1265,7 +1447,7 @@ func (m Model) renderMainView() string {
 		if showPreview {
 			gridW := m.width * 3 / 4
 			panes = append(panes, m.renderGrid(gridW, contentHeight))
-			panes = append(panes, m.renderPreview(m.width/4, contentHeight))
+			panes = append(panes, m.renderGridSidebarPreview(m.width/4, contentHeight))
 		} else {
 			panes = append(panes, m.renderGrid(m.width, contentHeight))
 		}
@@ -1350,14 +1532,14 @@ func (m Model) renderGrid(w, h int) string {
 		Render(m.grid.View())
 }
 
-func (m Model) renderPreview(w, h int) string {
-	m.preview.SetWidth(w)
-	m.preview.SetHeight(h)
+func (m Model) renderGridSidebarPreview(w, h int) string {
+	m.gridSidebarPreview.SetWidth(w)
+	m.gridSidebarPreview.SetHeight(h)
 
 	return m.styles.Border.
 		Width(w - 2).
 		Height(h - 2).
-		Render(m.preview.Render())
+		Render(m.gridSidebarPreview.Render())
 }
 
 func (m Model) renderGridPreview(w, h int) string {
@@ -1385,6 +1567,7 @@ func (m Model) syncGridPreview() {
 	if columns != nil && row != nil {
 		m.gridPreview.SetRow(columns, row)
 	}
+	m.gridPreview.SetForeignKeys(m.grid.ForeignKeys())
 }
 
 func (m Model) renderEditor(w, h int) string {

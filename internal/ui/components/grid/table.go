@@ -451,6 +451,10 @@ func (g *Grid) ScrollCol() int {
 	return g.scrollCol
 }
 
+func (g *Grid) ForeignKeys() []postgres.ForeignKeyInfo {
+	return g.foreignKeysData
+}
+
 func (g *Grid) GetResult() *postgres.QueryResult {
 	return g.data
 }

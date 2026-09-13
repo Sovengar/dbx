@@ -154,10 +154,11 @@ Focused via `Tab` in grid:
 
 | Key | Vim | Modern | Action |
 |-----|-----|--------|--------|
-| Scroll Up | `k` | `↑` | Scroll up |
-| Scroll Down | `j` | `↓` | Scroll down |
-| First | `g` | `Home` | Jump to top |
-| Last | `G` | `End` | Jump to bottom |
+| Cursor Up | `k` or `↑` | `↑` | Move cursor up |
+| Cursor Down | `j` or `↓` | `↓` | Move cursor down |
+| Expand FK | `Enter` | `Enter` | Expand foreign key object / Collapse |
+| First | `g` | `Home` | Jump to first line |
+| Last | `G` | `End` | Jump to last line |
 | Half Page Up | `Ctrl+U` | `PageUp` | Scroll up half page |
 | Half Page Down | `Ctrl+D` | `PageDown` | Scroll down half page |
 | Focus Explorer | `e` | `Ctrl+E` | Focus explorer pane |
@@ -239,7 +240,7 @@ The statusbar shows relevant keybinds based on current context:
 Enter edit · d delete · i insert · space select · y export · o FK nav · H go back · Tab preview
 
 [Grid Preview-focused]
-Tab back · j/k scroll · g/G first/last · e explorer
+Tab/Esc back · j/k navigate · Enter expand FK · g/G first/last · e explorer · / jq
 
 [Editor-focused]
 Ctrl+Enter execute · Ctrl+U clear · Ctrl+P/N history

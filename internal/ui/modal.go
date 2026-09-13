@@ -159,13 +159,15 @@ func (m *HelpModal) View() string {
 	lines = append(lines, "")
 
 	lines = append(lines, m.styles.Header.Render("Grid Preview"))
-	lines = append(lines, m.renderKeybind("grid-preview.scroll_up", "Scroll Up"))
-	lines = append(lines, m.renderKeybind("grid-preview.scroll_down", "Scroll Down"))
+	lines = append(lines, m.renderKeybind("grid-preview.cursor_up", "Navigate Up"))
+	lines = append(lines, m.renderKeybind("grid-preview.cursor_down", "Navigate Down"))
+	lines = append(lines, m.renderKeybind("grid-preview.expand", "Expand FK / Collapse"))
 	lines = append(lines, m.renderKeybind("grid-preview.first", "First Line"))
 	lines = append(lines, m.renderKeybind("grid-preview.last", "Last Line"))
 	lines = append(lines, m.renderKeybind("grid-preview.half_up", "Half Page Up"))
 	lines = append(lines, m.renderKeybind("grid-preview.half_down", "Half Page Down"))
 	lines = append(lines, m.renderKeybind("grid-preview.toggle_explorer", "Focus Explorer"))
+	lines = append(lines, m.renderKeybind("grid-preview.jq_filter", "JQ Filter"))
 	lines = append(lines, "")
 
 	lines = append(lines, m.styles.Header.Render("Editor"))

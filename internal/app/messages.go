@@ -59,6 +59,16 @@ type indexInfo struct {
 	Unique  bool
 }
 
+type GridSidebarFKPreviewLookupResultMsg struct {
+	Columns  []string
+	Row      []interface{}
+	CacheKey string
+	CacheVal interface{}
+	RefTable string
+	Token    int
+	Err      error
+}
+
 type NavigationEntry struct {
 	Schema    string
 	Table     string
