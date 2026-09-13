@@ -221,8 +221,8 @@ func (e *Explorer) View() string {
 
 	return border.
 		Width(e.width - 2).
-		Height(e.height - 2).
-		MaxHeight(e.height - 2).
+		Height(e.height).
+		MaxHeight(e.height).
 		Render(output)
 }
 
