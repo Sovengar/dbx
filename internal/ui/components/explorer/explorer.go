@@ -95,10 +95,17 @@ func (e *Explorer) Update(msg tea.Msg) (tea.Cmd, bool) {
 			}
 
 			if key == e.keybindings["explorer.toggle_columns"] {
-				node.ToggleExpand()
-				e.tree.flattenNodes()
-				if e.tree.cursor >= len(e.tree.filtered) {
-					e.tree.cursor = len(e.tree.filtered) - 1
+				if node.Parent != nil && node.Parent.Type == NodeSchema {
+					schemaNode := node.Parent
+					schemaNode.Expanded = false
+					e.tree.flattenNodes()
+					for i, n := range e.tree.filtered {
+						if n == schemaNode {
+							e.tree.cursor = i
+							break
+						}
+					}
+					e.tree.clampOffset()
 				}
 				return nil, true
 			}
@@ -205,6 +212,8 @@ func (e *Explorer) View() string {
 	content := e.tree.View()
 	s.WriteString(content)
 
+	output := s.String()
+
 	border := e.styles.Border
 	if e.focused {
 		border = e.styles.BorderActive
@@ -213,7 +222,8 @@ func (e *Explorer) View() string {
 	return border.
 		Width(e.width - 2).
 		Height(e.height - 2).
-		Render(s.String())
+		MaxHeight(e.height - 2).
+		Render(output)
 }
 
 func (e *Explorer) StartFilter() {

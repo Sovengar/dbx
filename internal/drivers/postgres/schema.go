@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -18,7 +19,26 @@ func NewSchemaLoader(conn *pgx.Conn) *SchemaLoader {
 	return &SchemaLoader{conn: conn}
 }
 
-func (s *SchemaLoader) LoadDatabase(ctx context.Context, dbName string) (*explorer.Node, error) {
+type TableDetail struct {
+	Name     string
+	Type     string
+	RowCount int
+	Columns  []ColumnInfo
+	Indexes  []IndexInfoFull
+	FKs      []ForeignKeyInfo
+}
+
+type SchemaDetail struct {
+	Name   string
+	Tables []TableDetail
+}
+
+type LoadDatabaseResult struct {
+	Root    *explorer.Node
+	Schemas []SchemaDetail
+}
+
+func (s *SchemaLoader) LoadDatabase(ctx context.Context, dbName string) (*LoadDatabaseResult, error) {
 	dbNode := explorer.NewNode(dbName, explorer.NodeDatabase, dbName)
 	dbNode.Expanded = true
 
@@ -26,6 +46,8 @@ func (s *SchemaLoader) LoadDatabase(ctx context.Context, dbName string) (*explor
 	if err != nil {
 		return nil, fmt.Errorf("failed to list schemas: %w", err)
 	}
+
+	var allSchemas []SchemaDetail
 
 	for _, schema := range schemas {
 		if schema == "pg_catalog" || schema == "information_schema" || schema == "pg_toast" {
@@ -44,6 +66,10 @@ func (s *SchemaLoader) LoadDatabase(ctx context.Context, dbName string) (*explor
 			continue
 		}
 
+		columnsByTable, _ := s.ListColumnsBySchema(ctx, schema)
+
+		sd := SchemaDetail{Name: schema}
+
 		for _, table := range tables {
 			tableNode := explorer.NewNode(
 				fmt.Sprintf("%s.%s.%s", dbName, schema, table.Name),
@@ -54,8 +80,14 @@ func (s *SchemaLoader) LoadDatabase(ctx context.Context, dbName string) (*explor
 			tableNode.Metadata["table_type"] = table.Type
 			tableNode.Metadata["schema"] = schema
 
-			columns, err := s.ListColumns(ctx, schema, table.Name)
-			if err == nil {
+			td := TableDetail{
+				Name:     table.Name,
+				Type:     table.Type,
+				RowCount: table.RowCount,
+			}
+
+			if columns, ok := columnsByTable[table.Name]; ok {
+				td.Columns = columns
 				for _, col := range columns {
 					colNode := explorer.NewNode(
 						fmt.Sprintf("%s.%s.%s.%s", dbName, schema, table.Name, col.Name),
@@ -69,13 +101,15 @@ func (s *SchemaLoader) LoadDatabase(ctx context.Context, dbName string) (*explor
 				}
 			}
 
+			sd.Tables = append(sd.Tables, td)
 			schemaNode.AddChild(tableNode)
 		}
 
+		allSchemas = append(allSchemas, sd)
 		dbNode.AddChild(schemaNode)
 	}
 
-	return dbNode, nil
+	return &LoadDatabaseResult{Root: dbNode, Schemas: allSchemas}, nil
 }
 
 func (s *SchemaLoader) ListSchemas(ctx context.Context) ([]string, error) {
@@ -167,6 +201,125 @@ type IndexInfo struct {
 	Columns string
 	Unique  bool
 	Def     string
+}
+
+func (s *SchemaLoader) ListColumnsBySchema(ctx context.Context, schema string) (map[string][]ColumnInfo, error) {
+	query := `
+		SELECT
+			table_name,
+			column_name,
+			data_type,
+			is_nullable,
+			column_default
+		FROM information_schema.columns
+		WHERE table_schema = $1
+		ORDER BY table_name, ordinal_position
+	`
+	rows, err := s.conn.Query(ctx, query, schema)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string][]ColumnInfo)
+	for rows.Next() {
+		var tableName, name, dataType, isNullable string
+		var def *string
+		if err := rows.Scan(&tableName, &name, &dataType, &isNullable, &def); err != nil {
+			return nil, err
+		}
+		result[tableName] = append(result[tableName], ColumnInfo{
+			Name:       name,
+			DataType:   dataType,
+			IsNullable: isNullable,
+			Default:    def,
+		})
+	}
+	return result, rows.Err()
+}
+
+func (s *SchemaLoader) ListIndexesFullBySchema(ctx context.Context, schema string) (map[string][]IndexInfoFull, error) {
+	query := `
+		SELECT
+			t.relname as table_name,
+			i.relname as index_name,
+			ix.indisunique as is_unique,
+			ix.indisprimary as is_primary,
+			array_agg(a.attname ORDER BY array_position(ix.indkey, a.attnum)) as columns
+		FROM pg_class t
+		JOIN pg_namespace ns ON ns.oid = t.relnamespace
+		JOIN pg_index ix ON ix.indrelid = t.oid
+		JOIN pg_class i ON i.oid = ix.indexrelid
+		JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
+		WHERE ns.nspname = $1 AND t.relkind = 'r'
+		GROUP BY t.relname, i.relname, ix.indisunique, ix.indisprimary
+		ORDER BY t.relname, i.relname
+	`
+	rows, err := s.conn.Query(ctx, query, schema)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string][]IndexInfoFull)
+	for rows.Next() {
+		var tableName, name string
+		var isUnique, isPrimary bool
+		var columns []string
+		if err := rows.Scan(&tableName, &name, &isUnique, &isPrimary, &columns); err != nil {
+			return nil, err
+		}
+		result[tableName] = append(result[tableName], IndexInfoFull{
+			Name:      name,
+			Columns:   columns,
+			IsUnique:  isUnique,
+			IsPrimary: isPrimary,
+		})
+	}
+	return result, rows.Err()
+}
+
+func (s *SchemaLoader) ListForeignKeysBySchema(ctx context.Context, schema string) (map[string][]ForeignKeyInfo, error) {
+	query := `
+		SELECT
+			tc.table_name,
+			tc.constraint_name,
+			kcu.column_name,
+			ccu.table_schema as ref_schema,
+			ccu.table_name as ref_table,
+			ccu.column_name as ref_column
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+			ON tc.constraint_name = kcu.constraint_name
+			AND tc.table_schema = kcu.table_schema
+		JOIN information_schema.constraint_column_usage ccu
+			ON tc.constraint_name = ccu.constraint_name
+			AND tc.table_schema = ccu.table_schema
+		WHERE tc.constraint_type = 'FOREIGN KEY'
+			AND tc.table_schema = $1
+		ORDER BY tc.table_name, tc.constraint_name
+	`
+	rows, err := s.conn.Query(ctx, query, schema)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string][]ForeignKeyInfo)
+	for rows.Next() {
+		var tableName, name, column, refSchema, refTable, refColumn string
+		if err := rows.Scan(&tableName, &name, &column, &refSchema, &refTable, &refColumn); err != nil {
+			return nil, err
+		}
+		result[tableName] = append(result[tableName], ForeignKeyInfo{
+			Name:      name,
+			Column:    column,
+			RefSchema: refSchema,
+			RefTable:  refTable,
+			RefColumn: refColumn,
+		})
+	}
+	return result, rows.Err()
 }
 
 func (s *SchemaLoader) ListColumns(ctx context.Context, schema, table string) ([]ColumnInfo, error) {
@@ -268,6 +421,46 @@ func (s *SchemaLoader) ListForeignKeys(ctx context.Context, schema, table string
 	return fks, rows.Err()
 }
 
+type IndexInfoFull struct {
+	Name      string
+	Columns   []string
+	IsUnique  bool
+	IsPrimary bool
+}
+
+func (s *SchemaLoader) ListIndexesFull(ctx context.Context, schema, table string) ([]IndexInfoFull, error) {
+	query := `
+		SELECT
+			i.relname as index_name,
+			ix.indisunique as is_unique,
+			ix.indisprimary as is_primary,
+			array_agg(a.attname ORDER BY array_position(ix.indkey, a.attnum)) as columns
+		FROM pg_class t
+		JOIN pg_namespace ns ON ns.oid = t.relnamespace
+		JOIN pg_index ix ON ix.indrelid = t.oid
+		JOIN pg_class i ON i.oid = ix.indexrelid
+		JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
+		WHERE ns.nspname = $1 AND t.relname = $2
+		GROUP BY i.relname, ix.indisunique, ix.indisprimary
+		ORDER BY i.relname
+	`
+	rows, err := s.conn.Query(ctx, query, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var indexes []IndexInfoFull
+	for rows.Next() {
+		var idx IndexInfoFull
+		if err := rows.Scan(&idx.Name, &idx.IsUnique, &idx.IsPrimary, &idx.Columns); err != nil {
+			return nil, err
+		}
+		indexes = append(indexes, idx)
+	}
+	return indexes, rows.Err()
+}
+
 func (s *SchemaLoader) ListIndexes(ctx context.Context, schema, table string) ([]IndexInfo, error) {
 	query := `
 		SELECT indexname, indexdef
@@ -298,4 +491,96 @@ func (s *SchemaLoader) ListIndexes(ctx context.Context, schema, table string) ([
 	}
 
 	return indexes, rows.Err()
+}
+
+type TableOverview struct {
+	TableName       string
+	TableType       string
+	Comment         *string
+	TotalSize       string
+	TableSize       string
+	IndexSize       string
+	LiveTuples      int64
+	DeadTuples      int64
+	LastVacuum      *time.Time
+	LastAutovacuum  *time.Time
+	LastAnalyze     *time.Time
+	LastAutoanalyze *time.Time
+	ColumnCount     int
+	ConstraintCount int
+	IndexCount      int
+	FKCount         int
+}
+
+func (s *SchemaLoader) GetTableOverview(ctx context.Context, schema, table string) (*TableOverview, error) {
+	overview := &TableOverview{
+		TableName: table,
+	}
+
+	// Table type and comment
+	err := s.conn.QueryRow(ctx, `
+		SELECT
+			t.table_type,
+			obj_description(c.oid) as comment
+		FROM information_schema.tables t
+		LEFT JOIN pg_class c ON c.relname = t.table_name
+			AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = t.table_schema)
+		WHERE t.table_schema = $1 AND t.table_name = $2
+	`, schema, table).Scan(&overview.TableType, &overview.Comment)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get table type: %w", err)
+	}
+
+	// Sizes
+	err = s.conn.QueryRow(ctx, `
+		SELECT
+			pg_size_pretty(pg_total_relation_size(c.oid)),
+			pg_size_pretty(pg_table_size(c.oid)),
+			pg_size_pretty(pg_indexes_size(c.oid))
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = $1 AND c.relname = $2
+	`, schema, table).Scan(&overview.TotalSize, &overview.TableSize, &overview.IndexSize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get table sizes: %w", err)
+	}
+
+	// Stats
+	err = s.conn.QueryRow(ctx, `
+		SELECT
+			COALESCE(n_live_tup, 0),
+			COALESCE(n_dead_tup, 0),
+			last_vacuum,
+			last_autovacuum,
+			last_analyze,
+			last_autoanalyze
+		FROM pg_stat_user_tables
+		WHERE schemaname = $1 AND relname = $2
+	`, schema, table).Scan(
+		&overview.LiveTuples, &overview.DeadTuples,
+		&overview.LastVacuum, &overview.LastAutovacuum,
+		&overview.LastAnalyze, &overview.LastAutoanalyze,
+	)
+	if err != nil {
+		// Stats not available (e.g. system tables), continue with defaults
+		overview.LiveTuples = -1
+	}
+
+	// Counts
+	err = s.conn.QueryRow(ctx, `
+		SELECT
+			(SELECT count(*) FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2),
+			(SELECT count(*) FROM information_schema.table_constraints WHERE table_schema = $1 AND table_name = $2),
+			(SELECT count(*) FROM pg_indexes WHERE schemaname = $1 AND tablename = $2),
+			(SELECT count(*) FROM information_schema.table_constraints tc
+				WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = $1 AND tc.table_name = $2)
+	`, schema, table).Scan(
+		&overview.ColumnCount, &overview.ConstraintCount,
+		&overview.IndexCount, &overview.FKCount,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get counts: %w", err)
+	}
+
+	return overview, nil
 }

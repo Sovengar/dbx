@@ -163,11 +163,7 @@ mode = "system"
 # background = "#1e1e2e"
 
 # ─── Keybindings ───────────────────────────────────────────────
-[keybindings]
-# Modo por defecto: "vim", "modern", "emacs"
-mode = "vim"
-
-# Custom keybinds (sobreescriben defaults del modo)
+# Custom keybind overrides (each action maps to a single key string)
 [keybindings.custom]
 # Global
 "global.ask" = "a"

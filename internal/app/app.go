@@ -16,12 +16,14 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	aiContext "github.com/buble/dbx/internal/ai/context"
 	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/buble/dbx/internal/theme"
 	"github.com/buble/dbx/internal/ui"
 	"github.com/buble/dbx/internal/ui/components/editor"
 	"github.com/buble/dbx/internal/ui/components/explorer"
+	"github.com/buble/dbx/internal/ui/components/explorerpreview"
 	"github.com/buble/dbx/internal/ui/components/grid"
 	"github.com/buble/dbx/internal/ui/components/gridpreview"
 	"github.com/buble/dbx/internal/ui/components/palette"
@@ -50,6 +52,7 @@ type Model struct {
 	editor          *editor.SQLEditor
 	gridSidebarPreview *gridsidebarpreview.Preview
 	gridPreview     *gridpreview.GridPreview
+	explorerPreview *explorerpreview.ExplorerPreview
 	router          *Router
 	keybindRegistry *config.KeybindRegistry
 	keybinds        map[string]string
@@ -72,6 +75,8 @@ type Model struct {
 	prevTable       string
 	gridSidebarFKPreviewCache  map[string][]gridSidebarFKPreviewCacheEntry
 	gridSidebarFKPreviewCursor int
+	schemaDetail               []postgres.SchemaDetail
+	dbName                     string
 }
 
 func NewModel(cfg *config.Config) Model {
@@ -91,6 +96,7 @@ func NewModel(cfg *config.Config) Model {
 		editor:          editor.NewSQLEditor(t.Styles()),
 		gridSidebarPreview: gridsidebarpreview.New(t.Styles()),
 		gridPreview:     gridpreview.New(t.Styles(), kbs),
+		explorerPreview: explorerpreview.New(t.Styles(), kbs),
 		router:          NewRouter(kbs),
 		keybindRegistry: kbr,
 		keybinds:        kbs,
@@ -127,6 +133,14 @@ type toastTickMsg struct{}
 func tickToast() tea.Cmd {
 	return tea.Every(time.Second, func(t time.Time) tea.Msg {
 		return toastTickMsg{}
+	})
+}
+
+type spinnerTickMsg struct{}
+
+func tickSpinner() tea.Cmd {
+	return tea.Every(time.Millisecond*100, func(t time.Time) tea.Msg {
+		return spinnerTickMsg{}
 	})
 }
 
@@ -170,13 +184,149 @@ func (m Model) loadSchema(conn *pgx.Conn, project config.FoundProject) tea.Cmd {
 			dbName = dbName[:idx]
 		}
 
-		rootNode, err := loader.LoadDatabase(ctx, dbName)
+		result, err := loader.LoadDatabase(ctx, dbName)
 		if err != nil {
 			return schemaLoadedMsg{err: fmt.Errorf("failed to load schema: %w", err)}
 		}
 
-		return schemaLoadedMsg{root: rootNode}
+		return schemaLoadedMsg{root: result.Root, dbName: dbName, schemaDetail: result.Schemas}
 	}
+}
+
+func (m Model) loadAutocompleteData() tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		loader := postgres.NewSchemaLoader(m.conn)
+
+		indexesBySchema := make(map[string]map[string][]postgres.IndexInfoFull)
+		fksBySchema := make(map[string]map[string][]postgres.ForeignKeyInfo)
+
+		for _, sd := range m.schemaDetail {
+			idx, _ := loader.ListIndexesFullBySchema(ctx, sd.Name)
+			fks, _ := loader.ListForeignKeysBySchema(ctx, sd.Name)
+			indexesBySchema[sd.Name] = idx
+			fksBySchema[sd.Name] = fks
+		}
+
+		export := buildSchemaExportFull(m.dbName, m.schemaDetail, indexesBySchema, fksBySchema)
+		return autocompleteDataLoadedMsg{schemaExport: export}
+	}
+}
+
+type autocompleteDataLoadedMsg struct {
+	schemaExport *aiContext.SchemaExport
+}
+
+func buildSchemaExport(dbName string, schemas []postgres.SchemaDetail) *aiContext.SchemaExport {
+	export := &aiContext.SchemaExport{Database: dbName}
+
+	for _, sd := range schemas {
+		si := aiContext.SchemaInfo{Name: sd.Name}
+
+		for _, td := range sd.Tables {
+			ti := aiContext.TableInfo{
+				Name:     td.Name,
+				Type:     td.Type,
+				RowCount: int64(td.RowCount),
+			}
+
+			for _, c := range td.Columns {
+				ti.Columns = append(ti.Columns, aiContext.ColumnInfo{
+					Name:         c.Name,
+					DataType:     c.DataType,
+					IsNullable:   c.IsNullable == "YES",
+					DefaultValue: c.Default,
+				})
+			}
+
+			for _, idx := range td.Indexes {
+				ti.Indexes = append(ti.Indexes, aiContext.IndexInfo{
+					Name:      idx.Name,
+					Columns:   idx.Columns,
+					IsUnique:  idx.IsUnique,
+					IsPrimary: idx.IsPrimary,
+				})
+			}
+
+			for _, fk := range td.FKs {
+				ti.FKs = append(ti.FKs, aiContext.FKInfo{
+					Name:       fk.Name,
+					Columns:    fk.Column,
+					RefSchema:  fk.RefSchema,
+					RefTable:   fk.RefTable,
+					RefColumns: fk.RefColumn,
+				})
+			}
+
+			si.Tables = append(si.Tables, ti)
+		}
+
+		export.Schemas = append(export.Schemas, si)
+	}
+
+	return export
+}
+
+func buildSchemaExportFull(
+	dbName string,
+	schemas []postgres.SchemaDetail,
+	indexesBySchema map[string]map[string][]postgres.IndexInfoFull,
+	fksBySchema map[string]map[string][]postgres.ForeignKeyInfo,
+) *aiContext.SchemaExport {
+	export := &aiContext.SchemaExport{Database: dbName}
+
+	for _, sd := range schemas {
+		si := aiContext.SchemaInfo{Name: sd.Name}
+
+		idxMap := indexesBySchema[sd.Name]
+		fksMap := fksBySchema[sd.Name]
+
+		for _, td := range sd.Tables {
+			ti := aiContext.TableInfo{
+				Name:     td.Name,
+				Type:     td.Type,
+				RowCount: int64(td.RowCount),
+			}
+
+			for _, c := range td.Columns {
+				ti.Columns = append(ti.Columns, aiContext.ColumnInfo{
+					Name:         c.Name,
+					DataType:     c.DataType,
+					IsNullable:   c.IsNullable == "YES",
+					DefaultValue: c.Default,
+				})
+			}
+
+			if idxMap != nil {
+				for _, idx := range idxMap[td.Name] {
+					ti.Indexes = append(ti.Indexes, aiContext.IndexInfo{
+						Name:      idx.Name,
+						Columns:   idx.Columns,
+						IsUnique:  idx.IsUnique,
+						IsPrimary: idx.IsPrimary,
+					})
+				}
+			}
+
+			if fksMap != nil {
+				for _, fk := range fksMap[td.Name] {
+					ti.FKs = append(ti.FKs, aiContext.FKInfo{
+						Name:       fk.Name,
+						Columns:    fk.Column,
+						RefSchema:  fk.RefSchema,
+						RefTable:   fk.RefTable,
+						RefColumns: fk.RefColumn,
+					})
+				}
+			}
+
+			si.Tables = append(si.Tables, ti)
+		}
+
+		export.Schemas = append(export.Schemas, si)
+	}
+
+	return export
 }
 
 func (m Model) isDDL(sql string) bool {
@@ -191,8 +341,10 @@ func (m Model) isDDL(sql string) bool {
 }
 
 type schemaLoadedMsg struct {
-	root *explorer.Node
-	err  error
+	root         *explorer.Node
+	dbName       string
+	schemaDetail []postgres.SchemaDetail
+	err          error
 }
 
 type tableSelectedMsg struct {
@@ -228,12 +380,18 @@ func (m Model) loadMetadata(schema, table string) tea.Cmd {
 			return metadataLoadedMsg{err: err}
 		}
 
+		overview, err := loader.GetTableOverview(ctx, schema, table)
+		if err != nil {
+			overview = nil
+		}
+
 		return metadataLoadedMsg{
 			schema:      schema,
 			table:       table,
 			constraints: toConstraintInfo(constraints),
 			foreignKeys: toForeignKeyInfo(foreignKeys),
 			indexes:     toIndexInfo(indexes),
+			overview:    overview,
 		}
 	}
 }
@@ -260,6 +418,48 @@ func toIndexInfo(data []postgres.IndexInfo) []indexInfo {
 		result[i] = indexInfo{Name: idx.Name, Columns: idx.Columns, Unique: idx.Unique}
 	}
 	return result
+}
+
+func (m Model) loadExplorerPreviewData(schema, table string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		loader := postgres.NewSchemaLoader(m.conn)
+
+		columns, err := loader.ListColumns(ctx, schema, table)
+		if err != nil {
+			columns = nil
+		}
+
+		constraints, err := loader.ListConstraints(ctx, schema, table)
+		if err != nil {
+			constraints = nil
+		}
+
+		foreignKeys, err := loader.ListForeignKeys(ctx, schema, table)
+		if err != nil {
+			foreignKeys = nil
+		}
+
+		indexes, err := loader.ListIndexes(ctx, schema, table)
+		if err != nil {
+			indexes = nil
+		}
+
+		overview, err := loader.GetTableOverview(ctx, schema, table)
+		if err != nil {
+			overview = nil
+		}
+
+		return explorerPreviewDataMsg{
+			schema:      schema,
+			table:       table,
+			columns:     columns,
+			constraints: constraints,
+			foreignKeys: foreignKeys,
+			indexes:     indexes,
+			overview:    overview,
+		}
+	}
 }
 
 type queryExecutedMsg struct {
@@ -453,7 +653,7 @@ func (m Model) executeQuery(sql string) tea.Cmd {
 		result, err := loader.ExecuteRaw(ctx, sql)
 
 		if err != nil {
-			return queryExecutedMsg{err: fmt.Errorf("query failed: %w", err), sql: sql}
+			return queryExecutedMsg{err: err, sql: sql}
 		}
 
 		return queryExecutedMsg{result: result, sql: sql}
@@ -482,6 +682,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toastTickMsg:
 		m.toast.Update()
 		return m, tickToast()
+
+	case spinnerTickMsg:
+		if m.statusbar != nil {
+			m.statusbar.TickSpinner()
+		}
+		return m, tickSpinner()
 
 	case projectsScannedMsg:
 		if len(msg.projects) == 0 {
@@ -514,6 +720,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.state = StateError
 			m.err = msg.err
+			m.statusbar.SetActiveSpinner(false)
 			m.toast.ShowError(fmt.Sprintf("Schema load failed: %v", msg.err))
 			return m, nil
 		}
@@ -523,8 +730,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.explorer.SetNodes([]*explorer.Node{msg.root})
 		m.grid.SetWidth(m.width * 2 / 3)
 		m.grid.SetHeight(m.height - 4)
+		m.schemaDetail = msg.schemaDetail
+		m.dbName = msg.dbName
 		m.state = StateMain
 		m.toast.ShowSuccess("Schema loaded")
+		m.statusbar.SetActiveSpinner(true)
+		return m, tea.Batch(m.loadAutocompleteData(), tickSpinner())
+
+	case autocompleteDataLoadedMsg:
+		m.statusbar.SetActiveSpinner(false)
+		if msg.schemaExport != nil {
+			m.editor.SetSchema(msg.schemaExport)
+			m.statusbar.SetAutocompleteReady(true)
+			m.toast.ShowSuccess("Autocomplete ready")
+		}
 		return m, nil
 
 	case tableSelectedMsg:
@@ -544,6 +763,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.grid.SetData(msg.result, msg.schema, msg.table)
 		m.prevSchema = msg.schema
 		m.prevTable = msg.table
+		m.explorerPreview.SetData(msg.schema, msg.table, nil, nil, nil, nil, nil)
 		m.statusbar.SetTable(msg.schema, msg.table, msg.result.Count)
 		m.statusbar.SetFilter(msg.where)
 		m.router.FocusPane(FocusGrid)
@@ -570,10 +790,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			indexes[i] = postgres.IndexInfo{Name: idx.Name, Columns: idx.Columns, Unique: idx.Unique}
 		}
 		m.grid.SetMetadata(constraints, foreignKeys, indexes)
+		var gridColumns []postgres.ColumnInfo
+		if gridData := m.grid.Data(); gridData != nil {
+			gridColumns = gridData.Columns
+		}
+		m.explorerPreview.SetData(msg.schema, msg.table, gridColumns, constraints, foreignKeys, indexes, msg.overview)
 		if row := m.grid.SelectedRow(); row != nil {
 			cmd := m.syncGridSidebarPreviewForCursor()
 			return m, cmd
 		}
+		return m, nil
+
+	case explorerPreviewDataMsg:
+		m.explorerPreview.SetData(msg.schema, msg.table, msg.columns, msg.constraints, msg.foreignKeys, msg.indexes, msg.overview)
 		return m, nil
 
 	case grid.GridCommitPendingMsg:
@@ -766,6 +995,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toast.ShowError(fmt.Sprintf("Query failed: %v", msg.err))
 			return m, nil
 		}
+		m.editorOpen = false
+		m.editor.Blur()
+		m.statusbar.SetEditorOpen(false)
 		m.grid.SetData(msg.result, "", "query")
 		m.editor.PushHistory(msg.sql)
 		m.statusbar.SetTable("", "query", msg.result.Count)
@@ -935,6 +1167,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if key == "esc" {
 					m.editorOpen = false
 					m.editor.Blur()
+					m.statusbar.SetEditorOpen(false)
 					return m, nil
 				}
 
@@ -1015,6 +1248,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.gridPreview.Blur()
 					return m, nil
 				}
+				if m.router.Focus() == FocusExplorerPreview && m.explorerPreview != nil {
+					m.router.FocusPane(FocusGrid)
+					m.explorerPreview.Blur()
+					return m, nil
+				}
 				m.router.CycleFocus()
 				return m, nil
 			}
@@ -1061,7 +1299,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if m.router.Focus() == FocusExplorer && m.explorer != nil {
+				if key == "tab" {
+					if selected := m.explorer.Selected(); selected != nil && selected.Type == explorer.NodeTable {
+						schema := ""
+						if s, ok := selected.Metadata["schema"].(string); ok {
+							schema = s
+						}
+						m.router.FocusPane(FocusExplorerPreview)
+						m.explorerPreview.Focus()
+						return m, m.loadExplorerPreviewData(schema, selected.Name)
+					}
+				}
 				if cmd, handled := m.explorer.Update(msg); handled {
+					return m, cmd
+				}
+			}
+
+			if m.router.Focus() == FocusExplorerPreview && m.explorerPreview != nil {
+				if key == "tab" || key == "esc" {
+					m.router.FocusPane(FocusExplorer)
+					m.explorerPreview.Blur()
+					return m, nil
+				}
+				if cmd, handled := m.explorerPreview.Update(msg); handled {
 					return m, cmd
 				}
 			}
@@ -1433,14 +1693,31 @@ func (m Model) renderMainView() string {
 
 	m.statusbar.SetFocus(m.router.Context())
 	statusLine := m.statusbar.RenderStatus()
+	breadcrumbs := m.renderBreadcrumbs()
 
-	contentHeight := m.height - 4
+	countLines := func(s string) int {
+		if s == "" {
+			return 0
+		}
+		lines := strings.Split(s, "\n")
+		if lines[len(lines)-1] == "" {
+			return len(lines) - 1
+		}
+		return len(lines)
+	}
+	statusBarLines := 4 + countLines(statusLine) + countLines(breadcrumbs)
+	contentHeight := m.height - statusBarLines
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
 	hasTableData := m.grid.HasData()
 	showPreview := hasTableData && m.grid.ActiveTab() == 0 && m.width >= 100
 
 	var panes []string
 	if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
 		panes = append(panes, m.renderGridPreview(m.width, contentHeight))
+	} else if m.router.Focus() == FocusExplorerPreview && m.explorerPreview != nil {
+		panes = append(panes, m.renderExplorerPreview(m.width, contentHeight))
 	} else if m.editorOpen || m.router.Focus() == FocusExplorer {
 		panes = append(panes, m.renderExplorer(m.width, contentHeight))
 	} else {
@@ -1453,7 +1730,7 @@ func (m Model) renderMainView() string {
 		}
 	}
 
-	content := statusLine + "\n" + m.renderBreadcrumbs() + lipgloss.JoinHorizontal(lipgloss.Top, panes...)
+	content := statusLine + "\n" + breadcrumbs + lipgloss.JoinHorizontal(lipgloss.Top, panes...)
 
 	if m.editorOpen {
 		modalW := m.width * 6 / 10
@@ -1496,19 +1773,34 @@ func (m Model) renderExplorer(w, h int) string {
 		return m.styles.Border.
 			Width(w - 2).
 			Height(h - 2).
+			MaxHeight(h - 2).
 			Render(m.styles.TextMuted.Render("Explorer"))
 	}
 
 	m.explorer.SetWidth(w)
 	m.explorer.SetHeight(h)
 
-	if m.router.Focus() == FocusExplorer {
+	if m.router.Focus() == FocusExplorer || m.router.Focus() == FocusExplorerPreview {
 		m.explorer.Focus()
 	} else {
 		m.explorer.Blur()
 	}
 
 	return m.explorer.View()
+}
+
+func (m Model) renderExplorerPreview(w, h int) string {
+	m.explorerPreview.SetWidth(w)
+	m.explorerPreview.SetHeight(h)
+
+	border := m.styles.BorderActive
+	content := m.explorerPreview.View()
+
+	return border.
+		Width(w - 2).
+		Height(h - 2).
+		MaxHeight(h - 2).
+		Render(content)
 }
 
 func (m Model) renderGrid(w, h int) string {
@@ -1529,6 +1821,7 @@ func (m Model) renderGrid(w, h int) string {
 	return border.
 		Width(w - 2).
 		Height(h - 2).
+		MaxHeight(h - 2).
 		Render(m.grid.View())
 }
 
@@ -1539,6 +1832,7 @@ func (m Model) renderGridSidebarPreview(w, h int) string {
 	return m.styles.Border.
 		Width(w - 2).
 		Height(h - 2).
+		MaxHeight(h - 2).
 		Render(m.gridSidebarPreview.Render())
 }
 
@@ -1555,6 +1849,7 @@ func (m Model) renderGridPreview(w, h int) string {
 	return border.
 		Width(w - 2).
 		Height(h - 2).
+		MaxHeight(h - 2).
 		Render(content)
 }
 
@@ -1571,17 +1866,21 @@ func (m Model) syncGridPreview() {
 }
 
 func (m Model) renderEditor(w, h int) string {
+	popupLines := 0
+	if m.editor.AutocompleteVisible() {
+		popupLines = 10
+	}
+
 	m.editor.SetWidth(w - 4)
-	m.editor.SetHeight(h - 6)
+	m.editor.SetHeight(h - 6 - popupLines)
 	m.editor.Focus()
 
 	title := m.styles.Header.Render("SQL Editor")
-	hint := m.styles.Help.Render("Ctrl+Enter: execute · Ctrl+U: clear · Ctrl+P/N: history · Esc: close")
+	hint := m.styles.Help.Render("Tab autocomplete · Ctrl+Enter execute · Ctrl+U clear · Ctrl+P/N history · Esc close")
 	content := m.editor.View()
 
 	return m.styles.BorderActive.
 		Width(w - 2).
-		Height(h - 2).
 		Render(title + "\n" + content + "\n" + hint)
 }
 

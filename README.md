@@ -26,7 +26,6 @@ dbx is a terminal UI for databases designed for both humans and AI agents.
 | Go back (`H`)            | Return to previous table in navigation history, restores cursor and filter                       |
 | Find column (`f`)        | Fuzzy search to jump to a column by name                                                          |
 | Pagination               | `n`/`p` next/prev page, `N`/`P` first/last page, `F1`–`F9` jump, digit keys for multi-digit pages |
-| Tabs                     | `1`–`5` switch between Records, Columns, Constraints, Foreign Keys, Indexes                       |
 | Preview                  | Right panel shows selected row as highlighted JSON, autoclosed when width < 100                   |
 | Preview FK cell          | If the cursor is on a FK cell, the preview shows the referenced row instead of the current one     |
 | JQ Filter (`/`)          | Filter/navigate JSON in preview with jq expressions, autocomplete, persistent history             |
@@ -59,20 +58,51 @@ No database changes occur until you commit with `Ctrl+S`.
 | Action                   | Behavior                                             |
 | ------------------------ | ---------------------------------------------------- |
 | Open table (`enter`)     | Loads table data into grid                           |
-| Toggle columns (`space`) | Expand/collapse column list under a table            |
+| Preview table (`Tab`)    | Opens explorer-preview with table details (full-screen) |
+| Collapse schema (`space`) | Collapse the schema of the selected table           |
 | Filter (`/`)             | Fuzzy filter across all table names                  |
 | New table (`n`)          | Opens editor pre-filled with `CREATE TABLE` template |
 | Drop table (`d`)         | Opens editor pre-filled with `DROP TABLE`            |
 | View DDL (`v`)           | Opens editor with `pg_get_tabledef` query            |
+
+### Explorer Preview
+
+Full-screen table detail view with tabbed panels. Open with `Tab` from explorer on any table.
+
+| Action                   | Behavior                                             |
+| ------------------------ | ---------------------------------------------------- |
+| Overview (`1`)           | Dashboard: sizes, row stats, vacuum status, counts   |
+| Columns (`2`)            | Column names, types, nullable, defaults              |
+| Constraints (`3`)        | PKs, UNIQUEs, CHECKs with column list               |
+| Foreign Keys (`4`)       | FK references with column and target table           |
+| Indexes (`5`)            | Index names, uniqueness, definitions                 |
+| ERE Diagram (`6`)        | Entity-Relationship diagram (placeholder)            |
+| Back (`Tab`/`Esc`)       | Return to explorer                                   |
 
 ### SQL Editor
 
 | Action                      | Behavior                                                         |
 | --------------------------- | ---------------------------------------------------------------- |
 | Execute (`ctrl+enter`)      | Runs SQL against database, results shown in grid                 |
+| Autocomplete (real-time)    | Context-aware popup as you type: keywords, schemas, tables, columns |
+| Navigate suggestions (`↑`/`↓`) | Move through completion list                               |
+| Accept suggestion (`Tab`/`Enter`) | Insert selected completion into editor                    |
+| Close suggestions (`Esc`)   | Dismiss autocomplete popup                                       |
 | History (`ctrl+p`/`ctrl+n`) | Navigate previous/next executed queries                          |
 | Syntax highlighting         | Keywords, strings, numbers, comments, functions, operators       |
 | Auto-refresh                | Schema reloads after DDL statements (CREATE/DROP/ALTER/TRUNCATE) |
+
+#### Autocomplete Context
+
+The editor detects what you're typing and shows relevant suggestions:
+
+| Context | Shows |
+|---------|-------|
+| After `FROM`/`JOIN`/`INTO`/`UPDATE` | Schemas + tables |
+| `schema_name.` | Tables in that schema |
+| `schema_name.table_name.` | Columns of that table |
+| `SELECT`/`WHERE`/`AND`/`ON`/`SET` | Columns |
+| Default (typing a keyword) | SQL keywords + functions |
 
 ### AI (NL → SQL)
 
@@ -88,8 +118,9 @@ No database changes occur until you commit with `Ctrl+S`.
 | --------------------- | -------------------------------------------------------------------- |
 | Top bar               | Shows active pane, `schema.table`, row count, WHERE filter, breadcrumbs |
 | Bottom bar            | Global keybinds (always visible) + contextual keybinds per pane      |
-| Focus cycling (`e`)  | Toggle Explorer pane                                                  |
-| Grid Preview (`Tab`) | Focus preview pane (full-width), Tab to return                        |
+| Focus cycling (`e`)  | Toggle Explorer ↔ Grid                                               |
+| Grid Preview (`Tab`) | Focus row preview (from grid), Tab/Esc to return                     |
+| Explorer Preview (`Tab`) | Focus table details (from explorer), full-screen                  |
 | JQ Filter (`/`)     | Filter JSON in preview with jq expressions, autocomplete, history    |
 | Command palette (`:`) | Fuzzy search for any command (refresh, export, execute, focus, etc.) |
 | Help (`?`)            | Overlay showing all keybinds, scrollable                             |
@@ -154,7 +185,9 @@ dbx ask "show me all active users"
 | `j`/`k` | Navigate down/up      |
 | `g`/`G` | First/last node        |
 | `Enter`/`l` | Open table data   |
+| `Tab` | Open explorer-preview  |
 | `Backspace`/`h` | Collapse / parent |
+| `Space` | Collapse schema      |
 | `/` | Filter tables              |
 | `n` | New table                  |
 | `d` | Drop table                 |
@@ -172,8 +205,7 @@ dbx ask "show me all active users"
 | `n`/`p` or `]`/`[` | Next/prev page |
 | `P`/`N` | First/last page       |
 | `F1`-`F9` | Go to page          |
-| `1`-`5` | Tabs (records/columns/constraints/FK/indexes) |
-| `Tab` | Focus preview pane         |
+| `Tab` | Focus row preview         |
 | `enter` | Enter EDIT mode          |
 | `d` | Delete row                |
 | `i` | Insert row                |
@@ -200,7 +232,7 @@ dbx ask "show me all active users"
 
 | Key | Action                     |
 | --- | -------------------------- |
-| `Tab` | Focus preview (from grid) |
+| `Tab` | Focus row preview (from grid) |
 | `Esc` | Back to grid              |
 | `j`/`k` or `↑`/`↓` | Navigate down/up (cursor) |
 | `Enter` | Expand FK / Collapse     |
@@ -211,13 +243,27 @@ dbx ask "show me all active users"
 | `Ctrl+P`/`Ctrl+N` | JQ history prev/next |
 | `Ctrl+Space` | Toggle autocomplete  |
 
+### Explorer Preview
+
+| Key | Action                     |
+| --- | -------------------------- |
+| `Tab`/`Esc` | Back to explorer     |
+| `1` | Overview tab                |
+| `2` | Columns tab                 |
+| `3` | Constraints tab             |
+| `4` | Foreign Keys tab            |
+| `5` | Indexes tab                 |
+| `6` | ERE Diagram tab (placeholder) |
+
 ### Editor
 
 | Key | Action                     |
 | --- | -------------------------- |
 | `Ctrl+Enter` | Execute query     |
 | `Ctrl+U` | Clear editor          |
-| `Tab` | Autocomplete              |
+| `Tab`/`Enter` | Accept autocomplete suggestion |
+| `↑`/`↓` | Navigate suggestions  |
+| `Esc` | Close autocomplete / close editor |
 | `Ctrl+P`/`Ctrl+N` | History prev/next |
 
 Press `?` anywhere to see all keybinds.
@@ -244,8 +290,8 @@ dsn = "postgres://staging.example.com/mydb"
 [theme]
 mode = "system"
 
-[keybindings]
-mode = "vim"  # or "modern" or "emacs"
+[keybindings.custom]
+"global.ask" = "ctrl+a"
 
 [ai]
 provider = "anthropic"

@@ -104,7 +104,6 @@ type Grid struct {
 	cells       *CellRenderer
 	pager       *Pager
 	mouse       *MouseHandler
-	tabBar      *TabBar
 	exportPicker *ExportPicker
 	data        *postgres.QueryResult
 	columns     []string
@@ -127,22 +126,22 @@ type Grid struct {
 	whereFilter  *WhereFilter
 	whereClause  string
 	pendingDigits string
-	activeTab    int // 0=Records, 1=Columns, 2=Constraints, 3=FK, 4=Indexes
 	keybinds     map[string]string
 	constraintsData []postgres.ConstraintInfo
 	foreignKeysData []postgres.ForeignKeyInfo
 	indexesData     []postgres.IndexInfo
 	keyIcons        map[int]KeyIcon
-	selectedRows    map[int]bool // tracks selected rows for multi-select
-	deletePending   bool         // awaiting second 'd' to confirm bulk delete
-	pendingRows     [][]interface{} // pending insert rows (not in DB yet)
-	inserting       bool            // true = has pending rows not yet committed to DB
-	pendingRow      int             // index in pendingRows
-	pendingCol      int             // active column in pendingRow
+	selectedRows    map[int]bool
+	deletePending   bool
+	pendingRows     [][]interface{}
+	inserting       bool
+	pendingRow      int
+	pendingCol      int
 	pendingUpdates  []PendingUpdate
 	pendingDeletes  []PendingDelete
-	discardPending  bool // awaiting second 'D' to confirm discard
-	refreshPending  bool // awaiting second 'r' to confirm refresh
+	discardPending  bool
+	refreshPending  bool
+	activeTab       int
 }
 
 func New(styles *theme.Styles, pageSize int, keybinds map[string]string) *Grid {
@@ -151,7 +150,6 @@ func New(styles *theme.Styles, pageSize int, keybinds map[string]string) *Grid {
 		header:   NewHeader(styles),
 		cells:    NewCellRenderer(styles),
 		pager:    NewPager(styles, pageSize),
-		tabBar:   NewTabBar(styles, keybinds),
 		exportPicker: NewExportPicker(styles),
 		keybinds: keybinds,
 		widths:   make([]int, 0),
@@ -184,7 +182,6 @@ func (g *Grid) SetData(result *postgres.QueryResult, schema, table string) {
 	g.pager.SetPendingCount(0)
 	if isNewTable {
 		g.header.ClearSort()
-		g.activeTab = 0
 		g.constraintsData = nil
 		g.foreignKeysData = nil
 		g.indexesData = nil
@@ -283,6 +280,10 @@ func (g *Grid) ActiveTab() int {
 
 func (g *Grid) Columns() []string {
 	return g.columns
+}
+
+func (g *Grid) Data() *postgres.QueryResult {
+	return g.data
 }
 
 func (g *Grid) calculateWidths() {
@@ -534,28 +535,6 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		return nil, true
-	}
-
-	// Tab keybindings — must be before 0-9 digit handler
-	if key == g.keybinds["grid.tab_records"] {
-		g.setActiveTab(0)
-		return func() tea.Msg { return GridTabChangeMsg{Tab: 0} }, true
-	}
-	if key == g.keybinds["grid.tab_columns"] {
-		g.setActiveTab(1)
-		return func() tea.Msg { return GridTabChangeMsg{Tab: 1} }, true
-	}
-	if key == g.keybinds["grid.tab_constraints"] {
-		g.setActiveTab(2)
-		return func() tea.Msg { return GridTabChangeMsg{Tab: 2} }, true
-	}
-	if key == g.keybinds["grid.tab_foreign_keys"] {
-		g.setActiveTab(3)
-		return func() tea.Msg { return GridTabChangeMsg{Tab: 3} }, true
-	}
-	if key == g.keybinds["grid.tab_indexes"] {
-		g.setActiveTab(4)
-		return func() tea.Msg { return GridTabChangeMsg{Tab: 4} }, true
 	}
 
 	// Goto page F1-F9 — must be before 0-9 digit handler
@@ -1474,94 +1453,13 @@ func (g *Grid) halfPageDown() {
 }
 
 func (g *Grid) setActiveTab(tab int) {
-	g.activeTab = tab
-	g.tabBar.SetActive(tab)
 	g.cursorRow = 0
 	g.cursorCol = 0
 	g.scrollCol = 0
 }
 
 func (g *Grid) cursorMovedCmd() tea.Cmd {
-	if g.activeTab != 0 {
-		return nil
-	}
 	return func() tea.Msg { return GridCursorMovedMsg{} }
-}
-
-func (g *Grid) renderColumnsView() string {
-	if g.data == nil || len(g.data.Columns) == 0 {
-		return g.styles.Text.Render("  No columns loaded")
-	}
-
-	title := g.styles.Header.Render(fmt.Sprintf("Columns — %s", g.tableName))
-	header := g.styles.Header.Render(fmt.Sprintf("%-30s %-20s %-10s %s", strings.ToUpper("Name"), strings.ToUpper("Type"), strings.ToUpper("Nullable"), strings.ToUpper("Default")))
-
-	var rows []string
-	for _, col := range g.data.Columns {
-		defaultVal := "NULL"
-		if col.Default != nil {
-			defaultVal = *col.Default
-		}
-		line := g.styles.Text.Render(fmt.Sprintf("%-30s %-20s %-10s %s", col.Name, col.DataType, col.IsNullable, defaultVal))
-		rows = append(rows, line)
-	}
-
-	return title + "\n" + header + "\n" + strings.Join(rows, "\n")
-}
-
-func (g *Grid) renderConstraintsView() string {
-	if len(g.constraintsData) == 0 {
-		return g.styles.Text.Render("  No constraints loaded")
-	}
-
-	title := g.styles.Header.Render(fmt.Sprintf("Constraints — %s", g.tableName))
-	header := g.styles.Header.Render(fmt.Sprintf("%-30s %-20s %s", strings.ToUpper("Name"), strings.ToUpper("Type"), strings.ToUpper("Columns")))
-
-	var rows []string
-	for _, c := range g.constraintsData {
-		line := g.styles.Text.Render(fmt.Sprintf("%-30s %-20s %s", c.Name, c.Type, c.Columns))
-		rows = append(rows, line)
-	}
-
-	return title + "\n" + header + "\n" + strings.Join(rows, "\n")
-}
-
-func (g *Grid) renderForeignKeysView() string {
-	if len(g.foreignKeysData) == 0 {
-		return g.styles.Text.Render("  No foreign keys loaded")
-	}
-
-	title := g.styles.Header.Render(fmt.Sprintf("Foreign Keys — %s", g.tableName))
-	header := g.styles.Header.Render(fmt.Sprintf("%-30s %-20s %-20s %s", strings.ToUpper("Name"), strings.ToUpper("Column"), strings.ToUpper("Ref Table"), strings.ToUpper("Ref Column")))
-
-	var rows []string
-	for _, fk := range g.foreignKeysData {
-		line := g.styles.Text.Render(fmt.Sprintf("%-30s %-20s %-20s %s", fk.Name, fk.Column, fk.RefTable, fk.RefColumn))
-		rows = append(rows, line)
-	}
-
-	return title + "\n" + header + "\n" + strings.Join(rows, "\n")
-}
-
-func (g *Grid) renderIndexesView() string {
-	if len(g.indexesData) == 0 {
-		return g.styles.Text.Render("  No indexes loaded")
-	}
-
-	title := g.styles.Header.Render(fmt.Sprintf("Indexes — %s", g.tableName))
-	header := g.styles.Header.Render(fmt.Sprintf("%-30s %-10s %s", strings.ToUpper("Name"), strings.ToUpper("Unique"), strings.ToUpper("Definition")))
-
-	var rows []string
-	for _, idx := range g.indexesData {
-		unique := "NO"
-		if idx.Unique {
-			unique = "YES"
-		}
-		line := g.styles.Text.Render(fmt.Sprintf("%-30s %-10s %s", idx.Name, unique, idx.Def))
-		rows = append(rows, line)
-	}
-
-	return title + "\n" + header + "\n" + strings.Join(rows, "\n")
 }
 
 func (g *Grid) toggleSort() tea.Cmd {
@@ -1617,23 +1515,7 @@ func (g *Grid) View() string {
 		return g.styles.Text.Render("  No data loaded")
 	}
 
-	tabBar := g.tabBar.Render()
-
-	var content string
-	switch g.activeTab {
-	case 0: // Records
-		content = g.renderRecordsView()
-	case 1: // Columns
-		content = g.renderColumnsView()
-	case 2: // Constraints
-		content = g.renderConstraintsView()
-	case 3: // Foreign Keys
-		content = g.renderForeignKeysView()
-	case 4: // Indexes
-		content = g.renderIndexesView()
-	}
-
-	return tabBar + "\n" + content
+	return g.renderRecordsView()
 }
 
 func (g *Grid) renderRecordsView() string {
@@ -1733,6 +1615,10 @@ func (g *Grid) renderRecordsView() string {
 		}
 		rows = append(rows, rendered)
 		visibleCount++
+	}
+
+	for i := visibleCount - 1; i < contentHeight; i++ {
+		rows = append(rows, "")
 	}
 
 	pager := g.pager.Render()

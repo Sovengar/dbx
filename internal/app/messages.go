@@ -1,5 +1,7 @@
 package app
 
+import "github.com/buble/dbx/internal/drivers/postgres"
+
 type FocusPane int
 
 const (
@@ -7,6 +9,7 @@ const (
 	FocusGrid
 	FocusEditor
 	FocusGridPreview
+	FocusExplorerPreview
 )
 
 func (f FocusPane) String() string {
@@ -19,6 +22,8 @@ func (f FocusPane) String() string {
 		return "editor"
 	case FocusGridPreview:
 		return "grid-preview"
+	case FocusExplorerPreview:
+		return "explorer-preview"
 	default:
 		return "unknown"
 	}
@@ -36,6 +41,7 @@ type metadataLoadedMsg struct {
 	constraints []constraintInfo
 	foreignKeys []foreignKeyInfo
 	indexes     []indexInfo
+	overview    *postgres.TableOverview
 	err         error
 }
 
@@ -76,4 +82,14 @@ type NavigationEntry struct {
 	CursorRow int
 	CursorCol int
 	ScrollCol int
+}
+
+type explorerPreviewDataMsg struct {
+	schema      string
+	table       string
+	columns     []postgres.ColumnInfo
+	constraints []postgres.ConstraintInfo
+	foreignKeys []postgres.ForeignKeyInfo
+	indexes     []postgres.IndexInfo
+	overview    *postgres.TableOverview
 }

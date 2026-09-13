@@ -164,10 +164,10 @@ func DetectSystemTheme() *Theme {
 
 ## Keybind System
 
-Keybinds are loaded from config with fallback to mode defaults:
+Keybinds are loaded from built-in defaults with optional config overrides:
 
 ```
-1. Load mode defaults (vim/modern/emacs)
+1. Load default bindings (each action has one or more default keys)
 2. Apply custom overrides from config
 3. Build registry
 4. Match incoming key events
@@ -176,14 +176,17 @@ Keybinds are loaded from config with fallback to mode defaults:
 ```go
 type KeybindRegistry struct {
     bindings map[string][]string
-    mode     string
 }
 
-func (k *KeybindRegistry) Match(msg tea.KeyPressMsg, context string) string {
-    key := msg.String()
-    for action, keys := range k.bindings {
-        if contains(keys, key) && k.inContext(action, context) {
-            return action
+func (r *KeybindRegistry) Match(key, context string) string {
+    for action, keys := range r.bindings {
+        if !inContext(action, context) {
+            continue
+        }
+        for _, k := range keys {
+            if k == key {
+                return action
+            }
         }
     }
     return ""

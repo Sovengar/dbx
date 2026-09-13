@@ -88,7 +88,7 @@ func (s *SchemaLoader) CountRows(ctx context.Context, schema, table string) (int
 func ExecuteQuery(ctx context.Context, conn *pgx.Conn, sql string) (*QueryResult, error) {
 	rows, err := conn.Query(ctx, sql)
 	if err != nil {
-		return nil, fmt.Errorf("query failed: %w", err)
+		return nil, err
 	}
 	defer rows.Close()
 

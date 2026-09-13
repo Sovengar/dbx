@@ -39,12 +39,7 @@ mode = "system"
 # info = "#89dceb"
 
 # ─── Keybindings ───────────────────────────────────────────────
-[keybindings]
-# Mode: "vim", "modern", "emacs"
-mode = "vim"
-
-# Custom keybind overrides
-# Format: "action.name" = "key" or ["key1", "key2"]
+# Custom keybind overrides (each action maps to a single key string)
 [keybindings.custom]
 # Global
 # "global.quit" = "q"
@@ -378,7 +373,6 @@ All config values can be overridden with env vars:
 # General
 DBX_CONFIG=/path/to/config.toml
 DBX_THEME=dark
-DBX_KEYBINDINGS_MODE=modern
 
 # Connection
 DBX_CONNECTION_NAME=local-dev

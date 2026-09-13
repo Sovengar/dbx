@@ -4,33 +4,54 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/buble/dbx/internal/ai/context"
 	"github.com/buble/dbx/internal/theme"
 )
 
 type SQLEditor struct {
-	styles     *theme.Styles
-	lines      []string
-	cursorRow  int
-	cursorCol  int
-	width      int
-	height     int
-	focused    bool
-	history    []string
-	historyIdx int
-modified   bool
+	styles       *theme.Styles
+	lines        []string
+	cursorRow    int
+	cursorCol    int
+	width        int
+	height       int
+	focused      bool
+	history      []string
+	historyIdx   int
+	modified     bool
+	autocomplete *AutocompleteState
+	schema       *context.SchemaExport
+	schemaLoaded bool
 }
 
 func NewSQLEditor(styles *theme.Styles) *SQLEditor {
 	return &SQLEditor{
-		styles: styles,
-		lines:  []string{""},
+		styles:       styles,
+		lines:        []string{""},
+		autocomplete: NewAutocompleteState(),
 	}
+}
+
+func (e *SQLEditor) SetSchema(export *context.SchemaExport) {
+	schemas := 0
+	if export != nil {
+		schemas = len(export.Schemas)
+	}
+	autocompleteDebugLog("SetSchema: export=%v schemas=%d", export != nil, schemas)
+	e.schema = export
+	e.schemaLoaded = true
+	e.autocomplete = NewAutocompleteState()
+	e.autocomplete.LoadSchema(export)
+	e.autocomplete.SetKeywords(sqlKeywords, sqlFunctions)
+	autocompleteDebugLog("SetSchema: done, allItems=%d", len(e.autocomplete.all))
 }
 
 func (e *SQLEditor) SetWidth(w int)  { e.width = w }
 func (e *SQLEditor) SetHeight(h int) { e.height = h }
 func (e *SQLEditor) Focus()          { e.focused = true }
 func (e *SQLEditor) Blur()           { e.focused = false }
+func (e *SQLEditor) AutocompleteVisible() bool { return e.autocomplete.Visible() }
+func (e *SQLEditor) AutocompleteReady() bool   { return e.schemaLoaded }
 
 func (e *SQLEditor) Content() string {
 	return strings.Join(e.lines, "\n")
@@ -76,19 +97,34 @@ func (e *SQLEditor) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case "ctrl+r":
 		return nil, false // handled by parent
 
+	case "ctrl+space":
+		e.triggerAutocomplete()
+		return nil, true
+
 	case "ctrl+u":
 		e.Clear()
+		e.autocomplete.Cancel()
 		return nil, true
 
 	case "ctrl+p":
+		if e.autocomplete.Visible() {
+			e.autocomplete.Cancel()
+		}
 		e.historyPrev()
 		return nil, true
 
 	case "ctrl+n":
+		if e.autocomplete.Visible() {
+			e.autocomplete.Cancel()
+		}
 		e.historyNext()
 		return nil, true
 
 	case "up":
+		if e.autocomplete.Visible() {
+			e.autocomplete.SelectPrev()
+			return nil, true
+		}
 		if e.cursorRow > 0 {
 			e.cursorRow--
 			e.clampCol()
@@ -96,6 +132,10 @@ func (e *SQLEditor) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 
 	case "down":
+		if e.autocomplete.Visible() {
+			e.autocomplete.SelectNext()
+			return nil, true
+		}
 		if e.cursorRow < len(e.lines)-1 {
 			e.cursorRow++
 			e.clampCol()
@@ -103,44 +143,73 @@ func (e *SQLEditor) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 
 	case "left":
+		e.autocomplete.Cancel()
 		e.moveLeft()
 		return nil, true
 
 	case "right":
+		e.autocomplete.Cancel()
 		e.moveRight()
 		return nil, true
 
 	case "home", "0":
+		e.autocomplete.Cancel()
 		e.cursorCol = 0
 		return nil, true
 
 	case "end", "$":
+		e.autocomplete.Cancel()
 		e.cursorCol = len(e.lines[e.cursorRow])
 		return nil, true
 
 	case "enter":
+		if e.autocomplete.Visible() {
+			item := e.autocomplete.SelectedItem()
+			if item != nil {
+				e.acceptCompletion(item)
+			}
+			return nil, true
+		}
 		e.insertNewline()
+		return nil, true
+
+	case "tab":
+		if e.autocomplete.Visible() {
+			item := e.autocomplete.SelectedItem()
+			if item != nil {
+				e.acceptCompletion(item)
+			}
+			return nil, true
+		}
+		e.insertText("    ")
 		return nil, true
 
 	case "backspace":
 		e.deleteBackward()
+		e.updateAutocompleteAfterEdit()
 		return nil, true
 
 	case "delete":
 		e.deleteForward()
+		e.updateAutocompleteAfterEdit()
 		return nil, true
 
 	case "space":
 		e.insertText(" ")
+		e.updateAutocompleteAfterEdit()
 		return nil, true
 
-	case "tab":
-		e.insertText("    ")
-		return nil, true
+	case "esc":
+		if e.autocomplete.Visible() {
+			e.autocomplete.Cancel()
+			return nil, true
+		}
+		return nil, false // handled by parent
 
 	default:
 		if len(msg.Text) > 0 {
 			e.insertText(msg.Text)
+			e.updateAutocompleteAfterEdit()
 			return nil, true
 		}
 	}
@@ -216,6 +285,50 @@ func (e *SQLEditor) clampCol() {
 	if e.cursorCol > max {
 		e.cursorCol = max
 	}
+}
+
+func (e *SQLEditor) triggerAutocomplete() {
+	if !e.schemaLoaded {
+		return
+	}
+	line := e.lines[e.cursorRow]
+	ctx := e.autocomplete.detectContext(line, e.cursorCol)
+	e.autocomplete.UpdateContext(ctx)
+}
+
+func (e *SQLEditor) updateAutocompleteAfterEdit() {
+	if !e.schemaLoaded {
+		autocompleteDebugLog("updateAutocompleteAfterEdit: schema not loaded, skipping")
+		return
+	}
+	line := e.lines[e.cursorRow]
+	autocompleteDebugLog("updateAutocompleteAfterEdit: line=%q cursorCol=%d", line, e.cursorCol)
+	ctx := e.autocomplete.detectContext(line, e.cursorCol)
+	e.autocomplete.UpdateContext(ctx)
+}
+
+func (e *SQLEditor) acceptCompletion(item *CompletionItem) {
+	line := e.lines[e.cursorRow]
+	before := line[:e.cursorCol]
+	after := line[e.cursorCol:]
+
+	wordStart := len(before)
+	for wordStart > 0 {
+		ch := before[wordStart-1]
+		if ch == ' ' || ch == '\t' || ch == '\n' || ch == ',' || ch == '(' || ch == ')' || ch == ';' {
+			break
+		}
+		if ch == '.' {
+			break
+		}
+		wordStart--
+	}
+
+	completion := item.Label()
+	e.lines[e.cursorRow] = before[:wordStart] + completion + after
+	e.cursorCol = wordStart + len(completion)
+	e.autocomplete.Cancel()
+	e.modified = true
 }
 
 func (e *SQLEditor) historyPrev() {
@@ -298,5 +411,15 @@ func (e *SQLEditor) View() string {
 		lines = lines[:e.height]
 	}
 
-	return strings.Join(lines, "\n")
+	editorContent := strings.Join(lines, "\n")
+
+	if e.focused && e.autocomplete.Visible() {
+		popup := e.autocomplete.Render(e.styles, e.width)
+		if popup != "" {
+			popupLines := strings.Split(popup, "\n")
+			editorContent = editorContent + "\n" + strings.Join(popupLines, "\n")
+		}
+	}
+
+	return editorContent
 }

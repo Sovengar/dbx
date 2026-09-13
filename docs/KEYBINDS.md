@@ -2,65 +2,75 @@
 
 ## Overview
 
-dbx supports three keybinding modes:
-- **Vim** (default): h/j/k/l navigation, modal editing
-- **Modern**: Arrow keys, intuitive shortcuts
-- **Emacs**: Ctrl-based shortcuts
+dbx uses an **action-based keybind system**. Each action has one or more default keys, all overridable via config.
 
-All modes share the same **action-based keybinds** where the primary key is the first letter of the action.
+Actions follow the **first-letter rule** — the primary key is the first letter of the action name.
 
 ## Action Naming Convention
 
-Keybinds follow the **first-letter rule**:
-- `a` = **a**sk (NL→SQL)
-- `d` = **d**elete
-- `e` = **e**xplorer toggle
-- `x` = e**x**port
-- `f` = **f**ilter
-- `g` = **g**o to (first/last)
-- `i` = **i**nsert
-- `n` = **n**ext
-- `o` = **o**pen FK reference
-- `p` = **p**revious
-- `q` = **q**uit
-- `r` = **r**efresh
-- `s` = **s**ort
-- `v` = **v**iew DDL
-- `y` = **y**ank (copy)
+| Key | Action |
+|-----|--------|
+| `a` | **a**sk (NL→SQL) |
+| `d` | **d**elete |
+| `e` | **e**xplorer toggle |
+| `x` | e**x**port |
+| `f` | **f**ilter |
+| `g` | **g**o to (first/last) |
+| `i` | **i**nsert |
+| `n` | **n**ext page |
+| `o` | **o**pen FK reference |
+| `p` | **p**revious page |
+| `q` | **q**uit |
+| `r` | **r**efresh |
+| `s` | **s**ort |
+| `v` | **v**iew DDL |
+| `y` | **y**ank (copy) |
 
-## Global Keybinds
+## Default Keys
 
-These work everywhere:
+Each action has a primary key and may have alternatives. All are overridable.
 
-| Key | Action | Description |
-|-----|--------|-------------|
-| `q` | Quit | Exit dbx |
-| `Ctrl+C` | Quit | Force quit |
-| `?` | Help | Show keybinds modal |
-| `:` | Palette | Open command palette |
-| `e` | Toggle Explorer | Toggle Explorer pane |
-| `E` | Toggle Editor | Toggle Editor pane |
-| `a` | Ask AI | Open NL→SQL prompt |
-| `x` | Export | Export current data |
+### Global
 
-## Explorer Pane
+| Action | Default Keys | Description |
+|--------|-------------|-------------|
+| `global.quit` | `q`, `Ctrl+C` | Exit dbx |
+| `global.help` | `?` | Show keybinds modal |
+| `global.palette` | `:` | Open command palette |
+| `global.cycle_focus` | `e` | Toggle Explorer pane |
+| `global.focus_editor` | `E` | Toggle Editor pane |
+| `global.ask` | `a` | Open NL→SQL prompt |
+| `global.export` | `x` | Export current data |
+
+### Explorer Pane
 
 Schema tree navigation:
 
-| Key | Vim | Modern | Action |
-|-----|-----|--------|--------|
-| Move Down | `j` | `↓` | Select next node |
-| Move Up | `k` | `↑` | Select previous node |
-| Expand | `l` | `→` | Expand node |
-| Collapse | `h` | `←` | Collapse / go to parent |
-| Open/Load | `Enter` | `Enter` | Load table data |
-| First | `g` | `Home` | Jump to first node |
-| Last | `G` | `End` | Jump to last node |
-| Filter | `/` | `Ctrl+F` | Filter tables |
-| New Table | `n` | `Ctrl+N` | Create new table |
-| Drop | `d` | `Delete` | Drop selected table |
-| View DDL | `v` | `Ctrl+V` | View table DDL |
-| Refresh | `r` | `F5` | Refresh tree |
+| Action | Default Keys | Description |
+|--------|-------------|-------------|
+| `explorer.down` | `j`, `↓` | Select next node |
+| `explorer.up` | `k`, `↑` | Select previous node |
+| `explorer.expand` | `Enter`, `l`, `→` | Expand node |
+| `explorer.collapse` | `Backspace`, `h`, `←` | Collapse / go to parent |
+| `explorer.toggle_columns` | `Space` | Collapse schema of selected table |
+| `explorer.first` | `g` | Jump to first node |
+| `explorer.last` | `G` | Jump to last node |
+| `explorer.filter` | `/` | Filter tables |
+| `explorer.new` | `n` | Create new table |
+| `explorer.drop` | `d` | Drop selected table |
+| `explorer.view_ddl` | `v` | View table DDL |
+| `explorer.refresh` | `r` | Refresh tree |
+
+#### Explorer Preview Tabs
+
+| Action | Default Keys |
+|--------|-------------|
+| `explorer.tab_overview` | `1` |
+| `explorer.tab_columns` | `2` |
+| `explorer.tab_constraints` | `3` |
+| `explorer.tab_foreign_keys` | `4` |
+| `explorer.tab_indexes` | `5` |
+| `explorer.tab_ere` | `6` |
 
 ### Mouse Actions
 
@@ -73,42 +83,37 @@ Schema tree navigation:
 
 ## Grid Pane
 
-### NORMAL mode
+### Default Keys
 
-| Key | Vim | Modern | Action |
-|-----|-----|--------|--------|
-| Row Down | `j` | `↓` | Next row |
-| Row Up | `k` | `↑` | Previous row |
-| Col Right | `l` | `→` | Next column |
-| Col Left | `h` | `←` | Previous column |
-| First Row | `gg` | `Home` | Jump to first row |
-| Last Row | `G` | `End` | Jump to last row |
-| Half Page Up | `Ctrl+U` | `PageUp` | Scroll up half page |
-| Half Page Down | `Ctrl+D` | `PageDown` | Scroll down half page |
-| Next Page | `n` or `]` | `Ctrl+Right` | Next page |
-| Prev Page | `p` or `[` | `Ctrl+Left` | Previous page |
-| First Page | `P` | `Shift+Left` | Jump to first page |
-| Last Page | `N` | `Shift+Right` | Jump to last page |
-| Go to Page | `F1`-`F9` | `F1`-`F9` | Jump to page 1-9 |
-| Tab Records | `1` | `1` | Show records tab |
-| Tab Columns | `2` | `2` | Show columns tab |
-| Tab Constraints | `3` | `3` | Show constraints tab |
-| Tab Foreign Keys | `4` | `4` | Show foreign keys tab |
-| Tab Indexes | `5` | `5` | Show indexes tab |
-| Focus Preview | `Tab` | `Tab` | Focus preview pane |
-| Edit Cell | `enter` | `Enter` | Enter EDIT mode |
-| Delete Row | `d` | `Delete` | Delete row |
-| Insert Row | `i` | `Ctrl+I` | Insert new row |
-| Select Row | `space` | `Space` | Toggle row selection |
-| Sort | `s` | `Ctrl+S` | Cycle sort (asc/desc/none) |
-| Filter | `/` | `Ctrl+F` | Filter by column (WHERE) |
-| Find Column | `f` | `Ctrl+F` | Jump to column by name |
-| Yank | `y` | `Ctrl+C` | Export (SQL/JSON/CSV) |
-| Open FK | `o` | `Ctrl+O` | Open referenced table |
-| Go Back | `H` | `Shift+Backspace` | Return to previous table |
-| Refresh | `r` | `F5` | Refresh data (re-execute query) |
-| Commit | `Ctrl+S` | `Ctrl+S` | Commit pending inserts |
-| Discard | `D` | `Shift+D` | Discard all draft changes |
+| Action | Default Keys | Description |
+|--------|-------------|-------------|
+| `grid.down` | `j`, `↓` | Next row |
+| `grid.up` | `k`, `↑` | Previous row |
+| `grid.left` | `h`, `←` | Previous column |
+| `grid.right` | `l`, `→` | Next column |
+| `grid.first` | `g` | Jump to first row |
+| `grid.last` | `G` | Jump to last row |
+| `grid.half_up` | `Ctrl+U` | Scroll up half page |
+| `grid.half_down` | `Ctrl+D` | Scroll down half page |
+| `grid.next_page` | `n`, `]` | Next page |
+| `grid.prev_page` | `p`, `[` | Previous page |
+| `grid.first_page` | `P` | Jump to first page |
+| `grid.last_page` | `N` | Jump to last page |
+| `grid.goto_page_1`–`grid.goto_page_9` | `F1`–`F9` | Jump to page 1-9 |
+| `grid.focus_preview` | `Tab` | Focus row preview pane |
+| `grid.edit_cell` | `Enter` | Enter EDIT mode |
+| `grid.delete_row` | `d` | Delete row |
+| `grid.insert_row` | `i` | Insert new row |
+| `grid.select_row` | `Space` | Toggle row selection |
+| `grid.sort` | `s` | Cycle sort (asc/desc/none) |
+| `grid.filter` | `/` | Filter by column (WHERE) |
+| `grid.find_and_jump_to_column` | `f` | Jump to column by name |
+| `grid.yank` | `y` | Export (SQL/JSON/CSV) |
+| `grid.navigate_fk` | `o` | Open referenced table |
+| `grid.go_back` | `H` | Return to previous table |
+| `grid.refresh` | `r` | Refresh data (re-execute query) |
+| `grid.commit_pending` | `Ctrl+S` | Commit pending inserts |
+| `grid.discard_all` | `D` | Discard all draft changes |
 
 ### EDIT mode
 
@@ -152,28 +157,43 @@ Schema tree navigation:
 
 Focused via `Tab` in grid:
 
-| Key | Vim | Modern | Action |
-|-----|-----|--------|--------|
-| Cursor Up | `k` or `↑` | `↑` | Move cursor up |
-| Cursor Down | `j` or `↓` | `↓` | Move cursor down |
-| Expand FK | `Enter` | `Enter` | Expand foreign key object / Collapse |
-| First | `g` | `Home` | Jump to first line |
-| Last | `G` | `End` | Jump to last line |
-| Half Page Up | `Ctrl+U` | `PageUp` | Scroll up half page |
-| Half Page Down | `Ctrl+D` | `PageDown` | Scroll down half page |
-| Focus Explorer | `e` | `Ctrl+E` | Focus explorer pane |
+| Action | Default Keys | Description |
+|--------|-------------|-------------|
+| `grid-preview.cursor_up` | `k`, `↑` | Move cursor up |
+| `grid-preview.cursor_down` | `j`, `↓` | Move cursor down |
+| `grid-preview.expand` | `Enter` | Expand foreign key object / Collapse |
+| `grid-preview.first` | `g` | Jump to first line |
+| `grid-preview.last` | `G` | Jump to last line |
+| `grid-preview.half_up` | `Ctrl+U` | Scroll up half page |
+| `grid-preview.half_down` | `Ctrl+D` | Scroll down half page |
+| `grid-preview.toggle_explorer` | `e` | Focus explorer pane |
+| `grid-preview.jq_filter` | `/` | Filter with jq |
+
+## Explorer Preview Pane
+
+Full-screen table detail view, focused via `Tab` in explorer:
+
+| Key | Action |
+|-----|--------|
+| `Tab`/`Esc` | Back to explorer |
+| `1` | Overview tab (sizes, stats, vacuum, counts) |
+| `2` | Columns tab |
+| `3` | Constraints tab |
+| `4` | Foreign Keys tab |
+| `5` | Indexes tab |
+| `6` | ERE Diagram tab (placeholder) |
 
 ## Editor Pane
 
 SQL editor:
 
-| Key | Vim | Modern | Action |
-|-----|-----|--------|--------|
-| Execute | `Ctrl+Enter` | `F5` | Run query |
-| Clear | `Ctrl+U` | `Ctrl+Delete` | Clear editor |
-| History Prev | `Ctrl+P` | `Alt+Up` | Previous query |
-| History Next | `Ctrl+N` | `Alt+Down` | Next query |
-| Complete | `Tab` | `Tab` | Autocomplete |
+| Action | Default Keys | Description |
+|--------|-------------|-------------|
+| `editor.execute` | `Ctrl+Enter`, `Ctrl+R` | Run query |
+| `editor.clear` | `Ctrl+U` | Clear editor |
+| `editor.autocomplete` | `Tab` | Accept autocomplete suggestion |
+| `editor.history_prev` | `Ctrl+P` | Previous query |
+| `editor.history_next` | `Ctrl+N` | Next query |
 
 ### Mouse Actions
 
@@ -200,8 +220,8 @@ Fuzzy command finder:
 |-----|--------|
 | `Enter` | Execute selected |
 | `Esc` | Close palette |
-| `↑/↓` | Navigate results |
-| `j/k` | Navigate results (vim) |
+| `↑`/`↓` | Navigate results |
+| `j`/`k` | Navigate results |
 
 ## Help Modal
 
@@ -209,22 +229,27 @@ Keybinds reference:
 
 | Key | Action |
 |-----|--------|
-| `j/k` or `↑/↓` | Scroll |
-| `g/G` | First/Last |
+| `j`/`k` or `↑`/`↓` | Scroll |
+| `g`/`G` | First/Last |
 | `Esc` or `?` | Close |
 
 ## Custom Keybinds
 
-Edit `~/.config/dbx/config.toml`:
+Override any default in `~/.config/dbx/config.toml`:
 
 ```toml
-[keybindings]
-mode = "vim"  # or "modern" or "emacs"
-
 [keybindings.custom]
-# Override any action
+# Each action maps to a single key string
 "global.ask" = "ctrl+a"
-"grid.edit_cell" = ["enter", "i", "ctrl+e"]
+"grid.edit_cell" = "enter"
+"grid.down" = "ctrl+j"
+```
+
+Unset a binding by mapping to empty string:
+
+```toml
+[keybindings.custom]
+"grid.discard_all" = ""
 ```
 
 ## Context-Sensitive Display
@@ -233,31 +258,18 @@ The statusbar shows relevant keybinds based on current context:
 
 ```
 [Explorer-focused]
-/ filter · n new · d drop · v DDL · r refresh · Enter Open table data · Space View columns
+/ filter · n new · d drop · v DDL · Enter Open table data · Space Collapse schema · Tab Preview
 
 [Grid-focused]
-1-5 tabs · / filter · n/p N/P page · F1-9 goto · s sort · f find column · r refresh
-Enter edit · d delete · i insert · space select · y export · o FK nav · H go back · Tab preview
+/ filter · n/p N/P page · F1-9 goto · s sort · f find column
+Enter edit · d delete · i insert · space select · y export · o FK nav · H go back
 
 [Grid Preview-focused]
 Tab/Esc back · j/k navigate · Enter expand FK · g/G first/last · e explorer · / jq
 
+[Explorer Preview-focused]
+1-6 tabs · Tab/Esc back to explorer
+
 [Editor-focused]
 Ctrl+Enter execute · Ctrl+U clear · Ctrl+P/N history
 ```
-
-## Default Mode: Vim
-
-If no mode is specified, Vim mode is used. Vim mode includes:
-
-- **Normal mode**: Navigation and commands
-- **Insert mode**: Text editing (in editor)
-- **Visual mode**: Selection (future)
-
-## Mode Switching
-
-Switch modes via:
-
-1. **Config**: `keybindings.mode = "modern"`
-2. **Command palette**: `:theme modern`
-3. **Runtime**: Future (keybind to cycle modes)
