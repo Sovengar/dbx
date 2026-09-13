@@ -15,6 +15,7 @@ import (
 type Tree struct {
 	nodes    []*Node
 	cursor   int
+	offset   int
 	styles   *theme.Styles
 	width    int
 	height   int
@@ -33,8 +34,9 @@ func NewTree(styles *theme.Styles) *Tree {
 
 func (t *Tree) SetNodes(nodes []*Node) {
 	t.nodes = nodes
-	t.flattenNodes()
 	t.cursor = 0
+	t.offset = 0
+	t.flattenNodes()
 }
 
 func (t *Tree) flattenNodes() {
@@ -45,6 +47,20 @@ func (t *Tree) flattenNodes() {
 		t.flatten(t.nodes)
 	}
 	t.applyFilter()
+	t.clampOffset()
+}
+
+func (t *Tree) clampOffset() {
+	if t.height <= 0 || len(t.filtered) <= t.height {
+		t.offset = 0
+		return
+	}
+	if t.offset > len(t.filtered)-t.height {
+		t.offset = len(t.filtered) - t.height
+	}
+	if t.offset < 0 {
+		t.offset = 0
+	}
 }
 
 func (t *Tree) flatten(nodes []*Node) {
@@ -148,12 +164,14 @@ func (t *Tree) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return t.collapse(), true
 	case "g":
 		t.cursor = 0
+		t.offset = 0
 		return nil, true
 	case "G":
 		t.cursor = len(t.filtered) - 1
 		if t.cursor < 0 {
 			t.cursor = 0
 		}
+		t.clampOffset()
 		return nil, true
 	}
 	return nil, false
@@ -162,12 +180,18 @@ func (t *Tree) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 func (t *Tree) moveDown() {
 	if t.cursor < len(t.filtered)-1 {
 		t.cursor++
+		if t.height > 0 && t.cursor >= t.offset+t.height {
+			t.offset = t.cursor - t.height + 1
+		}
 	}
 }
 
 func (t *Tree) moveUp() {
 	if t.cursor > 0 {
 		t.cursor--
+		if t.cursor < t.offset {
+			t.offset = t.cursor
+		}
 	}
 }
 
@@ -249,10 +273,10 @@ func (t *Tree) View() string {
 	}
 
 	var s strings.Builder
-	start := 0
+	start := t.offset
 	end := len(t.filtered)
-	if t.height > 0 && end > t.height {
-		end = t.height
+	if t.height > 0 && end > start+t.height {
+		end = start + t.height
 	}
 
 	availableWidth := t.width - 4

@@ -1026,7 +1026,7 @@ func (p *GridPreview) Render() string {
 
 	if len(p.lines) == 0 {
 		if p.jqMode {
-			return title + "\n" + p.styles.Text.Render("  No data") + "\n" + p.renderJQPrompt()
+			return title + "\n" + p.renderJQPrompt() + "\n" + p.styles.Text.Render("  No data")
 		}
 		return title + "\n" + p.styles.Text.Render("  No data")
 	}
@@ -1070,16 +1070,14 @@ func (p *GridPreview) Render() string {
 
 	content := strings.Join(rendered, "\n")
 
-	if p.jqExpr != "" && !p.jqMode {
-		hint := p.styles.Help.Render(fmt.Sprintf("  jq: %s", p.jqExpr))
-		content += "\n" + hint
-	}
-
+	var jqBar string
 	if p.jqMode {
-		content += "\n" + p.renderJQPrompt()
+		jqBar = p.renderJQPrompt() + "\n"
+	} else if p.jqExpr != "" {
+		jqBar = p.styles.Help.Render(fmt.Sprintf("  jq: %s", p.jqExpr)) + "\n"
 	}
 
-	return title + "\n" + content
+	return title + "\n" + jqBar + content
 }
 
 func (p *GridPreview) renderJQPrompt() string {

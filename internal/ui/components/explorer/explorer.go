@@ -33,7 +33,6 @@ type ExplorerRefreshMsg struct{}
 
 type Explorer struct {
 	tree        *Tree
-	mouse       *MouseHandler
 	styles      *theme.Styles
 	keybindings map[string]string
 	width       int
@@ -43,11 +42,6 @@ type Explorer struct {
 }
 
 func New(styles *theme.Styles, zones interface{}, keybindings map[string]string) *Explorer {
-	var mh *MouseHandler
-	if z, ok := zones.(*interface{ New() interface{} }); ok {
-		_ = z
-	}
-	_ = mh
 	return &Explorer{
 		tree:        NewTree(styles),
 		styles:      styles,
@@ -235,10 +229,11 @@ func (e *Explorer) HandleClick(y int) bool {
 	if e.tree == nil || len(e.tree.filtered) == 0 {
 		return false
 	}
-	if y < 0 || y >= len(e.tree.filtered) {
+	filteredIndex := e.tree.offset + y
+	if filteredIndex < 0 || filteredIndex >= len(e.tree.filtered) {
 		return false
 	}
-	e.tree.cursor = y
+	e.tree.cursor = filteredIndex
 	return true
 }
 
@@ -260,6 +255,7 @@ func (e *Explorer) SelectTable(schema, table string) bool {
 	for i, n := range e.tree.filtered {
 		if n == target {
 			e.tree.cursor = i
+			e.tree.clampOffset()
 			return true
 		}
 	}

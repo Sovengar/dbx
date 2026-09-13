@@ -37,7 +37,7 @@ func (s *SchemaLoader) LoadDatabase(ctx context.Context, dbName string) (*explor
 			explorer.NodeSchema,
 			schema,
 		)
-		schemaNode.Expanded = true
+		schemaNode.Expanded = false
 
 		tables, err := s.ListTables(ctx, schema)
 		if err != nil {
