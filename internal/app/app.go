@@ -80,6 +80,7 @@ type Model struct {
 	yankMaxRows                int
 	spinnerActive              bool
 	spinnerFrame               int
+	schemaForeignKeys          map[string][]postgres.ForeignKeyInfo
 }
 
 var spinnerChars = [9]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"}
@@ -249,12 +250,22 @@ func (m Model) loadAutocompleteData() tea.Cmd {
 		}
 
 		export := buildSchemaExportFull(m.dbName, m.schemaDetail, indexesBySchema, fksBySchema)
-		return autocompleteDataLoadedMsg{schemaExport: export}
+
+		// Flatten schema FKs for ERE diagram: table -> FKs across all schemas
+		allSchemaFKs := make(map[string][]postgres.ForeignKeyInfo)
+		for _, fksMap := range fksBySchema {
+			for table, fks := range fksMap {
+				allSchemaFKs[table] = append(allSchemaFKs[table], fks...)
+			}
+		}
+
+		return autocompleteDataLoadedMsg{schemaExport: export, schemaForeignKeys: allSchemaFKs}
 	}
 }
 
 type autocompleteDataLoadedMsg struct {
-	schemaExport *aiContext.SchemaExport
+	schemaExport     *aiContext.SchemaExport
+	schemaForeignKeys map[string][]postgres.ForeignKeyInfo
 }
 
 func buildSchemaExport(dbName string, schemas []postgres.SchemaDetail) *aiContext.SchemaExport {
@@ -932,6 +943,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusbar.SetAutocompleteReady(true)
 			m.toast.ShowSuccess("Autocomplete ready")
 		}
+		if msg.schemaForeignKeys != nil {
+			m.schemaForeignKeys = msg.schemaForeignKeys
+			m.explorerPreview.SetSchemaForeignKeys(msg.schemaForeignKeys)
+		}
 		return m, nil
 
 	case tableSelectedMsg:
@@ -988,8 +1003,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case explorerPreviewDataMsg:
+		m.explorerPreview.SetSchemaForeignKeys(m.schemaForeignKeys)
 		m.explorerPreview.SetData(msg.schema, msg.table, msg.columns, msg.constraints, msg.foreignKeys, msg.indexes, msg.overview)
 		return m, nil
+
+	case explorerpreview.ERENavigateMsg:
+		if m.explorer != nil {
+			m.explorer.SelectTable(msg.Schema, msg.Table)
+		}
+		// Load data for the new table
+		return m, m.loadExplorerPreviewData(msg.Schema, msg.Table)
 
 	case grid.GridCommitPendingMsg:
 		if m.conn == nil {
