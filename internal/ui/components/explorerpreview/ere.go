@@ -275,29 +275,34 @@ func (v *ERDiagramViewport) Reset() {
 
 // --- Renderer ---
 
-func renderBox(name string, columns []ColumnBadge, width int, isActive bool, styles ...interface{}) string {
+func renderBox(name string, columns []ColumnBadge, width int, cardinality string) string {
 	var lines []string
 
-	// Truncate name if needed
+	// Truncate name to fit within box inner width (width-2)
+	innerWidth := width - 2
 	displayName := TruncateTableName(name)
-
-	// Ensure width fits the name
-	nameWidth := len(displayName) + 4 // " " + name + " "
-	if nameWidth+2 > width {
-		width = nameWidth + 2
+	if len(displayName) > innerWidth {
+		if innerWidth > 1 {
+			displayName = displayName[:innerWidth-1] + "…"
+		} else {
+			displayName = "…"
+		}
 	}
 
 	// Top border
-	lines = append(lines, "┌"+strings.Repeat("─", width-2)+"┐")
+	lines = append(lines, "┌"+strings.Repeat("─", innerWidth)+"┐")
 
-	// Name line
-	namePad := width - 2 - len(displayName)
+	// Name line — centered
+	namePad := innerWidth - len(displayName)
+	if namePad < 0 {
+		namePad = 0
+	}
 	leftPad := namePad / 2
 	rightPad := namePad - leftPad
 	lines = append(lines, "│"+strings.Repeat(" ", leftPad)+displayName+strings.Repeat(" ", rightPad)+"│")
 
 	// Separator
-	lines = append(lines, "├"+strings.Repeat("─", width-2)+"┤")
+	lines = append(lines, "├"+strings.Repeat("─", innerWidth)+"┤")
 
 	// Columns
 	for _, col := range columns {
@@ -309,15 +314,28 @@ func renderBox(name string, columns []ColumnBadge, width int, isActive bool, sty
 		}
 		colName := TruncateColumnName(col.Name)
 		entry := badge + colName + " " + col.DataType
-		if len(entry) > width-2 {
-			entry = entry[:width-2]
+		if len(entry) > innerWidth {
+			entry = entry[:innerWidth]
 		}
-		pad := width - 2 - len(entry)
+		pad := innerWidth - len(entry)
+		if pad < 0 {
+			pad = 0
+		}
 		lines = append(lines, "│"+entry+strings.Repeat(" ", pad)+"│")
 	}
 
+	// Cardinality label (inside box, before bottom border)
+	if cardinality != "" {
+		label := "  " + cardinality
+		if len(label) > innerWidth {
+			label = label[:innerWidth]
+		}
+		pad := innerWidth - len(label)
+		lines = append(lines, "│"+label+strings.Repeat(" ", pad)+"│")
+	}
+
 	// Bottom border
-	lines = append(lines, "└"+strings.Repeat("─", width-2)+"┘")
+	lines = append(lines, "└"+strings.Repeat("─", innerWidth)+"┘")
 
 	return strings.Join(lines, "\n")
 }
@@ -329,73 +347,55 @@ func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int) string {
 	}
 
 	centerWidth := ComputeBoxWidth(diagram.Center.Columns)
-	centerBox := renderBox(diagram.Center.Name, diagram.Center.Columns, centerWidth, false)
+	centerBox := renderBox(diagram.Center.Name, diagram.Center.Columns, centerWidth, "")
 	centerLines := strings.Split(centerBox, "\n")
 	centerHeight := len(centerLines)
 
-	// Track neighbor boxes with their cardinality labels
-	type neighborEntry struct {
-		box   string
-		label string
-	}
-	var neighbors []neighborEntry
+	// Build neighbor boxes with cardinality inside
+	var rightLines []string
 
 	for _, rel := range diagram.Outgoing {
-		cols := []ColumnBadge{
-			{Name: rel.FromColumn, DataType: "", IsFK: true},
-		}
-		box := renderBox(rel.ToTable, cols, centerWidth, false)
-		neighbors = append(neighbors, neighborEntry{box: box, label: rel.Cardinality})
-	}
-
-	for _, rel := range diagram.Incoming {
-		cols := []ColumnBadge{
-			{Name: rel.FromColumn, DataType: "", IsFK: true},
-		}
-		box := renderBox(rel.ToTable, cols, centerWidth, false)
-		neighbors = append(neighbors, neighborEntry{box: box, label: rel.Cardinality})
-	}
-
-	// Build right-side lines from neighbors
-	var rightLines []string
-	var rightLabels []string // cardinality label per line (empty = no label)
-	for _, n := range neighbors {
-		boxLines := strings.Split(n.box, "\n")
 		if len(rightLines) > 0 {
-			rightLines = append(rightLines, "") // spacing
-			rightLabels = append(rightLabels, "")
+			rightLines = append(rightLines, "") // spacing between boxes
 		}
-		for j, bl := range boxLines {
-			rightLines = append(rightLines, bl)
-			// Put cardinality label on the separator line (line 2 = "├───┤")
-			if j == 2 && n.label != "" {
-				rightLabels = append(rightLabels, n.label)
-			} else {
-				rightLabels = append(rightLabels, "")
-			}
+		cols := []ColumnBadge{
+			{Name: rel.FromColumn, DataType: "", IsFK: true},
 		}
+		box := renderBox(rel.ToTable, cols, centerWidth, rel.Cardinality)
+		rightLines = append(rightLines, strings.Split(box, "\n")...)
 	}
-
-	// Overflow indicators
 	if diagram.OutgoingOverflow > 0 {
 		if len(rightLines) > 0 {
 			rightLines = append(rightLines, "")
-			rightLabels = append(rightLabels, "")
 		}
 		rightLines = append(rightLines, fmt.Sprintf("  +%d more", diagram.OutgoingOverflow))
-		rightLabels = append(rightLabels, "")
 	}
-	if diagram.IncomingOverflow > 0 {
+
+	if len(diagram.Incoming) > 0 {
 		if len(rightLines) > 0 {
+			rightLines = append(rightLines, "") // spacing between sections
 			rightLines = append(rightLines, "")
-			rightLabels = append(rightLabels, "")
 		}
-		rightLines = append(rightLines, fmt.Sprintf("  +%d more", diagram.IncomingOverflow))
-		rightLabels = append(rightLabels, "")
+		for _, rel := range diagram.Incoming {
+			if len(rightLines) > 0 && rightLines[len(rightLines)-1] != "" {
+				rightLines = append(rightLines, "") // spacing between boxes
+			}
+			cols := []ColumnBadge{
+				{Name: rel.FromColumn, DataType: "", IsFK: true},
+			}
+			box := renderBox(rel.ToTable, cols, centerWidth, rel.Cardinality)
+			rightLines = append(rightLines, strings.Split(box, "\n")...)
+		}
+		if diagram.IncomingOverflow > 0 {
+			if len(rightLines) > 0 {
+				rightLines = append(rightLines, "")
+			}
+			rightLines = append(rightLines, fmt.Sprintf("  +%d more", diagram.IncomingOverflow))
+		}
 	}
 
 	// Layout: center box on the left, neighbors on the right
-	leftWidth := centerWidth + 4 // box + margin
+	leftWidth := centerWidth + 4 // box + invisible gap
 
 	// Merge side by side
 	maxLines := centerHeight
@@ -409,7 +409,7 @@ func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int) string {
 		if i < len(centerLines) {
 			left = centerLines[i]
 		}
-		// Pad to fixed left width
+		// Pad to fixed left width (invisible whitespace)
 		if len(left) < leftWidth {
 			left += strings.Repeat(" ", leftWidth-len(left))
 		}
@@ -419,25 +419,7 @@ func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int) string {
 			right = rightLines[i]
 		}
 
-		// Edge connector with cardinality label
-		connector := ""
-		if right != "" && i < centerHeight {
-			// Inside center box height: show connector
-			if i > 0 && i < centerHeight-1 {
-				label := rightLabels[i]
-				if label == "" {
-					connector = strings.Repeat("─", 3) + " "
-				} else {
-					connector = "─" + label + "─ "
-				}
-			}
-		} else if right != "" && rightLabels[i] != "" {
-			// Below center box: only show connector for labeled lines
-			label := rightLabels[i]
-			connector = "─" + label + "─ "
-		}
-
-		result = append(result, left+connector+right)
+		result = append(result, left+right)
 	}
 
 	return strings.Join(result, "\n")
