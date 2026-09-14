@@ -1081,9 +1081,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case editor.CopySQLMsg:
+		appDebugLog("CopySQLMsg received")
 		return m, m.handleCopySQL()
 
 	case copySQLDoneMsg:
+		appDebugLog("copySQLDoneMsg: err=%v", msg.err)
 		if msg.err != nil {
 			m.toast.ShowError("Clipboard not available")
 		} else {
@@ -1393,6 +1395,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.state == StateMain {
 			key := msg.String()
+			appDebugLog("KeyPress: key=%q editorOpen=%v focus=%q", key, m.editorOpen, m.router.Focus())
 
 			if m.editorOpen {
 				if key == "esc" {
@@ -1470,8 +1473,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if key == m.keybinds["grid.commit_pending"] && m.router.Focus() == FocusGrid && m.grid != nil {
-				if cmd, handled := m.grid.Update(msg); handled {
-					return m, cmd
+				appDebugLog("Ctrl+S: grid.commit_pending, hasDrafts=%v", m.grid.HasDrafts())
+				if m.grid.HasDrafts() {
+					sql := m.grid.DraftSQL()
+					appDebugLog("Ctrl+S: draft SQL=%q", sql)
+					if sql != "" {
+						m.editorOpen = true
+						m.editor.Focus()
+						m.editor.SetContent(sql)
+						m.statusbar.SetEditorOpen(true)
+						return m, nil
+					}
 				}
 			}
 
@@ -1985,7 +1997,7 @@ func (m Model) renderMainView() string {
 		}
 		return len(lines)
 	}
-	statusBarLines := 8 + countLines(topLine)
+	statusBarLines := 7 + countLines(topLine)
 	contentHeight := m.height - statusBarLines
 	if contentHeight < 1 {
 		contentHeight = 1
@@ -2215,7 +2227,7 @@ func overlayBottomRight(base, box string, width, height, stackOffset int) string
 	if x < 0 {
 		x = 0
 	}
-	y := height - bh - 9 - stackOffset*(bh+1)
+	y := height - bh - 7 - stackOffset*(bh+1)
 	if y < 0 {
 		y = 0
 	}
@@ -2231,4 +2243,13 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+func appDebugLog(format string, args ...interface{}) {
+	f, err := os.OpenFile("/tmp/dbx_app_debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "App: "+format+"\n", args...)
 }

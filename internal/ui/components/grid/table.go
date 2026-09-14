@@ -1404,6 +1404,67 @@ func (g *Grid) commitEdit() tea.Cmd {
 	return nil
 }
 
+// DraftSQL generates SQL from pending drafts without clearing them.
+func (g *Grid) DraftSQL() string {
+	if !g.HasDrafts() {
+		return ""
+	}
+
+	var queries []string
+
+	for _, row := range g.pendingRows {
+		var cols []string
+		var placeholders []string
+		var args []interface{}
+		argIdx := 1
+		for i, val := range row {
+			cols = append(cols, g.columns[i])
+			if val == nil {
+				placeholders = append(placeholders, "NULL")
+			} else {
+				placeholders = append(placeholders, fmt.Sprintf("$%d", argIdx))
+				args = append(args, val)
+				argIdx++
+			}
+		}
+		_ = args
+		q := fmt.Sprintf("INSERT INTO %q.%q (%s) VALUES (%s)",
+			g.schema, g.tableName,
+			strings.Join(cols, ", "),
+			strings.Join(placeholders, ", "))
+		queries = append(queries, q)
+	}
+
+	for _, update := range g.pendingUpdates {
+		if update.RowIdx < 0 || update.RowIdx >= len(g.data.Rows) {
+			continue
+		}
+		row := g.data.Rows[update.RowIdx]
+		colName := g.columns[update.ColIdx]
+		var whereParts []string
+		var args []interface{}
+		argIdx := 1
+		for i, val := range row {
+			whereParts = append(whereParts, fmt.Sprintf("%q = $%d", g.columns[i], argIdx))
+			args = append(args, val)
+			argIdx++
+		}
+		args = append(args, update.NewValue)
+		q := fmt.Sprintf("UPDATE %q.%q SET %q = $%d WHERE %s",
+			g.schema, g.tableName, colName, argIdx, strings.Join(whereParts, " AND "))
+		_ = args
+		queries = append(queries, q)
+	}
+
+	pkCols := g.PrimaryKeyColumns()
+	for _, del := range g.pendingDeletes {
+		q, _ := BuildDeleteQuery(g.schema, g.tableName, g.columns, del.Row, pkCols)
+		queries = append(queries, q)
+	}
+
+	return strings.Join(queries, ";\n")
+}
+
 func (g *Grid) CommitAllDrafts() tea.Cmd {
 	var queries []string
 	var allArgs [][]interface{}
