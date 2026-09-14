@@ -842,7 +842,7 @@ func (a *AutocompleteState) Render(styles *theme.Styles, width int) string {
 		name := item.Label()
 		kind := item.KindLabel()
 
-		nameMaxW := popupW - kindW - 4
+		nameMaxW := popupW - kindW - 5
 		if nameMaxW < 10 {
 			nameMaxW = 10
 		}

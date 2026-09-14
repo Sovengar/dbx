@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/buble/dbx/internal/theme"
 )
 
@@ -10,6 +12,8 @@ type StatusBar struct {
 	styles            *theme.Styles
 	keybinds          map[string]string
 	width             int
+	height            int
+	focused           bool
 	focus             string
 	editorOpen        bool
 	autocompleteReady bool
@@ -23,9 +27,16 @@ func NewStatusBar(styles *theme.Styles, keybinds map[string]string) *StatusBar {
 }
 
 func (s *StatusBar) SetWidth(w int)              { s.width = w }
+func (s *StatusBar) SetHeight(h int)             { s.height = h }
 func (s *StatusBar) SetFocus(f string)           { s.focus = f }
 func (s *StatusBar) SetEditorOpen(open bool)     { s.editorOpen = open }
 func (s *StatusBar) SetAutocompleteReady(r bool) { s.autocompleteReady = r }
+func (s *StatusBar) Focus()                      { s.focused = true }
+func (s *StatusBar) Blur()                       { s.focused = false }
+
+func (s *StatusBar) Update(msg tea.Msg) (tea.Cmd, bool) {
+	return nil, false
+}
 
 func (s *StatusBar) keyFor(action string) string {
 	if k, ok := s.keybinds[action]; ok {
@@ -34,23 +45,28 @@ func (s *StatusBar) keyFor(action string) string {
 	return "?"
 }
 
-func (s *StatusBar) Render() string {
+func (s *StatusBar) View() string {
 	if s.width <= 0 {
 		return ""
 	}
 
-	sep := strings.Repeat("─", s.width)
+	innerW := s.width - 2
 	line1 := s.renderActions()
 	contextLines := s.renderContextual()
 
 	var parts []string
-	parts = append(parts, s.styles.Sep.Render(sep))
-	parts = append(parts, s.styles.Help.Render("  "+line1))
+	parts = append(parts, s.styles.Help.Render(line1))
 	for _, cl := range contextLines {
-		parts = append(parts, s.styles.Help.Render("  "+cl))
+		parts = append(parts, s.styles.Help.Render(cl))
 	}
 
-	return strings.Join(parts, "\n")
+	content := strings.Join(parts, "\n")
+
+	return s.styles.BorderActive.
+		Width(innerW).
+		Height(3).
+		MaxHeight(3).
+		Render(content)
 }
 
 func (s *StatusBar) renderActions() string {

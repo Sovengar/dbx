@@ -855,6 +855,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.helpModal.SetWidth(msg.Width)
 		m.helpModal.SetHeight(msg.Height)
 		m.statusbar.SetWidth(msg.Width)
+		m.statusbar.SetHeight(msg.Height)
 		if m.explorer != nil {
 			m.explorer.SetWidth(msg.Width / 3)
 			m.explorer.SetHeight(msg.Height - 2)
@@ -1913,6 +1914,7 @@ func (m Model) renderMainView() string {
 	}
 
 	m.statusbar.SetFocus(m.router.Context())
+	m.statusbar.SetHeight(m.height)
 	topLine := m.renderTopLine(selSchema, selTable, rowCount)
 
 	countLines := func(s string) int {
@@ -1925,7 +1927,7 @@ func (m Model) renderMainView() string {
 		}
 		return len(lines)
 	}
-	statusBarLines := 4 + countLines(topLine)
+	statusBarLines := 5 + countLines(topLine)
 	contentHeight := m.height - statusBarLines
 	if contentHeight < 1 {
 		contentHeight = 1
@@ -1966,7 +1968,7 @@ func (m Model) renderMainView() string {
 		}
 	}
 
-	content += "\n" + m.statusbar.Render()
+	content += "\n" + m.statusbar.View()
 
 	return content
 }
@@ -2164,7 +2166,7 @@ func overlayBottomRight(base, box string, width, height, stackOffset int) string
 	if x < 0 {
 		x = 0
 	}
-	y := height - bh - 5 - stackOffset*(bh+1)
+	y := height - bh - 6 - stackOffset*(bh+1)
 	if y < 0 {
 		y = 0
 	}
