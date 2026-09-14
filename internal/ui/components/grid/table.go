@@ -544,6 +544,11 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 
+	if key == "esc" && len(g.selectedRows) > 0 {
+		g.ClearSelection()
+		return func() tea.Msg { return GridCursorMovedMsg{} }, true
+	}
+
 	// Keys that work regardless of whether there are rows
 	switch key {
 	case "i":
