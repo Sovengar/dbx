@@ -36,6 +36,7 @@ type PendingUpdate struct {
 	ColIdx   int
 	OldValue interface{}
 	NewValue interface{}
+	OldRow   []interface{}
 }
 
 type PendingDelete struct {
@@ -1393,11 +1394,14 @@ func (g *Grid) commitEdit() tea.Cmd {
 		}
 	}
 	if !found {
+		oldRow := make([]interface{}, len(row))
+		copy(oldRow, row)
 		g.pendingUpdates = append(g.pendingUpdates, PendingUpdate{
 			RowIdx:   g.editRow,
 			ColIdx:   g.editCol,
 			OldValue: row[g.editCol],
 			NewValue: newVal,
+			OldRow:   oldRow,
 		})
 	}
 	g.data.Rows[g.editRow][g.editCol] = newVal
@@ -1431,10 +1435,13 @@ func (g *Grid) DraftSQL() string {
 		if update.RowIdx < 0 || update.RowIdx >= len(g.data.Rows) {
 			continue
 		}
-		row := g.data.Rows[update.RowIdx]
 		colName := g.columns[update.ColIdx]
+		whereRow := update.OldRow
+		if whereRow == nil {
+			whereRow = g.data.Rows[update.RowIdx]
+		}
 		var whereParts []string
-		for i, val := range row {
+		for i, val := range whereRow {
 			whereParts = append(whereParts, fmt.Sprintf("%q = %s", g.columns[i], formatSQLValue(val)))
 		}
 		q := fmt.Sprintf("UPDATE %q.%q SET %q = %s WHERE %s",
@@ -1504,12 +1511,15 @@ func (g *Grid) CommitAllDrafts() tea.Cmd {
 		if update.RowIdx < 0 || update.RowIdx >= len(g.data.Rows) {
 			continue
 		}
-		row := g.data.Rows[update.RowIdx]
+		whereRow := update.OldRow
+		if whereRow == nil {
+			whereRow = g.data.Rows[update.RowIdx]
+		}
 		colName := g.columns[update.ColIdx]
 		var whereParts []string
 		var args []interface{}
 		argIdx := 1
-		for i, val := range row {
+		for i, val := range whereRow {
 			whereParts = append(whereParts, fmt.Sprintf("%q = $%d", g.columns[i], argIdx))
 			args = append(args, val)
 			argIdx++
