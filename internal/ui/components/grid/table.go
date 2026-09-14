@@ -1405,6 +1405,7 @@ func (g *Grid) commitEdit() tea.Cmd {
 }
 
 // DraftSQL generates SQL from pending drafts without clearing them.
+// Uses real values instead of parameterized placeholders.
 func (g *Grid) DraftSQL() string {
 	if !g.HasDrafts() {
 		return ""
@@ -1414,24 +1415,15 @@ func (g *Grid) DraftSQL() string {
 
 	for _, row := range g.pendingRows {
 		var cols []string
-		var placeholders []string
-		var args []interface{}
-		argIdx := 1
+		var vals []string
 		for i, val := range row {
 			cols = append(cols, g.columns[i])
-			if val == nil {
-				placeholders = append(placeholders, "NULL")
-			} else {
-				placeholders = append(placeholders, fmt.Sprintf("$%d", argIdx))
-				args = append(args, val)
-				argIdx++
-			}
+			vals = append(vals, formatSQLValue(val))
 		}
-		_ = args
 		q := fmt.Sprintf("INSERT INTO %q.%q (%s) VALUES (%s)",
 			g.schema, g.tableName,
 			strings.Join(cols, ", "),
-			strings.Join(placeholders, ", "))
+			strings.Join(vals, ", "))
 		queries = append(queries, q)
 	}
 
@@ -1442,17 +1434,11 @@ func (g *Grid) DraftSQL() string {
 		row := g.data.Rows[update.RowIdx]
 		colName := g.columns[update.ColIdx]
 		var whereParts []string
-		var args []interface{}
-		argIdx := 1
 		for i, val := range row {
-			whereParts = append(whereParts, fmt.Sprintf("%q = $%d", g.columns[i], argIdx))
-			args = append(args, val)
-			argIdx++
+			whereParts = append(whereParts, fmt.Sprintf("%q = %s", g.columns[i], formatSQLValue(val)))
 		}
-		args = append(args, update.NewValue)
-		q := fmt.Sprintf("UPDATE %q.%q SET %q = $%d WHERE %s",
-			g.schema, g.tableName, colName, argIdx, strings.Join(whereParts, " AND "))
-		_ = args
+		q := fmt.Sprintf("UPDATE %q.%q SET %q = %s WHERE %s",
+			g.schema, g.tableName, colName, formatSQLValue(update.NewValue), strings.Join(whereParts, " AND "))
 		queries = append(queries, q)
 	}
 
@@ -1463,6 +1449,28 @@ func (g *Grid) DraftSQL() string {
 	}
 
 	return strings.Join(queries, ";\n")
+}
+
+// formatSQLValue formats a value for display in SQL.
+func formatSQLValue(val interface{}) string {
+	if val == nil {
+		return "NULL"
+	}
+	switch v := val.(type) {
+	case string:
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''"))
+	case int64:
+		return fmt.Sprintf("%d", v)
+	case float64:
+		return fmt.Sprintf("%g", v)
+	case bool:
+		if v {
+			return "TRUE"
+		}
+		return "FALSE"
+	default:
+		return fmt.Sprintf("'%v'", v)
+	}
 }
 
 func (g *Grid) CommitAllDrafts() tea.Cmd {
