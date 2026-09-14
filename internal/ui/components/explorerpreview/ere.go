@@ -421,13 +421,20 @@ func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int) string {
 
 		// Edge connector with cardinality label
 		connector := ""
-		if i > 0 && i < centerHeight-1 && right != "" {
-			label := rightLabels[i]
-			if label == "" {
-				connector = strings.Repeat("─", 3) + " "
-			} else {
-				connector = "─" + label + "─ "
+		if right != "" && i < centerHeight {
+			// Inside center box height: show connector
+			if i > 0 && i < centerHeight-1 {
+				label := rightLabels[i]
+				if label == "" {
+					connector = strings.Repeat("─", 3) + " "
+				} else {
+					connector = "─" + label + "─ "
+				}
 			}
+		} else if right != "" && rightLabels[i] != "" {
+			// Below center box: only show connector for labeled lines
+			label := rightLabels[i]
+			connector = "─" + label + "─ "
 		}
 
 		result = append(result, left+connector+right)
