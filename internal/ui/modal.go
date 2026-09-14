@@ -186,6 +186,7 @@ func (m *HelpModal) View() string {
 	lines = append(lines, m.styles.Header.Render("Editor"))
 	lines = append(lines, m.renderKeybind("editor.execute", "Execute Query"))
 	lines = append(lines, m.renderKeybind("editor.clear", "Clear Editor"))
+	lines = append(lines, m.renderKeybind("editor.copy", "Copy SQL"))
 	lines = append(lines, m.renderKeybind("editor.autocomplete", "Autocomplete"))
 	lines = append(lines, m.renderKeybind("editor.history_prev", "History Previous"))
 	lines = append(lines, m.renderKeybind("editor.history_next", "History Next"))
