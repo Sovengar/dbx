@@ -1394,8 +1394,18 @@ func (g *Grid) commitEdit() tea.Cmd {
 		}
 	}
 	if !found {
-		oldRow := make([]interface{}, len(row))
-		copy(oldRow, row)
+		// Check if there's already an update for this row — reuse its OldRow
+		var oldRow []interface{}
+		for _, u := range g.pendingUpdates {
+			if u.RowIdx == g.editRow && u.OldRow != nil {
+				oldRow = u.OldRow
+				break
+			}
+		}
+		if oldRow == nil {
+			oldRow = make([]interface{}, len(row))
+			copy(oldRow, row)
+		}
 		g.pendingUpdates = append(g.pendingUpdates, PendingUpdate{
 			RowIdx:   g.editRow,
 			ColIdx:   g.editCol,
