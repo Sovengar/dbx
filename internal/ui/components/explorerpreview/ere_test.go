@@ -374,10 +374,10 @@ func TestRenderERDiagram_EdgeLabels(t *testing.T) {
 	output := RenderERDiagram(diagram, 80, 30)
 
 	if !strings.Contains(output, "N:1") {
-		t.Error("expected N:1 cardinality label")
+		t.Errorf("expected N:1 cardinality label, output:\n%s", output)
 	}
 	if !strings.Contains(output, "1:N") {
-		t.Error("expected 1:N cardinality label")
+		t.Errorf("expected 1:N cardinality label, output:\n%s", output)
 	}
 }
 

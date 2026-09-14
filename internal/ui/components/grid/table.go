@@ -1629,12 +1629,23 @@ func (g *Grid) View() string {
 		return g.styles.Text.Render("  No data loaded")
 	}
 
-	return g.renderRecordsView()
+	output := g.renderRecordsView()
+
+	border := g.styles.Border
+	if g.focused {
+		border = g.styles.BorderActive
+	}
+
+	return border.
+		Width(g.width - 2).
+		Height(g.height).
+		MaxHeight(g.height).
+		Render(output)
 }
 
 func (g *Grid) renderRecordsView() string {
-	// Calculate dynamic overhead: header(1) + mode(1) + border(2) + buffer(1) = 5 base
-	overhead := 5
+	// Calculate dynamic overhead: header(1) + mode(1) + buffer(2) = 4 base
+	overhead := 4
 	if g.commitPending || g.refreshPending || g.discardPending || g.HasDrafts() {
 		overhead++ // prefix message line
 	}

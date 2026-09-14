@@ -333,49 +333,74 @@ func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int) string {
 	centerLines := strings.Split(centerBox, "\n")
 	centerHeight := len(centerLines)
 
-	// Build neighbor sections
-	var sections []string
+	// Track neighbor boxes with their cardinality labels
+	type neighborEntry struct {
+		box   string
+		label string
+	}
+	var neighbors []neighborEntry
 
-	if len(diagram.Outgoing) > 0 {
-		sections = append(sections, "── Outgoing (N:1) ──")
-		for _, rel := range diagram.Outgoing {
-			cols := []ColumnBadge{
-				{Name: rel.FromColumn, DataType: "", IsFK: true},
-			}
-			box := renderBox(rel.ToTable, cols, centerWidth, false)
-			sections = append(sections, strings.Split(box, "\n")...)
-			sections = append(sections, "") // spacing
+	for _, rel := range diagram.Outgoing {
+		cols := []ColumnBadge{
+			{Name: rel.FromColumn, DataType: "", IsFK: true},
 		}
-		if diagram.OutgoingOverflow > 0 {
-			sections = append(sections, fmt.Sprintf("  +%d more", diagram.OutgoingOverflow))
-			sections = append(sections, "")
+		box := renderBox(rel.ToTable, cols, centerWidth, false)
+		neighbors = append(neighbors, neighborEntry{box: box, label: rel.Cardinality})
+	}
+
+	for _, rel := range diagram.Incoming {
+		cols := []ColumnBadge{
+			{Name: rel.FromColumn, DataType: "", IsFK: true},
+		}
+		box := renderBox(rel.ToTable, cols, centerWidth, false)
+		neighbors = append(neighbors, neighborEntry{box: box, label: rel.Cardinality})
+	}
+
+	// Build right-side lines from neighbors
+	var rightLines []string
+	var rightLabels []string // cardinality label per line (empty = no label)
+	for _, n := range neighbors {
+		boxLines := strings.Split(n.box, "\n")
+		if len(rightLines) > 0 {
+			rightLines = append(rightLines, "") // spacing
+			rightLabels = append(rightLabels, "")
+		}
+		for j, bl := range boxLines {
+			rightLines = append(rightLines, bl)
+			// Put cardinality label on the separator line (line 2 = "├───┤")
+			if j == 2 && n.label != "" {
+				rightLabels = append(rightLabels, n.label)
+			} else {
+				rightLabels = append(rightLabels, "")
+			}
 		}
 	}
 
-	if len(diagram.Incoming) > 0 {
-		sections = append(sections, "── Incoming (1:N) ──")
-		for _, rel := range diagram.Incoming {
-			cols := []ColumnBadge{
-				{Name: rel.FromColumn, DataType: "", IsFK: true},
-			}
-			box := renderBox(rel.ToTable, cols, centerWidth, false)
-			sections = append(sections, strings.Split(box, "\n")...)
-			sections = append(sections, "") // spacing
+	// Overflow indicators
+	if diagram.OutgoingOverflow > 0 {
+		if len(rightLines) > 0 {
+			rightLines = append(rightLines, "")
+			rightLabels = append(rightLabels, "")
 		}
-		if diagram.IncomingOverflow > 0 {
-			sections = append(sections, fmt.Sprintf("  +%d more", diagram.IncomingOverflow))
-			sections = append(sections, "")
+		rightLines = append(rightLines, fmt.Sprintf("  +%d more", diagram.OutgoingOverflow))
+		rightLabels = append(rightLabels, "")
+	}
+	if diagram.IncomingOverflow > 0 {
+		if len(rightLines) > 0 {
+			rightLines = append(rightLines, "")
+			rightLabels = append(rightLabels, "")
 		}
+		rightLines = append(rightLines, fmt.Sprintf("  +%d more", diagram.IncomingOverflow))
+		rightLabels = append(rightLabels, "")
 	}
 
 	// Layout: center box on the left, neighbors on the right
 	leftWidth := centerWidth + 4 // box + margin
-	edgeLen := 3
 
 	// Merge side by side
 	maxLines := centerHeight
-	if len(sections) > maxLines {
-		maxLines = len(sections)
+	if len(rightLines) > maxLines {
+		maxLines = len(rightLines)
 	}
 
 	var result []string
@@ -390,14 +415,19 @@ func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int) string {
 		}
 
 		right := ""
-		if i < len(sections) {
-			right = sections[i]
+		if i < len(rightLines) {
+			right = rightLines[i]
 		}
 
-		// Edge connector: horizontal line from center box right edge to neighbor
+		// Edge connector with cardinality label
 		connector := ""
 		if i > 0 && i < centerHeight-1 && right != "" {
-			connector = strings.Repeat("─", edgeLen) + " "
+			label := rightLabels[i]
+			if label == "" {
+				connector = strings.Repeat("─", 3) + " "
+			} else {
+				connector = "─" + label + "─ "
+			}
 		}
 
 		result = append(result, left+connector+right)

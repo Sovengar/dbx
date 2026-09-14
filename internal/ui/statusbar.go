@@ -64,8 +64,8 @@ func (s *StatusBar) View() string {
 
 	return s.styles.BorderActive.
 		Width(innerW).
-		Height(3).
-		MaxHeight(3).
+		Height(6).
+		MaxHeight(6).
 		Render(content)
 }
 
