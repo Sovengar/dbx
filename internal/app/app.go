@@ -843,14 +843,73 @@ func (m Model) executeQuery(sql string) tea.Cmd {
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(m.conn)
 
-		result, err := loader.ExecuteRaw(ctx, sql)
-
-		if err != nil {
-			return queryExecutedMsg{err: err, sql: sql}
+		statements := splitSQL(sql)
+		if len(statements) == 0 {
+			return queryExecutedMsg{err: fmt.Errorf("no statements to execute")}
 		}
 
-		return queryExecutedMsg{result: result, sql: sql}
+		var lastResult *postgres.QueryResult
+		for _, stmt := range statements {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" {
+				continue
+			}
+			result, err := loader.ExecuteRaw(ctx, stmt)
+			if err != nil {
+				return queryExecutedMsg{err: err, sql: stmt}
+			}
+			lastResult = result
+		}
+
+		if lastResult == nil {
+			lastResult = &postgres.QueryResult{}
+		}
+		return queryExecutedMsg{result: lastResult, sql: sql}
 	}
+}
+
+// splitSQL splits a SQL string by top-level semicolons, ignoring semicolons inside strings.
+func splitSQL(sql string) []string {
+	var parts []string
+	var current strings.Builder
+	inSingleQuote := false
+	inDoubleQuote := false
+
+	for i := 0; i < len(sql); i++ {
+		ch := sql[i]
+
+		if ch == '\'' && !inDoubleQuote {
+			if i+1 < len(sql) && sql[i+1] == '\'' {
+				current.WriteByte(ch)
+				current.WriteByte(ch)
+				i++
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			current.WriteByte(ch)
+			continue
+		}
+
+		if ch == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			current.WriteByte(ch)
+			continue
+		}
+
+		if ch == ';' && !inSingleQuote && !inDoubleQuote {
+			parts = append(parts, current.String())
+			current.Reset()
+			continue
+		}
+
+		current.WriteByte(ch)
+	}
+
+	if current.Len() > 0 {
+		parts = append(parts, current.String())
+	}
+
+	return parts
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
