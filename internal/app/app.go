@@ -1985,7 +1985,7 @@ func (m Model) renderMainView() string {
 		}
 		return len(lines)
 	}
-	statusBarLines := 5 + countLines(topLine)
+	statusBarLines := 7 + countLines(topLine)
 	contentHeight := m.height - statusBarLines
 	if contentHeight < 1 {
 		contentHeight = 1
@@ -2115,16 +2115,7 @@ func (m Model) renderGrid(w, h int) string {
 		m.grid.Blur()
 	}
 
-	border := m.styles.Border
-	if m.router.Focus() == FocusGrid {
-		border = m.styles.BorderActive
-	}
-
-	return border.
-		Width(w - 2).
-		Height(h - 2).
-		MaxHeight(h - 2).
-		Render(m.grid.View())
+	return m.grid.View()
 }
 
 func (m Model) renderGridSidebarPreview(w, h int) string {
@@ -2224,7 +2215,7 @@ func overlayBottomRight(base, box string, width, height, stackOffset int) string
 	if x < 0 {
 		x = 0
 	}
-	y := height - bh - 6 - stackOffset*(bh+1)
+	y := height - bh - 8 - stackOffset*(bh+1)
 	if y < 0 {
 		y = 0
 	}
