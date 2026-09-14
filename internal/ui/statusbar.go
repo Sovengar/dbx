@@ -86,9 +86,9 @@ func (s *StatusBar) renderContextual() []string {
 
 	if s.editorOpen {
 		if s.autocompleteReady {
-			lines = append(lines, "Ctrl+Enter execute · Tab autocomplete · Ctrl+U clear · Ctrl+P/N history")
+			lines = append(lines, "Ctrl+Enter execute · Tab autocomplete · Ctrl+U clear · Ctrl+Y copy · Ctrl+P/N history")
 		} else {
-			lines = append(lines, "Ctrl+Enter execute · Ctrl+U clear · Ctrl+P/N history")
+			lines = append(lines, "Ctrl+Enter execute · Ctrl+U clear · Ctrl+Y copy · Ctrl+P/N history")
 		}
 	} else {
 		switch s.focus {
