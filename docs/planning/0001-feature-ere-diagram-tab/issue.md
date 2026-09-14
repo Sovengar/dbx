@@ -16,6 +16,7 @@
 
 - As a user, I want the current table rendered as a box with its columns, so I can see which columns are PK (`🔑`/`PK`) and FK (`FK`).
 - As a user, I want relationship lines drawn from the current table to related tables (outgoing FKs and incoming references), so I can see the graph neighborhood.
+- As a user, I want to navigate to a related table by pressing Enter on a neighbor box, so the diagram re-centers on that table and shows ITS relationships — enabling schema exploration by walking the graph.
 - As a user, I want the diagram to scroll (viewport) when it exceeds the pane size, so large schemas don't break the layout.
 - As a user, I want the diagram styled with the existing theme system (Lipgloss), so it matches the rest of the UI.
 
@@ -92,8 +93,10 @@ MVP rules:
 - [ ] Diagram scrolls when taller/wider than the pane; scroll state resets on table change.
 - [ ] Tables with zero relationships show a clean empty-state message.
 - [ ] Hub tables (many FKs) render without crashing or overflowing — capped neighbors + "+N more" note.
+- [ ] Pressing Enter on a neighbor box re-centers the diagram on that table, showing its relationships.
+- [ ] Navigation updates the explorer tree selection to the new table (keeps state in sync).
 - [ ] `go build ./... && go vet ./... && go test ./...` pass; `make install` deployed.
-- [ ] Keybind checklist honored (no new keybinds expected, but scroll keys must not collide with existing preview keybinds).
+- [ ] Keybind checklist honored (Enter for navigation must not collide with existing preview keybinds).
 
 ## Task Breakdown
 
@@ -101,9 +104,10 @@ MVP rules:
 2. **Diagram model**: build a `relationship graph` struct (current table + outgoing/incoming edges) from existing FK data.
 3. **Renderer**: new `ere.go` in `explorerpreview` — box renderer (width computed from content), edge renderer, star layout, theme styles.
 4. **Viewport/scroll**: integrate scrolling for oversized diagrams.
-5. **Edge cases**: empty state, hub cap, name truncation, cross-schema refs (`RefSchema != current schema` → annotate table as `schema.table`).
-6. **Tests**: unit tests for layout math (box widths, edge routing) and graph building; golden-output test for a small fixture schema.
-7. **Docs**: update README preview-tabs section + `docs/KEYBINDS.md` if any scroll keys are added.
+5. **Navigation**: cursor-based selection on neighbor boxes; Enter re-centers diagram on selected table; arrow keys move selection.
+6. **Edge cases**: empty state, hub cap, name truncation, cross-schema refs (`RefSchema != current schema` → annotate table as `schema.table`).
+7. **Tests**: unit tests for layout math (box widths, edge routing) and graph building; golden-output test for a small fixture schema.
+8. **Docs**: update README preview-tabs section + `docs/KEYBINDS.md` if any scroll keys are added.
 
 ## Testing Plan
 
@@ -114,6 +118,5 @@ MVP rules:
 ## Out of Scope (follow-ups)
 
 - Full-schema diagram (all tables, multi-hop)
-- Interactive navigation (jump to related table via Enter) — natural follow-up
 - Zoom/expand neighbor boxes to full column lists
 - Export diagram to file (SVG/Mermaid)

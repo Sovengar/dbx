@@ -14,21 +14,32 @@ type ExplorerPreviewTabChangeMsg struct {
 	Tab int
 }
 
+type ERENavigateMsg struct {
+	Schema string
+	Table  string
+}
+
 type ExplorerPreview struct {
-	styles       *theme.Styles
-	tabBar       *TabBar
-	activeTab    int
-	focused      bool
-	width        int
-	height       int
-	keybinds     map[string]string
-	tableName    string
-	schema       string
-	columns      []postgres.ColumnInfo
-	constraints  []postgres.ConstraintInfo
-	foreignKeys  []postgres.ForeignKeyInfo
-	indexes      []postgres.IndexInfo
-	overview     *postgres.TableOverview
+	styles            *theme.Styles
+	tabBar            *TabBar
+	activeTab         int
+	focused           bool
+	width             int
+	height            int
+	keybinds          map[string]string
+	tableName         string
+	schema            string
+	columns           []postgres.ColumnInfo
+	constraints       []postgres.ConstraintInfo
+	foreignKeys       []postgres.ForeignKeyInfo
+	indexes           []postgres.IndexInfo
+	overview          *postgres.TableOverview
+	schemaForeignKeys map[string][]postgres.ForeignKeyInfo
+	centerSchema      string
+	centerTable       string
+	ereNav            *ERDiagramNav
+	ereViewport       *ERDiagramViewport
+	ereDiagram        *ERDiagram
 }
 
 func New(styles *theme.Styles, keybinds map[string]string) *ExplorerPreview {
@@ -64,6 +75,9 @@ func (e *ExplorerPreview) SetData(
 	e.foreignKeys = foreignKeys
 	e.indexes = indexes
 	e.overview = overview
+	e.centerSchema = schema
+	e.centerTable = table
+	e.buildEREDiagram()
 }
 
 func (e *ExplorerPreview) SetOverview(overview *postgres.TableOverview) {
@@ -86,12 +100,48 @@ func (e *ExplorerPreview) SetIndexes(indexes []postgres.IndexInfo) {
 	e.indexes = indexes
 }
 
+func (e *ExplorerPreview) SetSchemaForeignKeys(schemaFKs map[string][]postgres.ForeignKeyInfo) {
+	e.schemaForeignKeys = schemaFKs
+}
+
+func (e *ExplorerPreview) CenterTable() string {
+	if e.centerTable != "" {
+		return e.centerTable
+	}
+	return e.tableName
+}
+
+func (e *ExplorerPreview) CenterSchema() string {
+	if e.centerSchema != "" {
+		return e.centerSchema
+	}
+	return e.schema
+}
+
 func (e *ExplorerPreview) HasData() bool {
 	return e.tableName != ""
 }
 
 func (e *ExplorerPreview) TableName() string {
 	return e.tableName
+}
+
+func (e *ExplorerPreview) buildEREDiagram() {
+	if e.centerTable == "" || e.centerSchema == "" {
+		return
+	}
+	diagram := BuildERDiagram(
+		e.centerSchema,
+		e.centerTable,
+		e.columns,
+		e.constraints,
+		e.foreignKeys,
+		e.schemaForeignKeys,
+	)
+	e.ereDiagram = &diagram
+	totalNeighbors := len(diagram.Outgoing) + len(diagram.Incoming)
+	e.ereNav = NewERDiagramNav(totalNeighbors)
+	e.ereViewport = NewERDiagramViewport(e.height, totalNeighbors*6+4) // rough estimate
 }
 
 func (e *ExplorerPreview) Update(msg tea.Msg) (tea.Cmd, bool) {
@@ -127,6 +177,53 @@ func (e *ExplorerPreview) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if key == e.keybinds["explorer.tab_ere"] {
 			e.setActiveTab(5)
 			return func() tea.Msg { return ExplorerPreviewTabChangeMsg{Tab: 5} }, true
+		}
+
+		// ERE navigation keys (only when ERE tab is active)
+		if e.activeTab == 5 && e.ereNav != nil {
+			switch key {
+			case "up", "k":
+				e.ereNav.MoveUp()
+				return nil, true
+			case "down", "j":
+				e.ereNav.MoveDown()
+				return nil, true
+			case "g":
+				if e.ereViewport != nil {
+					e.ereViewport.JumpTop()
+				}
+				return nil, true
+			case "G":
+				if e.ereViewport != nil {
+					e.ereViewport.JumpBottom()
+				}
+				return nil, true
+			case "enter":
+				if e.ereNav.HasSelection() {
+					allNeighbors := append(e.ereDiagram.Outgoing, e.ereDiagram.Incoming...)
+					if rel := e.ereNav.GetSelectedNeighbor(allNeighbors); rel != nil {
+						// Re-center on the selected table
+						newTable := rel.ToTable
+						newSchema := e.centerSchema
+						// Handle cross-schema
+						if idx := strings.Index(newTable, "."); idx > 0 {
+							newSchema = newTable[:idx]
+							newTable = newTable[idx+1:]
+						}
+						e.centerSchema = newSchema
+						e.centerTable = newTable
+						e.buildEREDiagram()
+						if e.ereViewport != nil {
+							e.ereViewport.Reset()
+						}
+						// Return a message so app.go can update explorer selection
+						return func() tea.Msg {
+							return ERENavigateMsg{Schema: newSchema, Table: newTable}
+						}, true
+					}
+				}
+				return nil, true
+			}
 		}
 	}
 
@@ -165,7 +262,10 @@ func (e *ExplorerPreview) View() string {
 }
 
 func (e *ExplorerPreview) renderERE() string {
-	return e.styles.TextMuted.Render("  Entity-Relationship diagram — coming soon")
+	if e.ereDiagram == nil {
+		return e.styles.TextMuted.Render("  No data available for ERE diagram")
+	}
+	return RenderERDiagram(*e.ereDiagram, e.width, e.height)
 }
 
 func (e *ExplorerPreview) renderOverview() string {
