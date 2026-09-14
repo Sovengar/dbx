@@ -261,6 +261,7 @@ dbx ask "show me all active users"
 | --- | -------------------------- |
 | `Ctrl+Enter` | Execute query     |
 | `Ctrl+U` | Clear editor          |
+| `Ctrl+Y` | Copy SQL to clipboard |
 | `Tab`/`Enter` | Accept autocomplete suggestion |
 | `↑`/`↓` | Navigate suggestions  |
 | `Esc` | Close autocomplete / close editor |

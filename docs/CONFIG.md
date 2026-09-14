@@ -71,6 +71,7 @@ mode = "system"
 # Editor
 # "editor.execute" = ["ctrl+enter", "ctrl+r"]
 # "editor.clear" = "ctrl+u"
+# "editor.copy" = "ctrl+y"
 # "editor.external" = "ctrl+g"
 # "editor.history_prev" = "ctrl+p"
 # "editor.history_next" = "ctrl+n"

@@ -192,6 +192,7 @@ SQL editor:
 |--------|-------------|-------------|
 | `editor.execute` | `Ctrl+Enter`, `Ctrl+R` | Run query |
 | `editor.clear` | `Ctrl+U` | Clear editor |
+| `editor.copy` | `Ctrl+Y` | Copy SQL to clipboard |
 | `editor.autocomplete` | `Tab` | Accept autocomplete suggestion |
 | `editor.history_prev` | `Ctrl+P` | Previous query |
 | `editor.history_next` | `Ctrl+N` | Next query |
@@ -273,5 +274,5 @@ Tab/Esc back · j/k navigate · Enter expand FK · g/G first/last · e explorer 
 1-6 tabs · Tab/Esc back to explorer
 
 [Editor-focused]
-Ctrl+Enter execute · Ctrl+U clear · Ctrl+P/N history
+Ctrl+Enter execute · Ctrl+U clear · Ctrl+Y copy · Ctrl+P/N history
 ```
