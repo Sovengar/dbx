@@ -136,6 +136,7 @@ func DefaultKeybindings() map[string]string {
 
 		"editor.execute":      "ctrl+enter",
 		"editor.clear":        "ctrl+u",
+		"editor.copy":         "ctrl+y",
 		"editor.autocomplete": "tab",
 		"editor.history_prev": "ctrl+p",
 		"editor.history_next": "ctrl+n",
@@ -223,6 +224,7 @@ func defaultBindings() map[string][]string {
 
 		"editor.execute":      {"ctrl+enter", "ctrl+r"},
 		"editor.clear":        {"ctrl+u"},
+		"editor.copy":         {"ctrl+y"},
 		"editor.autocomplete": {"tab"},
 		"editor.history_prev": {"ctrl+p"},
 		"editor.history_next": {"ctrl+n"},
