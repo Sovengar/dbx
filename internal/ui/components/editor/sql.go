@@ -8,6 +8,9 @@ import (
 	"github.com/buble/dbx/internal/theme"
 )
 
+// CopySQLMsg is emitted when the user presses Ctrl+Y in the editor.
+type CopySQLMsg struct{}
+
 type SQLEditor struct {
 	styles       *theme.Styles
 	lines        []string
@@ -118,6 +121,12 @@ func (e *SQLEditor) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case "ctrl+space":
 		e.triggerAutocomplete()
 		return nil, true
+
+	case "ctrl+y":
+		if e.Content() == "" {
+			return nil, false
+		}
+		return func() tea.Msg { return CopySQLMsg{} }, true
 
 	case "ctrl+u":
 		e.Clear()

@@ -1057,6 +1057,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case editor.CopySQLMsg:
+		return m, m.handleCopySQL()
+
+	case copySQLDoneMsg:
+		if msg.err != nil {
+			m.toast.ShowError("Clipboard not available")
+		} else {
+			m.toast.ShowSuccess("SQL copied to clipboard")
+		}
+		return m, nil
+
 	case grid.GridTabChangeMsg:
 		cmd := m.syncGridSidebarPreviewForCursor()
 		return m, cmd
@@ -1859,6 +1870,23 @@ type exportDoneMsg struct {
 	clipboard bool
 	yankCount int
 	err       error
+}
+
+type copySQLDoneMsg struct {
+	err error
+}
+
+func (m Model) handleCopySQL() tea.Cmd {
+	content := m.editor.Content()
+	if content == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		if err := copyToClipboard(content); err != nil {
+			return copySQLDoneMsg{err: err}
+		}
+		return copySQLDoneMsg{}
+	}
 }
 
 func (m Model) View() tea.View {
