@@ -123,10 +123,15 @@ func BuildERDiagram(
 	}
 
 	// Outgoing: current table's FKs → other tables
+	// Deduplicate by target table — one box per table
+	seenOutgoing := make(map[string]bool)
 	for _, fk := range outgoingFKs {
 		targetTable := fk.RefTable
 		if fk.RefSchema != schema && fk.RefSchema != "" {
 			targetTable = fk.RefSchema + "." + fk.RefTable
+		}
+		if seenOutgoing[targetTable] {
+			continue
 		}
 		diagram.Outgoing = append(diagram.Outgoing, Relationship{
 			FromColumn:  fk.Column,
@@ -134,28 +139,17 @@ func BuildERDiagram(
 			ToColumn:    fk.RefColumn,
 			Cardinality: "N:1",
 		})
+		seenOutgoing[targetTable] = true
 	}
 
 	// Incoming: other tables' FKs → current table
-	for _, fks := range schemaFKs {
-		for _, fk := range fks {
-			if fk.RefTable == table && fk.RefSchema == schema {
-				sourceTable := fk.RefTable // just for the relationship
-				_ = sourceTable
-				diagram.Incoming = append(diagram.Incoming, Relationship{
-					FromColumn:  fk.Column,
-					ToTable:     fk.Name, // placeholder, we'll fix below
-					ToColumn:    fk.RefColumn,
-					Cardinality: "1:N",
-				})
-			}
-		}
-	}
-
-	// Fix incoming: we need the source table name, not the FK name.
-	// Re-scan schemaFKs to find the table that owns each FK.
+	// Deduplicate by source table — one box per table, even with multiple FKs
+	seenIncoming := make(map[string]bool)
 	incomingFixed := make([]Relationship, 0)
 	for tableName, fks := range schemaFKs {
+		if seenIncoming[tableName] {
+			continue
+		}
 		for _, fk := range fks {
 			if fk.RefTable == table && fk.RefSchema == schema {
 				incomingFixed = append(incomingFixed, Relationship{
@@ -164,6 +158,8 @@ func BuildERDiagram(
 					ToColumn:    fk.RefColumn,
 					Cardinality: "1:N",
 				})
+				seenIncoming[tableName] = true
+				break
 			}
 		}
 	}
@@ -334,69 +330,52 @@ func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int) string {
 
 	centerWidth := ComputeBoxWidth(diagram.Center.Columns)
 	centerBox := renderBox(diagram.Center.Name, diagram.Center.Columns, centerWidth, false)
-
-	// Build neighbor boxes
-	var outgoingBoxes []string
-	for _, rel := range diagram.Outgoing {
-		// We don't have full column info for neighbors, just render the table name + involved columns
-		cols := []ColumnBadge{
-			{Name: rel.ToTable, DataType: "", IsFK: true},
-		}
-		box := renderBox(rel.ToTable, cols, centerWidth, false)
-		outgoingBoxes = append(outgoingBoxes, box)
-	}
-
-	var incomingBoxes []string
-	for _, rel := range diagram.Incoming {
-		cols := []ColumnBadge{
-			{Name: rel.ToTable, DataType: "", IsFK: true},
-		}
-		box := renderBox(rel.ToTable, cols, centerWidth, false)
-		incomingBoxes = append(incomingBoxes, box)
-	}
-
-	// Overflow indicators
-	if diagram.OutgoingOverflow > 0 {
-		outgoingBoxes = append(outgoingBoxes, fmt.Sprintf("  +%d more", diagram.OutgoingOverflow))
-	}
-	if diagram.IncomingOverflow > 0 {
-		incomingBoxes = append(incomingBoxes, fmt.Sprintf("  +%d more", diagram.IncomingOverflow))
-	}
-
-	// Layout: center box on the left, neighbors on the right
-	// Split pane: left half for center, right half for neighbors
-	halfWidth := paneWidth / 2
-
-	// Calculate total height needed
 	centerLines := strings.Split(centerBox, "\n")
 	centerHeight := len(centerLines)
 
-	// Neighbor section: outgoing on top, incoming on bottom
-	var neighborLines []string
-	if len(outgoingBoxes) > 0 {
-		neighborLines = append(neighborLines, "── Outgoing (N:1) ──")
-		for _, box := range outgoingBoxes {
-			neighborLines = append(neighborLines, strings.Split(box, "\n")...)
-			neighborLines = append(neighborLines, "") // spacing
+	// Build neighbor sections
+	var sections []string
+
+	if len(diagram.Outgoing) > 0 {
+		sections = append(sections, "── Outgoing (N:1) ──")
+		for _, rel := range diagram.Outgoing {
+			cols := []ColumnBadge{
+				{Name: rel.FromColumn, DataType: "", IsFK: true},
+			}
+			box := renderBox(rel.ToTable, cols, centerWidth, false)
+			sections = append(sections, strings.Split(box, "\n")...)
+			sections = append(sections, "") // spacing
 		}
-	}
-	if len(incomingBoxes) > 0 {
-		neighborLines = append(neighborLines, "── Incoming (1:N) ──")
-		for _, box := range incomingBoxes {
-			neighborLines = append(neighborLines, strings.Split(box, "\n")...)
-			neighborLines = append(neighborLines, "") // spacing
+		if diagram.OutgoingOverflow > 0 {
+			sections = append(sections, fmt.Sprintf("  +%d more", diagram.OutgoingOverflow))
+			sections = append(sections, "")
 		}
 	}
 
-	// Build edge lines between center and neighbors
-	// For simplicity, draw horizontal connectors
-	edgePad := 3
-	edgeLine := strings.Repeat("─", edgePad)
+	if len(diagram.Incoming) > 0 {
+		sections = append(sections, "── Incoming (1:N) ──")
+		for _, rel := range diagram.Incoming {
+			cols := []ColumnBadge{
+				{Name: rel.FromColumn, DataType: "", IsFK: true},
+			}
+			box := renderBox(rel.ToTable, cols, centerWidth, false)
+			sections = append(sections, strings.Split(box, "\n")...)
+			sections = append(sections, "") // spacing
+		}
+		if diagram.IncomingOverflow > 0 {
+			sections = append(sections, fmt.Sprintf("  +%d more", diagram.IncomingOverflow))
+			sections = append(sections, "")
+		}
+	}
 
-	// Merge left (center) and right (neighbors) side by side
+	// Layout: center box on the left, neighbors on the right
+	leftWidth := centerWidth + 4 // box + margin
+	edgeLen := 3
+
+	// Merge side by side
 	maxLines := centerHeight
-	if len(neighborLines) > maxLines {
-		maxLines = len(neighborLines)
+	if len(sections) > maxLines {
+		maxLines = len(sections)
 	}
 
 	var result []string
@@ -405,20 +384,20 @@ func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int) string {
 		if i < len(centerLines) {
 			left = centerLines[i]
 		}
-		// Pad left to halfWidth
-		if len(left) < halfWidth {
-			left += strings.Repeat(" ", halfWidth-len(left))
+		// Pad to fixed left width
+		if len(left) < leftWidth {
+			left += strings.Repeat(" ", leftWidth-len(left))
 		}
 
 		right := ""
-		if i < len(neighborLines) {
-			right = neighborLines[i]
+		if i < len(sections) {
+			right = sections[i]
 		}
 
-		// Add edge connector at the center box's right edge
+		// Edge connector: horizontal line from center box right edge to neighbor
 		connector := ""
-		if i > 0 && i < centerHeight-1 && i < len(neighborLines) {
-			connector = edgeLine + " "
+		if i > 0 && i < centerHeight-1 && right != "" {
+			connector = strings.Repeat("─", edgeLen) + " "
 		}
 
 		result = append(result, left+connector+right)

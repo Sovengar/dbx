@@ -172,6 +172,44 @@ func TestBuildERDiagram_CrossSchema(t *testing.T) {
 	}
 }
 
+// --- Deduplication: multiple FKs to same table produce one box ---
+
+func TestBuildERDiagram_Deduplication(t *testing.T) {
+	columns := []postgres.ColumnInfo{
+		{Name: "id", DataType: "integer"},
+		{Name: "user_id", DataType: "integer"},
+		{Name: "creator_id", DataType: "integer"},
+	}
+	outgoingFKs := []postgres.ForeignKeyInfo{
+		{Name: "fk_user", Column: "user_id", RefSchema: "public", RefTable: "users", RefColumn: "id"},
+		{Name: "fk_creator", Column: "creator_id", RefSchema: "public", RefTable: "users", RefColumn: "id"},
+	}
+
+	diagram := BuildERDiagram("public", "orders", columns, nil, outgoingFKs, nil)
+
+	// Two FKs to same table should produce only one outgoing box
+	if len(diagram.Outgoing) != 1 {
+		t.Errorf("expected 1 outgoing after dedup, got %d", len(diagram.Outgoing))
+	}
+}
+
+func TestBuildERDiagram_IncomingDeduplication(t *testing.T) {
+	columns := []postgres.ColumnInfo{{Name: "id", DataType: "integer"}}
+	schemaFKs := map[string][]postgres.ForeignKeyInfo{
+		"order_items": {
+			{Name: "fk_order1", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
+			{Name: "fk_order2", Column: "parent_order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
+		},
+	}
+
+	diagram := BuildERDiagram("public", "orders", columns, nil, nil, schemaFKs)
+
+	// Two FKs from same table should produce only one incoming box
+	if len(diagram.Incoming) != 1 {
+		t.Errorf("expected 1 incoming after dedup, got %d", len(diagram.Incoming))
+	}
+}
+
 // --- Scenario: Long table name truncation ---
 // Given the current table has a name longer than 40 characters
 
