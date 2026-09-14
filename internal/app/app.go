@@ -1626,6 +1626,13 @@ func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 	case "editor.clear":
 		m.editor.Clear()
 		m.toast.ShowInfo("Editor cleared")
+	case "editor.copy":
+		if !m.editorOpen {
+			m.editorOpen = true
+			m.editor.Focus()
+			m.statusbar.SetEditorOpen(true)
+		}
+		return m, m.handleCopySQL()
 	default:
 		m.toast.ShowInfo(fmt.Sprintf("Command: %s", action))
 	}

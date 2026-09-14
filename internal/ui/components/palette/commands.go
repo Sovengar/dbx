@@ -29,6 +29,7 @@ func DefaultCommands() []command {
 
 		{Name: "Execute Query", Alias: "execute", Action: "editor.execute", Section: SectionQuery},
 		{Name: "Clear Editor", Alias: "clear", Action: "editor.clear", Section: SectionQuery},
+		{Name: "Copy SQL", Alias: "copy", Action: "editor.copy", Section: SectionQuery},
 
 		{Name: "Show Help", Alias: "help", Action: "global.help", Section: SectionUI},
 
