@@ -113,7 +113,7 @@ Schema tree navigation:
 | `grid.navigate_fk` | `o` | Open referenced table |
 | `grid.go_back` | `H` | Return to previous table |
 | `grid.refresh` | `r` | Refresh data (re-execute query) |
-| `grid.commit_pending` | `Ctrl+S` | Commit all drafts (double-confirm when deletes pending) |
+| `grid.commit_pending` | `Ctrl+S` | Dump draft SQL to editor for review/edit/copy |
 | `grid.discard_all` | `D` | Discard all draft changes |
 
 ### EDIT mode
@@ -265,7 +265,7 @@ The statusbar shows relevant keybinds based on current context:
 [Grid-focused]
 / filter · r refresh · n/p N/P page · F1-9 goto · s sort · f find column
 Enter edit · d delete · i insert · space select · y yank · x export · o FK nav
-Ctrl+S save · D discard · H go back
+Ctrl+S dump SQL · D discard · H go back
 
 [Grid Preview-focused]
 Tab/Esc back · j/k navigate · Enter expand FK · g/G first/last · e explorer · / jq

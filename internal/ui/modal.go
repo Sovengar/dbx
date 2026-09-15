@@ -153,6 +153,7 @@ func (m *HelpModal) View() string {
 	lines = append(lines, m.renderKeybind("grid.select_row", "Select Row"))
 	lines = append(lines, m.renderKeybind("grid.commit_pending", "Commit Drafts"))
 	lines = append(lines, m.renderKeybind("grid.discard_all", "Discard Drafts"))
+	lines = append(lines, m.renderKeybind("grid.undo", "Undo Row Drafts"))
 	lines = append(lines, m.renderKeybind("grid.yank", "Yank to Clipboard"))
 	lines = append(lines, m.renderKeybind("grid.export", "Export (SQL/JSON/CSV)"))
 	lines = append(lines, m.renderKeybind("grid.sort", "Sort Column"))

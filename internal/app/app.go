@@ -1106,6 +1106,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.toast.ShowSuccess(fmt.Sprintf("%d change(s) committed", executed))
 		return m, m.loadTableData(msg.Schema, msg.Table)
 
+	case grid.GridUndoRowMsg:
+		if msg.Count > 0 {
+			m.toast.ShowSuccess(fmt.Sprintf("Undid %d draft change(s) on row", msg.Count))
+		} else {
+			m.toast.ShowInfo("No drafts on this row")
+		}
+
 	case grid.GridFilterApplyMsg:
 		if m.conn == nil {
 			return m, nil
@@ -1709,6 +1716,15 @@ func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 		if m.router.Focus() == FocusGrid && m.grid.HasData() {
 			if cmd, handled := m.grid.StartExport(); handled {
 				return m, cmd
+			}
+		}
+	case "grid.undo":
+		if m.router.Focus() == FocusGrid && m.grid.HasData() {
+			count := m.grid.UndoRowDrafts()
+			if count > 0 {
+				m.toast.ShowSuccess(fmt.Sprintf("Undid %d draft change(s) on row", count))
+			} else {
+				m.toast.ShowInfo("No drafts on this row")
 			}
 		}
 	case "editor.execute":

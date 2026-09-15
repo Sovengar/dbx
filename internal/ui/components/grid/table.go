@@ -31,6 +31,10 @@ type GridCommitAllMsg struct {
 	Args    [][]interface{}
 }
 
+type GridUndoRowMsg struct {
+	Count int
+}
+
 type PendingUpdate struct {
 	RowIdx   int
 	ColIdx   int
@@ -123,6 +127,7 @@ type Grid struct {
 	editValue   string
 	editStartValue string
 	editCursor  int
+	editOrigWidth int
 	displayDraftCount int
 	filtering   bool
 	filter      string
@@ -652,6 +657,7 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return g.cursorMovedCmd(), true
 	case "enter":
 		if g.inserting {
+			g.restoreEditWidth()
 			g.editing = true
 			g.editCol = g.pendingCol
 			val := g.pendingRows[g.pendingRow][g.pendingCol]
@@ -661,6 +667,7 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 				g.editValue = fmt.Sprintf("%v", val)
 			}
 			g.editCursor = len(g.editValue)
+			g.expandEditCol()
 			return nil, true
 		}
 		g.startEdit()
@@ -698,6 +705,15 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	// Handle discard drafts keybinding
 	if key == "D" {
 		return g.handleDiscardKey()
+	}
+
+	// Handle undo row drafts keybinding
+	if key == g.keybinds["grid.undo"] {
+		count := g.UndoRowDrafts()
+		if count > 0 {
+			return func() tea.Msg { return GridUndoRowMsg{Count: count} }, true
+		}
+		return nil, true
 	}
 
 	// Handle refresh keybinding
@@ -828,6 +844,7 @@ func (g *Grid) startEdit() {
 	g.editValue = fmt.Sprintf("%v", g.data.Rows[g.editRow][g.editCol])
 	g.editStartValue = g.editValue
 	g.editCursor = len(g.editValue)
+	g.expandEditCol()
 }
 
 func (g *Grid) startInsertRow() (tea.Cmd, bool) {
@@ -1083,6 +1100,42 @@ func (g *Grid) IsDiscardPending() bool {
 	return g.discardPending
 }
 
+// UndoRowDrafts reverts all draft changes (updates + deletes) on the
+// currently selected row. Does NOT affect pending inserts.
+func (g *Grid) UndoRowDrafts() int {
+	targetRowIdx := g.cursorRow + g.pager.Offset()
+
+	count := 0
+
+	// Restore cell values for updates on this row
+	filtered := g.pendingUpdates[:0]
+	for _, u := range g.pendingUpdates {
+		if u.RowIdx == targetRowIdx {
+			if u.RowIdx >= 0 && u.RowIdx < len(g.data.Rows) {
+				g.data.Rows[u.RowIdx][u.ColIdx] = u.OldValue
+			}
+			count++
+		} else {
+			filtered = append(filtered, u)
+		}
+	}
+	g.pendingUpdates = filtered
+
+	// Remove delete for this row
+	filteredDel := g.pendingDeletes[:0]
+	for _, d := range g.pendingDeletes {
+		if d.RowIdx == targetRowIdx {
+			count++
+		} else {
+			filteredDel = append(filteredDel, d)
+		}
+	}
+	g.pendingDeletes = filteredDel
+
+	g.displayDraftCount = g.DraftCount()
+	return count
+}
+
 func (g *Grid) handleRefreshKey() (tea.Cmd, bool) {
 	if g.data == nil || len(g.columns) == 0 {
 		return nil, false
@@ -1257,6 +1310,7 @@ func (g *Grid) handleEditKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 
 	switch key {
 	case "esc":
+		g.restoreEditWidth()
 		if g.editValue != g.editStartValue {
 			g.commitEdit()
 			g.editing = false
@@ -1273,6 +1327,7 @@ func (g *Grid) handleEditKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	case "tab":
+		g.restoreEditWidth()
 		cmd := g.commitEdit()
 		g.editValue = ""
 		nextCol := (g.editCol + 1) % len(g.columns)
@@ -1289,8 +1344,10 @@ func (g *Grid) handleEditKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			g.editValue = fmt.Sprintf("%v", g.data.Rows[g.editRow][nextCol])
 		}
 		g.editCursor = len(g.editValue)
+		g.expandEditCol()
 		return cmd, true
 	case "enter":
+		g.restoreEditWidth()
 		cmd := g.commitEdit()
 		g.editValue = ""
 		nextCol := (g.editCol + 1) % len(g.columns)
@@ -1307,22 +1364,29 @@ func (g *Grid) handleEditKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			g.editValue = fmt.Sprintf("%v", g.data.Rows[g.editRow][nextCol])
 		}
 		g.editCursor = len(g.editValue)
+		g.expandEditCol()
 		return cmd, true
 	case "up":
 		if g.editRow > 0 {
+			g.restoreEditWidth()
+			g.commitEdit()
 			g.editRow--
 			g.cursorRow = g.editRow - g.pager.Offset()
 			g.editValue = fmt.Sprintf("%v", g.data.Rows[g.editRow][g.editCol])
 			g.editCursor = len(g.editValue)
+			g.expandEditCol()
 		}
 		return nil, true
 	case "down":
 		maxRow := len(g.data.Rows) - 1
 		if g.editRow < maxRow {
+			g.restoreEditWidth()
+			g.commitEdit()
 			g.editRow++
 			g.cursorRow = g.editRow - g.pager.Offset()
 			g.editValue = fmt.Sprintf("%v", g.data.Rows[g.editRow][g.editCol])
 			g.editCursor = len(g.editValue)
+			g.expandEditCol()
 		}
 		return nil, true
 	case "left":
@@ -1356,6 +1420,9 @@ func (g *Grid) handleEditKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		if msg.Text != "" && !isControlKey(msg) {
 			g.editValue = g.editValue[:g.editCursor] + msg.Text + g.editValue[g.editCursor:]
 			g.editCursor += len(msg.Text)
+			if len(g.editValue)+4 > g.widths[g.editCol] {
+				g.expandEditCol()
+			}
 			return nil, true
 		}
 	}
@@ -1365,6 +1432,33 @@ func (g *Grid) handleEditKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 
 func isControlKey(msg tea.KeyPressMsg) bool {
 	return msg.Mod > 0
+}
+
+func (g *Grid) restoreEditWidth() {
+	if g.editOrigWidth > 0 && g.editCol >= 0 && g.editCol < len(g.widths) {
+		g.widths[g.editCol] = g.editOrigWidth
+		g.editOrigWidth = 0
+	}
+}
+
+func (g *Grid) expandEditCol() {
+	if g.editCol < 0 || g.editCol >= len(g.widths) {
+		return
+	}
+	g.editOrigWidth = g.widths[g.editCol]
+	colNameWidth := len(g.columns[g.editCol]) + 4
+	editValWidth := len(g.editValue) + 4
+	expandedWidth := g.editOrigWidth
+	if colNameWidth > expandedWidth {
+		expandedWidth = colNameWidth
+	}
+	if editValWidth > expandedWidth {
+		expandedWidth = editValWidth
+	}
+	if expandedWidth > 80 {
+		expandedWidth = 80
+	}
+	g.widths[g.editCol] = expandedWidth
 }
 
 func (g *Grid) commitEdit() tea.Cmd {

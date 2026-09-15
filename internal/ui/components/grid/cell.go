@@ -120,7 +120,7 @@ func (cr *CellRenderer) RenderCursorSelectedRow(values []interface{}, widths []i
 }
 
 func (cr *CellRenderer) RenderEditCell(value interface{}, width int, editValue string, cursorPos int) string {
-	truncated := cr.Truncate(editValue, width-2)
+	truncated := cr.Truncate(editValue, width-3)
 
 	runes := []rune(truncated)
 	if cursorPos > len(runes) {

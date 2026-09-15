@@ -26,6 +26,7 @@ func DefaultCommands() []command {
 		{Name: "Refresh Schema", Alias: "refresh", Action: "explorer.refresh", Section: SectionDatabase},
 		{Name: "Refresh Data", Alias: "refresh-data", Action: "grid.refresh", Section: SectionDatabase},
 		{Name: "Export Table", Alias: "export", Action: "global.export", Section: SectionDatabase},
+		{Name: "Undo Row Drafts", Alias: "undo", Action: "grid.undo", Section: SectionDatabase},
 
 		{Name: "Execute Query", Alias: "execute", Action: "editor.execute", Section: SectionQuery},
 		{Name: "Clear Editor", Alias: "clear", Action: "editor.clear", Section: SectionQuery},

@@ -8,7 +8,7 @@ dbx is a terminal UI for databases designed for both humans and AI agents.
 
 ### Grid
 
-> **Draft model**: All edits, inserts, and deletes are staged locally (with color feedback) and committed atomically with `Ctrl+S`. Press `D` to discard.
+> **Draft model**: All edits, inserts, and deletes are staged locally (with color feedback). Press `Ctrl+S` to dump the generated SQL into the editor for review/edit/copy. Press `D` to discard.
 
 | Action                   | Behavior                                                                                          |
 | ------------------------ | ------------------------------------------------------------------------------------------------- |
@@ -19,7 +19,7 @@ dbx is a terminal UI for databases designed for both humans and AI agents.
 | Edit cell (`enter`)      | Inline editing with type-aware parsing (int, float, bool), stores draft locally (blue cell)       |
 | Insert row (`i`)         | Staged insert: creates a pending row in the grid (shown in green)                                 |
 | Delete row (`d`)         | Stages row for deletion (red)                                                                      |
-| Commit all (`Ctrl+S`)    | Commits ALL drafts atomically. When deletes are pending, press twice to confirm                   |
+| Dump SQL to editor (`Ctrl+S`) | Generates SQL for all drafts and opens it in the editor for review/edit/copy |
 | Discard all (`D`)        | Discards all pending changes, restores original values (press twice to confirm)                   |
 | Multi-select (`space`)   | Toggles row selection for bulk operations                                                         |
 | FK navigate (`o`)        | Follow foreign key: loads referenced table with FK filter AND existing WHERE, syncs explorer     |
@@ -47,11 +47,11 @@ All changes (edits, inserts, deletes) are staged locally before being committed 
 | 🔵 Blue   | Modified cell (edit draft)  |
 | 🔴 Red    | Row marked for deletion     |
 
-- **`Ctrl+S`** — Commits all drafts (INSERTs + UPDATEs + DELETEs) atomically, then reloads the table.
+- **`Ctrl+S`** — Generates SQL for all drafts (INSERTs + UPDATEs + DELETEs) and opens it in the editor. You can modify, review, and execute from there.
 - **`D`** — Discard all pending changes. Press twice to confirm. Restores original values.
 - **`Esc`** — Exits edit mode but does **NOT** discard drafts. Drafts persist with their colors.
 
-No database changes occur until you commit with `Ctrl+S`.
+No database changes occur until you execute the SQL from the editor with `Ctrl+Enter`.
 
 ### Explorer
 
@@ -217,7 +217,7 @@ dbx ask "show me all active users"
 | `o` | Open FK reference         |
 | `H` | Go back                   |
 | `r` | Refresh data              |
-| `Ctrl+S` | Commit pending        |
+| `Ctrl+S` | Dump drafts SQL to editor |
 | `D` | Discard drafts            |
 
 ### Grid — EDIT mode
