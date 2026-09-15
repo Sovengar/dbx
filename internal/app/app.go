@@ -2145,19 +2145,25 @@ func (m Model) renderBreadcrumbs(selSchema, selTable string, rowCount int) strin
 func (m Model) renderTopLine(selSchema, selTable string, rowCount int) string {
 	breadcrumb := m.renderBreadcrumbs(selSchema, selTable, rowCount)
 
+	var content string
 	if m.spinnerActive {
 		spinner := m.styles.Info.Render(spinnerChars[m.spinnerFrame])
 		if breadcrumb == "" {
 			return "  " + spinner + "\n"
 		}
 		breadInline := strings.TrimRight(breadcrumb, "\n")
-		return "  " + spinner + m.styles.TextMuted.Render(" · ") + breadInline + "\n"
+		content = spinner + m.styles.TextMuted.Render(" · ") + breadInline
+	} else {
+		if breadcrumb == "" {
+			return ""
+		}
+		content = strings.TrimRight(breadcrumb, "\n")
 	}
 
-	if breadcrumb == "" {
-		return ""
-	}
-	return strings.TrimRight(breadcrumb, "\n") + "\n"
+	border := lipgloss.RoundedBorder()
+	borderFg := m.styles.Border.GetBorderTopForeground()
+
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Breadcrumbs ", content, m.width) + "\n"
 }
 
 func (m Model) renderExplorer(w, h int) string {

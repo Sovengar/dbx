@@ -102,7 +102,7 @@ func (p *Preview) Render() string {
 		return ""
 	}
 
-	contentHeight := p.height - 2
+	contentHeight := p.height - 4
 
 	if len(p.lines) == 0 {
 		return p.styles.Text.Render("  No data")
