@@ -220,28 +220,51 @@ func buildContentLines(style *ansi.Style, leftChar, rightChar, content string, i
 }
 
 // wrapLine breaks a line into chunks that fit within maxDisplayWidth.
+// ANSI escape sequences are treated as atomic units — never split mid-sequence.
 func wrapLine(line string, maxDisplayWidth int) []string {
 	if maxDisplayWidth <= 0 {
 		return []string{line}
 	}
 
 	var chunks []string
-	runes := []rune(line)
 	currentChunk := ""
 	currentWidth := 0
+	i := 0
+	runes := []rune(line)
 
-	for _, r := range runes {
-		runeStr := string(r)
-		runeWidth := ansi.StringWidth(runeStr)
+	for i < len(runes) {
+		r := runes[i]
+
+		// ANSI escape sequence: ESC [ ... final_byte
+		// Treat the entire sequence as one unit with 0 display width.
+		if r == '\033' && i+1 < len(runes) && runes[i+1] == '[' {
+			// Find the final byte (0x40–0x7E)
+			j := i + 2
+			for j < len(runes) {
+				b := runes[j]
+				if b >= 0x40 && b <= 0x7E {
+					j++
+					break
+				}
+				j++
+			}
+			// Append the entire escape sequence to current chunk (0 display width)
+			currentChunk += string(runes[i:j])
+			i = j
+			continue
+		}
+
+		runeWidth := ansi.StringWidth(string(r))
 
 		if currentWidth+runeWidth > maxDisplayWidth {
 			chunks = append(chunks, currentChunk)
-			currentChunk = runeStr
+			currentChunk = string(r)
 			currentWidth = runeWidth
 		} else {
-			currentChunk += runeStr
+			currentChunk += string(r)
 			currentWidth += runeWidth
 		}
+		i++
 	}
 
 	if currentChunk != "" {
