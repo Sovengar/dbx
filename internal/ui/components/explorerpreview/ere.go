@@ -26,9 +26,10 @@ type ColumnBadge struct {
 }
 
 type TableBox struct {
-	Schema  string
-	Name    string
-	Columns []ColumnBadge
+	Schema     string
+	Name       string
+	Columns    []ColumnBadge
+	IsJunction bool
 }
 
 type Relationship struct {
@@ -36,6 +37,7 @@ type Relationship struct {
 	ToTable      string
 	ToColumn     string
 	Cardinality  string // "N:1" or "1:N"
+	IsJunction   bool
 }
 
 type ERDiagram struct {
@@ -78,6 +80,16 @@ func ComputeBoxWidth(columns []ColumnBadge) int {
 	return width
 }
 
+// isJunctionTable checks if a table is a junction (N:N) table.
+// A junction table has ≥2 foreign keys referencing different tables.
+func isJunctionTable(fks []postgres.ForeignKeyInfo) bool {
+	targets := make(map[string]bool)
+	for _, fk := range fks {
+		targets[fk.RefTable] = true
+	}
+	return len(targets) >= 2
+}
+
 // buildPKSet extracts primary key column names from constraints.
 func buildPKSet(constraints []postgres.ConstraintInfo) map[string]bool {
 	pks := make(map[string]bool)
@@ -118,9 +130,10 @@ func BuildERDiagram(
 
 	diagram := ERDiagram{
 		Center: TableBox{
-			Schema:  schema,
-			Name:    table,
-			Columns: centerCols,
+			Schema:     schema,
+			Name:       table,
+			Columns:    centerCols,
+			IsJunction: isJunctionTable(outgoingFKs),
 		},
 	}
 
@@ -135,11 +148,17 @@ func BuildERDiagram(
 		if seenOutgoing[targetTable] {
 			continue
 		}
+		// Check if target table is a junction table
+		targetIsJunction := false
+		if targetFKs, ok := schemaFKs[fk.RefTable]; ok {
+			targetIsJunction = isJunctionTable(targetFKs)
+		}
 		diagram.Outgoing = append(diagram.Outgoing, Relationship{
 			FromColumn:  fk.Column,
 			ToTable:     targetTable,
 			ToColumn:    fk.RefColumn,
 			Cardinality: "N:1",
+			IsJunction:  targetIsJunction,
 		})
 		seenOutgoing[targetTable] = true
 	}
@@ -154,11 +173,14 @@ func BuildERDiagram(
 		}
 		for _, fk := range fks {
 			if fk.RefTable == table && fk.RefSchema == schema {
+				// Check if source table is a junction table
+				sourceIsJunction := isJunctionTable(fks)
 				incomingFixed = append(incomingFixed, Relationship{
 					FromColumn:  fk.Column,
 					ToTable:     tableName,
 					ToColumn:    fk.RefColumn,
 					Cardinality: "1:N",
+					IsJunction:  sourceIsJunction,
 				})
 				seenIncoming[tableName] = true
 				break
@@ -277,7 +299,7 @@ func (v *ERDiagramViewport) Reset() {
 
 // --- Renderer ---
 
-func renderBox(name string, columns []ColumnBadge, width int, cardinality string) string {
+func renderBox(name string, columns []ColumnBadge, width int, cardinality string, isJunction bool) string {
 	var lines []string
 
 	// Truncate name to fit within box inner width (width-2)
@@ -326,6 +348,16 @@ func renderBox(name string, columns []ColumnBadge, width int, cardinality string
 		lines = append(lines, "│"+entry+strings.Repeat(" ", pad)+"│")
 	}
 
+	// N:N badge for junction tables (inside box, before cardinality/bottom border)
+	if isJunction {
+		label := "  N:N"
+		if ansi.StringWidth(label) > innerWidth {
+			label = label[:innerWidth]
+		}
+		pad := innerWidth - ansi.StringWidth(label)
+		lines = append(lines, "│"+label+strings.Repeat(" ", pad)+"│")
+	}
+
 	// Cardinality label (inside box, before bottom border)
 	if cardinality != "" {
 		label := "  " + cardinality
@@ -349,7 +381,7 @@ func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int) string {
 	}
 
 	centerWidth := ComputeBoxWidth(diagram.Center.Columns)
-	centerBox := renderBox(diagram.Center.Name, diagram.Center.Columns, centerWidth, "")
+	centerBox := renderBox(diagram.Center.Name, diagram.Center.Columns, centerWidth, "", diagram.Center.IsJunction)
 	centerLines := strings.Split(centerBox, "\n")
 	centerHeight := len(centerLines)
 
@@ -363,7 +395,7 @@ func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int) string {
 		cols := []ColumnBadge{
 			{Name: rel.FromColumn, DataType: "", IsFK: true},
 		}
-		box := renderBox(rel.ToTable, cols, centerWidth, rel.Cardinality)
+		box := renderBox(rel.ToTable, cols, centerWidth, rel.Cardinality, rel.IsJunction)
 		rightLines = append(rightLines, strings.Split(box, "\n")...)
 	}
 	if diagram.OutgoingOverflow > 0 {
@@ -385,7 +417,7 @@ func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int) string {
 			cols := []ColumnBadge{
 				{Name: rel.FromColumn, DataType: "", IsFK: true},
 			}
-			box := renderBox(rel.ToTable, cols, centerWidth, rel.Cardinality)
+			box := renderBox(rel.ToTable, cols, centerWidth, rel.Cardinality, rel.IsJunction)
 			rightLines = append(rightLines, strings.Split(box, "\n")...)
 		}
 		if diagram.IncomingOverflow > 0 {

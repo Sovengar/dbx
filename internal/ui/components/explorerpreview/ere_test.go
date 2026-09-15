@@ -653,3 +653,173 @@ func TestBuildAndRender_SimpleDiagram(t *testing.T) {
 		t.Error("expected 'N:1' in rendered output")
 	}
 }
+
+// --- Junction table detection ---
+
+func TestBuildERDiagram_CenterIsJunction(t *testing.T) {
+	columns := []postgres.ColumnInfo{
+		{Name: "id", DataType: "integer"},
+		{Name: "order_id", DataType: "integer"},
+		{Name: "product_id", DataType: "integer"},
+	}
+	outgoingFKs := []postgres.ForeignKeyInfo{
+		{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
+		{Name: "fk_product", Column: "product_id", RefSchema: "public", RefTable: "products", RefColumn: "id"},
+	}
+
+	diagram := BuildERDiagram("public", "order_items", columns, nil, outgoingFKs, nil)
+
+	if !diagram.Center.IsJunction {
+		t.Error("expected center 'order_items' to be detected as junction table")
+	}
+}
+
+func TestBuildERDiagram_CenterNotJunction(t *testing.T) {
+	columns := []postgres.ColumnInfo{
+		{Name: "id", DataType: "integer"},
+		{Name: "user_id", DataType: "integer"},
+	}
+	outgoingFKs := []postgres.ForeignKeyInfo{
+		{Name: "fk_user", Column: "user_id", RefSchema: "public", RefTable: "users", RefColumn: "id"},
+	}
+
+	diagram := BuildERDiagram("public", "orders", columns, nil, outgoingFKs, nil)
+
+	if diagram.Center.IsJunction {
+		t.Error("expected center 'orders' NOT to be junction (only 1 FK)")
+	}
+}
+
+func TestBuildERDiagram_IncomingNeighborIsJunction(t *testing.T) {
+	columns := []postgres.ColumnInfo{{Name: "id", DataType: "integer"}}
+	schemaFKs := map[string][]postgres.ForeignKeyInfo{
+		"order_items": {
+			{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
+			{Name: "fk_product", Column: "product_id", RefSchema: "public", RefTable: "products", RefColumn: "id"},
+		},
+	}
+
+	diagram := BuildERDiagram("public", "orders", columns, nil, nil, schemaFKs)
+
+	if len(diagram.Incoming) != 1 {
+		t.Fatalf("expected 1 incoming, got %d", len(diagram.Incoming))
+	}
+	if !diagram.Incoming[0].IsJunction {
+		t.Error("expected incoming neighbor 'order_items' to be detected as junction")
+	}
+}
+
+func TestBuildERDiagram_OutgoingNeighborIsJunction(t *testing.T) {
+	columns := []postgres.ColumnInfo{
+		{Name: "id", DataType: "integer"},
+		{Name: "order_id", DataType: "integer"},
+	}
+	outgoingFKs := []postgres.ForeignKeyInfo{
+		{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "order_items", RefColumn: "id"},
+	}
+	schemaFKs := map[string][]postgres.ForeignKeyInfo{
+		"order_items": {
+			{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
+			{Name: "fk_product", Column: "product_id", RefSchema: "public", RefTable: "products", RefColumn: "id"},
+		},
+	}
+
+	diagram := BuildERDiagram("public", "orders", columns, nil, outgoingFKs, schemaFKs)
+
+	if len(diagram.Outgoing) != 1 {
+		t.Fatalf("expected 1 outgoing, got %d", len(diagram.Outgoing))
+	}
+	if !diagram.Outgoing[0].IsJunction {
+		t.Error("expected outgoing neighbor 'order_items' to be detected as junction")
+	}
+}
+
+func TestBuildERDiagram_IncomingNotJunction(t *testing.T) {
+	columns := []postgres.ColumnInfo{{Name: "id", DataType: "integer"}}
+	schemaFKs := map[string][]postgres.ForeignKeyInfo{
+		"order_items": {
+			{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
+		},
+	}
+
+	diagram := BuildERDiagram("public", "orders", columns, nil, nil, schemaFKs)
+
+	if len(diagram.Incoming) != 1 {
+		t.Fatalf("expected 1 incoming, got %d", len(diagram.Incoming))
+	}
+	if diagram.Incoming[0].IsJunction {
+		t.Error("expected incoming neighbor 'order_items' NOT to be junction (only 1 FK)")
+	}
+}
+
+// --- Rendering: N:N badge ---
+
+func TestRenderERDiagram_JunctionBadge(t *testing.T) {
+	diagram := ERDiagram{
+		Center: TableBox{
+			Schema: "public",
+			Name:   "orders",
+			Columns: []ColumnBadge{
+				{Name: "id", DataType: "integer", IsPK: true},
+			},
+			IsJunction: true,
+		},
+		Outgoing: []Relationship{
+			{FromColumn: "order_id", ToTable: "order_items", ToColumn: "id", Cardinality: "N:1", IsJunction: true},
+		},
+	}
+	output := RenderERDiagram(diagram, 80, 20)
+
+	if !strings.Contains(output, "N:N") {
+		t.Errorf("expected 'N:N' badge in output, got:\n%s", output)
+	}
+}
+
+func TestRenderERDiagram_NoJunctionBadgeWhenNotJunction(t *testing.T) {
+	diagram := ERDiagram{
+		Center: TableBox{
+			Schema: "public",
+			Name:   "orders",
+			Columns: []ColumnBadge{
+				{Name: "id", DataType: "integer", IsPK: true},
+			},
+			IsJunction: false,
+		},
+		Outgoing: []Relationship{
+			{FromColumn: "user_id", ToTable: "users", ToColumn: "id", Cardinality: "N:1", IsJunction: false},
+		},
+	}
+	output := RenderERDiagram(diagram, 80, 20)
+
+	if strings.Contains(output, "N:N") {
+		t.Errorf("expected NO 'N:N' badge for non-junction table, got:\n%s", output)
+	}
+}
+
+func TestBuildAndRender_JunctionTable(t *testing.T) {
+	columns := []postgres.ColumnInfo{
+		{Name: "id", DataType: "integer"},
+		{Name: "order_id", DataType: "integer"},
+		{Name: "product_id", DataType: "integer"},
+	}
+	constraints := []postgres.ConstraintInfo{
+		{Name: "pkey", Type: "PRIMARY KEY", Columns: "id"},
+	}
+	outgoing := []postgres.ForeignKeyInfo{
+		{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
+		{Name: "fk_product", Column: "product_id", RefSchema: "public", RefTable: "products", RefColumn: "id"},
+	}
+
+	diagram := BuildERDiagram("public", "order_items", columns, constraints, outgoing, nil)
+	output := RenderERDiagram(diagram, 80, 30)
+
+	if !diagram.Center.IsJunction {
+		t.Error("expected 'order_items' to be junction")
+	}
+	if !strings.Contains(output, "N:N") {
+		t.Errorf("expected 'N:N' badge in rendered output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "order_items") {
+		t.Error("expected 'order_items' in output")
+	}
+}
