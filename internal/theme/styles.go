@@ -11,9 +11,12 @@ type Styles struct {
 	Selected lipgloss.Style
 	Cursor   lipgloss.Style
 	Pending  lipgloss.Style
-	DraftInsert  lipgloss.Style
-	DraftUpdate  lipgloss.Style
-	DraftDelete  lipgloss.Style
+	DraftInsert         lipgloss.Style
+	DraftInsertSelected lipgloss.Style
+	DraftUpdate         lipgloss.Style
+	DraftUpdateSelected lipgloss.Style
+	DraftDelete         lipgloss.Style
+	DraftDeleteSelected lipgloss.Style
 
 	Text       lipgloss.Style
 	TextMuted  lipgloss.Style
@@ -68,18 +71,30 @@ func NewStyles(t *Theme) *Styles {
 			Foreground(t.Pending),
 
 		DraftInsert: lipgloss.NewStyle().
-			Background(lipgloss.Color("#2d5a27")).
-			Foreground(t.Foreground).
+			Foreground(lipgloss.Color("#4ade80")).
+			Padding(0, 1),
+
+		DraftInsertSelected: lipgloss.NewStyle().
+			Background(t.BackgroundCursor).
+			Foreground(lipgloss.Color("#4ade80")).
 			Padding(0, 1),
 
 		DraftUpdate: lipgloss.NewStyle().
-			Background(lipgloss.Color("#1a3a5c")).
-			Foreground(t.Foreground).
+			Foreground(lipgloss.Color("#60a5fa")).
+			Padding(0, 1),
+
+		DraftUpdateSelected: lipgloss.NewStyle().
+			Background(t.BackgroundCursor).
+			Foreground(lipgloss.Color("#60a5fa")).
 			Padding(0, 1),
 
 		DraftDelete: lipgloss.NewStyle().
-			Background(lipgloss.Color("#5c1a1a")).
-			Foreground(t.Foreground).
+			Foreground(lipgloss.Color("#f87171")).
+			Padding(0, 1),
+
+		DraftDeleteSelected: lipgloss.NewStyle().
+			Background(t.BackgroundCursor).
+			Foreground(lipgloss.Color("#f87171")).
 			Padding(0, 1),
 
 		Text: lipgloss.NewStyle().

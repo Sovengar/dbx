@@ -656,6 +656,28 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		g.clampCursor()
 		return g.cursorMovedCmd(), true
 	case "enter":
+		if g.cursorRowType() == "insert" {
+			idx := g.pendingInsertIndex()
+			if idx >= 0 {
+				g.restoreEditWidth()
+				g.inserting = true
+				g.pendingRow = idx
+				g.pendingCol = g.cursorCol
+				g.editing = true
+				g.editRow = len(g.data.Rows) + idx
+				g.editCol = g.cursorCol
+				val := g.pendingRows[idx][g.cursorCol]
+				if val == nil {
+					g.editValue = ""
+				} else {
+					g.editValue = fmt.Sprintf("%v", val)
+				}
+				g.editStartValue = g.editValue
+				g.editCursor = len(g.editValue)
+				g.expandEditCol()
+				return nil, true
+			}
+		}
 		if g.inserting {
 			g.restoreEditWidth()
 			g.editing = true
@@ -1100,9 +1122,20 @@ func (g *Grid) IsDiscardPending() bool {
 	return g.discardPending
 }
 
-// UndoRowDrafts reverts all draft changes (updates + deletes) on the
-// currently selected row. Does NOT affect pending inserts.
+// UndoRowDrafts reverts all draft changes on the currently selected row.
+// For pending inserts, removes the insert row entirely.
+// For real rows, reverts updates and deletes.
 func (g *Grid) UndoRowDrafts() int {
+	// Handle pending insert row
+	if idx := g.pendingInsertIndex(); idx >= 0 {
+		g.pendingRows = append(g.pendingRows[:idx], g.pendingRows[idx+1:]...)
+		g.pager.SetPendingCount(len(g.pendingRows))
+		g.displayDraftCount = g.DraftCount()
+		g.clampCursor()
+		return 1
+	}
+
+	// Handle real rows (updates + deletes)
 	targetRowIdx := g.cursorRow + g.pager.Offset()
 
 	count := 0
@@ -1322,8 +1355,15 @@ func (g *Grid) handleEditKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		g.editValue = ""
 		if g.inserting {
 			g.inserting = false
-			g.pendingRows = nil
-			g.pager.SetPendingCount(0)
+			if g.pendingRow >= 0 && g.pendingRow < len(g.pendingRows) {
+				// Remove only the current pending insert row
+				g.pendingRows = append(g.pendingRows[:g.pendingRow], g.pendingRows[g.pendingRow+1:]...)
+				g.pager.SetPendingCount(len(g.pendingRows))
+			}
+			if len(g.pendingRows) == 0 {
+				g.pendingRows = nil
+			}
+			g.clampCursor()
 		}
 		return nil, true
 	case "tab":
@@ -1367,27 +1407,8 @@ func (g *Grid) handleEditKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		g.expandEditCol()
 		return cmd, true
 	case "up":
-		if g.editRow > 0 {
-			g.restoreEditWidth()
-			g.commitEdit()
-			g.editRow--
-			g.cursorRow = g.editRow - g.pager.Offset()
-			g.editValue = fmt.Sprintf("%v", g.data.Rows[g.editRow][g.editCol])
-			g.editCursor = len(g.editValue)
-			g.expandEditCol()
-		}
 		return nil, true
 	case "down":
-		maxRow := len(g.data.Rows) - 1
-		if g.editRow < maxRow {
-			g.restoreEditWidth()
-			g.commitEdit()
-			g.editRow++
-			g.cursorRow = g.editRow - g.pager.Offset()
-			g.editValue = fmt.Sprintf("%v", g.data.Rows[g.editRow][g.editCol])
-			g.editCursor = len(g.editValue)
-			g.expandEditCol()
-		}
 		return nil, true
 	case "left":
 		if g.editCursor > 0 {
@@ -1784,15 +1805,19 @@ func (g *Grid) visibleRows() int {
 		return 0
 	}
 	total := len(g.data.Rows)
-	if total == 0 {
+	if total == 0 && len(g.pendingRows) == 0 {
 		return 0
 	}
 
 	offset := g.pager.Offset()
 	limit := g.pager.Limit()
 	remaining := total - offset
-	if remaining < limit {
-		return remaining
+	if remaining < 0 {
+		remaining = 0
+	}
+	totalVisible := remaining + len(g.pendingRows)
+	if totalVisible < limit {
+		return totalVisible
 	}
 	return limit
 }
@@ -1805,6 +1830,33 @@ func (g *Grid) clampCursor() {
 	if g.cursorRow > max {
 		g.cursorRow = max
 	}
+}
+
+func (g *Grid) cursorRowType() string {
+	offset := g.pager.Offset()
+	remaining := len(g.data.Rows) - offset
+	if remaining < 0 {
+		remaining = 0
+	}
+	if g.cursorRow >= remaining {
+		return "insert"
+	}
+	return "real"
+}
+
+func (g *Grid) pendingInsertIndex() int {
+	offset := g.pager.Offset()
+	remaining := len(g.data.Rows) - offset
+	if remaining < 0 {
+		remaining = 0
+	}
+	if g.cursorRow >= remaining {
+		idx := g.cursorRow - remaining
+		if idx >= 0 && idx < len(g.pendingRows) {
+			return idx
+		}
+	}
+	return -1
 }
 
 func (g *Grid) View() string {
@@ -1881,7 +1933,11 @@ func (g *Grid) renderRecordsView() string {
 		}
 		var rendered string
 		if isDraftDelete {
-			rendered = g.cells.RenderDraftDeleteRow(visValues, visWidths)
+			activeCol := -1
+			if isSelected {
+				activeCol = g.cursorCol - g.scrollCol
+			}
+			rendered = g.cells.RenderDraftDeleteRow(visValues, visWidths, activeCol)
 		} else if isEditing {
 			editColLocal := g.editCol - g.scrollCol
 			if editColLocal >= 0 && editColLocal < len(visWidths) {
@@ -1925,6 +1981,7 @@ func (g *Grid) renderRecordsView() string {
 			}
 		}
 		isPendingEditing := g.inserting && pi == g.pendingRow && g.editing
+		isPendingSelected := g.cursorRowType() == "insert" && g.pendingInsertIndex() == pi
 		var rendered string
 		if isPendingEditing {
 			editColLocal := g.pendingCol - g.scrollCol
@@ -1933,6 +1990,8 @@ func (g *Grid) renderRecordsView() string {
 			} else {
 				rendered = g.cells.RenderDraftInsertRow(visValues, visWidths)
 			}
+		} else if isPendingSelected {
+			rendered = g.cells.RenderDraftInsertSelectedRow(visValues, visWidths)
 		} else {
 			rendered = g.cells.RenderDraftInsertRow(visValues, visWidths)
 		}

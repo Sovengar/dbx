@@ -187,6 +187,21 @@ func (cr *CellRenderer) RenderPendingEditRow(values []interface{}, widths []int,
 	return strings.Join(cells, "")
 }
 
+func (cr *CellRenderer) RenderDraftInsertSelectedRow(values []interface{}, widths []int) string {
+	var cells []string
+	for i, val := range values {
+		raw := cr.FormatValue(val)
+		truncated := cr.Truncate(raw, widths[i]-2)
+		cell := cr.styles.DraftInsertSelected.
+			PaddingLeft(1).
+			PaddingRight(1).
+			Width(widths[i]).
+			Render(truncated)
+		cells = append(cells, cell)
+	}
+	return strings.Join(cells, "")
+}
+
 func (cr *CellRenderer) RenderDraftInsertRow(values []interface{}, widths []int) string {
 	var cells []string
 	for i, val := range values {
@@ -221,16 +236,25 @@ func (cr *CellRenderer) RenderDraftInsertEditRow(values []interface{}, widths []
 	return strings.Join(cells, "")
 }
 
-func (cr *CellRenderer) RenderDraftDeleteRow(values []interface{}, widths []int) string {
+func (cr *CellRenderer) RenderDraftDeleteRow(values []interface{}, widths []int, activeCol int) string {
 	var cells []string
 	for i, val := range values {
 		raw := cr.FormatValue(val)
 		truncated := cr.Truncate(raw, widths[i]-2)
-		cell := cr.styles.DraftDelete.
-			PaddingLeft(1).
-			PaddingRight(1).
-			Width(widths[i]).
-			Render(truncated)
+		var cell string
+		if i == activeCol {
+			cell = cr.styles.DraftDeleteSelected.
+				PaddingLeft(1).
+				PaddingRight(1).
+				Width(widths[i]).
+				Render(truncated)
+		} else {
+			cell = cr.styles.DraftDelete.
+				PaddingLeft(1).
+				PaddingRight(1).
+				Width(widths[i]).
+				Render(truncated)
+		}
 		cells = append(cells, cell)
 	}
 	return strings.Join(cells, "")
@@ -242,7 +266,13 @@ func (cr *CellRenderer) RenderDraftUpdateRow(values []interface{}, widths []int,
 		raw := cr.FormatValue(val)
 		truncated := cr.Truncate(raw, widths[i]-2)
 		var cell string
-		if draftCols[i] {
+		if draftCols[i] && i == activeCol {
+			cell = cr.styles.DraftUpdateSelected.
+				PaddingLeft(1).
+				PaddingRight(1).
+				Width(widths[i]).
+				Render(truncated)
+		} else if draftCols[i] {
 			cell = cr.styles.DraftUpdate.
 				PaddingLeft(1).
 				PaddingRight(1).
