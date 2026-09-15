@@ -81,6 +81,7 @@ type NavigationEntry struct {
 	Where     string
 	CursorRow int
 	CursorCol int
+	ScrollRow int
 	ScrollCol int
 }
 

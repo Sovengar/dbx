@@ -118,6 +118,7 @@ type Grid struct {
 	widths      []int
 	cursorRow   int
 	cursorCol   int
+	scrollRow   int
 	scrollCol   int
 	width       int
 	height      int
@@ -179,6 +180,7 @@ func (g *Grid) SetData(result *postgres.QueryResult, schema, table string) {
 	g.schema = schema
 	g.cursorRow = 0
 	g.cursorCol = 0
+	g.scrollRow = 0
 	g.scrollCol = 0
 	g.editing = false
 	g.editValue = ""
@@ -446,8 +448,9 @@ func (g *Grid) SelectedRow() []interface{} {
 	if g.data == nil || len(g.data.Rows) == 0 {
 		return nil
 	}
-	if g.cursorRow >= 0 && g.cursorRow < len(g.data.Rows) {
-		return g.data.Rows[g.cursorRow]
+	absRow := g.scrollRow + g.cursorRow + g.pager.Offset()
+	if absRow >= 0 && absRow < len(g.data.Rows) {
+		return g.data.Rows[absRow]
 	}
 	return nil
 }
@@ -462,6 +465,10 @@ func (g *Grid) CursorRow() int {
 
 func (g *Grid) CursorCol() int {
 	return g.cursorCol
+}
+
+func (g *Grid) ScrollRow() int {
+	return g.scrollRow
 }
 
 func (g *Grid) ScrollCol() int {
@@ -600,6 +607,7 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		action := fmt.Sprintf("grid.goto_page_%d", i)
 		if key == g.keybinds[action] {
 			g.pager.GoToPage(i)
+			g.scrollRow = 0
 			g.clampCursor()
 			return nil, true
 		}
@@ -612,6 +620,7 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			n = n*10 + int(ch-'0')
 		}
 		g.pager.GoToPage(n)
+		g.scrollRow = 0
 		g.clampCursor()
 		return nil, true
 	}
@@ -644,18 +653,22 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return g.cursorMovedCmd(), true
 	case "N":
 		g.pager.LastPage()
+		g.scrollRow = 0
 		g.clampCursor()
 		return g.cursorMovedCmd(), true
 	case "P":
 		g.pager.FirstPage()
+		g.scrollRow = 0
 		g.clampCursor()
 		return g.cursorMovedCmd(), true
 	case "n", "]", "ctrl+right":
 		g.pager.NextPage()
+		g.scrollRow = 0
 		g.clampCursor()
 		return g.cursorMovedCmd(), true
 	case "p", "[", "ctrl+left":
 		g.pager.PrevPage()
+		g.scrollRow = 0
 		g.clampCursor()
 		return g.cursorMovedCmd(), true
 	case "enter":
@@ -855,7 +868,8 @@ func (g *Grid) startEdit() {
 	if g.data == nil || len(g.data.Rows) == 0 {
 		return
 	}
-	if g.cursorRow < 0 || g.cursorRow >= len(g.data.Rows) {
+	absRow := g.scrollRow + g.cursorRow + g.pager.Offset()
+	if absRow < 0 || absRow >= len(g.data.Rows) {
 		return
 	}
 	if g.cursorCol < 0 || g.cursorCol >= len(g.columns) {
@@ -864,7 +878,7 @@ func (g *Grid) startEdit() {
 
 	g.displayDraftCount = g.DraftCount()
 	g.editing = true
-	g.editRow = g.cursorRow
+	g.editRow = absRow
 	g.editCol = g.cursorCol
 	g.editValue = fmt.Sprintf("%v", g.data.Rows[g.editRow][g.editCol])
 	g.editStartValue = g.editValue
@@ -915,7 +929,7 @@ func (g *Grid) navigateFK() (tea.Cmd, bool) {
 		return nil, false
 	}
 
-	fkValue := g.data.Rows[g.cursorRow+g.pager.Offset()][g.cursorCol]
+	fkValue := g.data.Rows[g.scrollRow+g.cursorRow+g.pager.Offset()][g.cursorCol]
 	if fkValue == nil {
 		return nil, false
 	}
@@ -976,8 +990,9 @@ func (g *Grid) startYank() (tea.Cmd, bool) {
 		}
 	} else {
 		// Cursor row
-		if g.cursorRow >= 0 && g.cursorRow < len(g.data.Rows) {
-			row = g.data.Rows[g.cursorRow]
+		absRow := g.scrollRow + g.cursorRow + g.pager.Offset()
+		if absRow >= 0 && absRow < len(g.data.Rows) {
+			row = g.data.Rows[absRow]
 		}
 	}
 
@@ -1052,7 +1067,7 @@ func (g *Grid) startDelete() (tea.Cmd, bool) {
 	rowCopy := make([]interface{}, len(row))
 	copy(rowCopy, row)
 	g.pendingDeletes = append(g.pendingDeletes, PendingDelete{
-		RowIdx: g.cursorRow + g.pager.Offset(),
+		RowIdx: g.scrollRow + g.cursorRow + g.pager.Offset(),
 		Row:    rowCopy,
 	})
 	return nil, true
@@ -1139,7 +1154,7 @@ func (g *Grid) UndoRowDrafts() int {
 	}
 
 	// Handle real rows (updates + deletes)
-	targetRowIdx := g.cursorRow + g.pager.Offset()
+	targetRowIdx := g.scrollRow + g.cursorRow + g.pager.Offset()
 
 	count := 0
 
@@ -1289,8 +1304,8 @@ func (g *Grid) toggleRowSelection() {
 		return
 	}
 	
-	// Calculate the actual row index considering pagination
-	actualRow := g.cursorRow + g.pager.Offset()
+	// Calculate the actual row index considering pagination and scroll
+	actualRow := g.scrollRow + g.cursorRow + g.pager.Offset()
 	
 	if actualRow >= 0 && actualRow < len(g.data.Rows) {
 		if g.selectedRows[actualRow] {
@@ -1712,15 +1727,27 @@ func (g *Grid) parseEditValue(s string, original interface{}) interface{} {
 }
 
 func (g *Grid) moveDown() {
-	maxRow := g.visibleRows() - 1
-	if g.cursorRow < maxRow {
+	totalRows := g.visibleRows()
+	if totalRows == 0 {
+		return
+	}
+	ch := g.contentHeight()
+	absRow := g.scrollRow + g.cursorRow
+	if absRow >= totalRows-1 {
+		return
+	}
+	if g.cursorRow < ch-1 {
 		g.cursorRow++
+	} else {
+		g.scrollRow++
 	}
 }
 
 func (g *Grid) moveUp() {
 	if g.cursorRow > 0 {
 		g.cursorRow--
+	} else if g.scrollRow > 0 {
+		g.scrollRow--
 	}
 }
 
@@ -1747,35 +1774,66 @@ func (g *Grid) moveLeft() {
 
 func (g *Grid) moveToFirst() {
 	g.cursorRow = 0
+	g.scrollRow = 0
 }
 
 func (g *Grid) moveToLast() {
-	g.cursorRow = g.visibleRows() - 1
+	totalRows := g.visibleRows()
+	if totalRows == 0 {
+		return
+	}
+	ch := g.contentHeight()
+	g.scrollRow = totalRows - ch
+	if g.scrollRow < 0 {
+		g.scrollRow = 0
+	}
+	g.cursorRow = totalRows - g.scrollRow - 1
 	if g.cursorRow < 0 {
 		g.cursorRow = 0
 	}
 }
 
 func (g *Grid) halfPageUp() {
-	half := g.visibleRows() / 2
+	half := g.contentHeight() / 2
 	g.cursorRow -= half
 	if g.cursorRow < 0 {
+		g.scrollRow += g.cursorRow
 		g.cursorRow = 0
+		if g.scrollRow < 0 {
+			g.scrollRow = 0
+		}
 	}
 }
 
 func (g *Grid) halfPageDown() {
-	half := g.visibleRows() / 2
+	totalRows := g.visibleRows()
+	if totalRows == 0 {
+		return
+	}
+	half := g.contentHeight() / 2
+	ch := g.contentHeight()
 	g.cursorRow += half
-	maxRow := g.visibleRows() - 1
-	if g.cursorRow > maxRow {
-		g.cursorRow = maxRow
+	if g.cursorRow >= ch {
+		g.scrollRow += g.cursorRow - ch + 1
+		g.cursorRow = ch - 1
+	}
+	absRow := g.scrollRow + g.cursorRow
+	if absRow >= totalRows {
+		g.scrollRow = totalRows - ch
+		if g.scrollRow < 0 {
+			g.scrollRow = 0
+		}
+		g.cursorRow = totalRows - g.scrollRow - 1
+		if g.cursorRow < 0 {
+			g.cursorRow = 0
+		}
 	}
 }
 
 func (g *Grid) setActiveTab(tab int) {
 	g.cursorRow = 0
 	g.cursorCol = 0
+	g.scrollRow = 0
 	g.scrollCol = 0
 }
 
@@ -1825,13 +1883,43 @@ func (g *Grid) visibleRows() int {
 	return limit
 }
 
-func (g *Grid) clampCursor() {
-	max := g.visibleRows() - 1
-	if max < 0 {
-		max = 0
+func (g *Grid) contentHeight() int {
+	overhead := 6
+	if g.commitPending || g.refreshPending || g.discardPending || g.HasDrafts() {
+		overhead++
 	}
-	if g.cursorRow > max {
-		g.cursorRow = max
+	if g.whereFilter != nil && g.whereFilter.Visible() {
+		overhead++
+	} else if g.whereClause != "" {
+		overhead++
+	} else if g.filtering {
+		overhead++
+	}
+	h := g.height - overhead
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
+func (g *Grid) clampCursor() {
+	totalRows := g.visibleRows()
+	if totalRows == 0 {
+		g.cursorRow = 0
+		g.scrollRow = 0
+		return
+	}
+	ch := g.contentHeight()
+	absRow := g.scrollRow + g.cursorRow
+	if absRow >= totalRows {
+		g.scrollRow = totalRows - ch
+		if g.scrollRow < 0 {
+			g.scrollRow = 0
+		}
+		g.cursorRow = totalRows - g.scrollRow - 1
+		if g.cursorRow < 0 {
+			g.cursorRow = 0
+		}
 	}
 }
 
@@ -1841,7 +1929,8 @@ func (g *Grid) cursorRowType() string {
 	if remaining < 0 {
 		remaining = 0
 	}
-	if g.cursorRow >= remaining {
+	absRow := g.scrollRow + g.cursorRow
+	if absRow >= remaining {
 		return "insert"
 	}
 	return "real"
@@ -1853,8 +1942,9 @@ func (g *Grid) pendingInsertIndex() int {
 	if remaining < 0 {
 		remaining = 0
 	}
-	if g.cursorRow >= remaining {
-		idx := g.cursorRow - remaining
+	absRow := g.scrollRow + g.cursorRow
+	if absRow >= remaining {
+		idx := absRow - remaining
 		if idx >= 0 && idx < len(g.pendingRows) {
 			return idx
 		}
@@ -1885,23 +1975,7 @@ func (g *Grid) View() string {
 }
 
 func (g *Grid) renderRecordsView() string {
-	// Calculate dynamic overhead: header(1) + mode(1) + buffer(2) = 4 base
-	// Plus 2 for border (top + bottom lines)
-	overhead := 6
-	if g.commitPending || g.refreshPending || g.discardPending || g.HasDrafts() {
-		overhead++ // prefix message line
-	}
-	if g.whereFilter != nil && g.whereFilter.Visible() {
-		overhead++ // whereFilter input line
-	} else if g.whereClause != "" {
-		overhead++ // active WHERE indicator line
-	} else if g.filtering {
-		overhead++ // column filter line
-	}
-	contentHeight := g.height - overhead
-	if contentHeight < 1 {
-		contentHeight = 1
-	}
+	contentHeight := g.contentHeight()
 
 	visCols, visWidths := g.visibleColumns()
 
@@ -1911,6 +1985,7 @@ func (g *Grid) renderRecordsView() string {
 
 	var rows []string
 	offset := g.pager.Offset()
+	startRow := offset + g.scrollRow
 	limit := g.pager.Limit()
 	endRow := offset + limit
 	if endRow > len(g.data.Rows) {
@@ -1918,7 +1993,7 @@ func (g *Grid) renderRecordsView() string {
 	}
 
 	visibleCount := 0
-	for i := offset; i < endRow && visibleCount < contentHeight; i++ {
+	for i := startRow; i < endRow && visibleCount < contentHeight; i++ {
 		row := g.data.Rows[i]
 		visValues := make([]interface{}, len(visCols))
 		for j := 0; j < len(visCols); j++ {
@@ -1929,7 +2004,7 @@ func (g *Grid) renderRecordsView() string {
 		}
 		isSelected := visibleCount == g.cursorRow
 		isMultiSelected := g.selectedRows[i]
-		isEditing := g.editing && visibleCount == (g.editRow-offset) && g.editRow >= offset && g.editRow < endRow
+		isEditing := g.editing && visibleCount == (g.editRow-(offset+g.scrollRow)) && g.editRow >= offset+g.scrollRow && g.editRow < endRow
 		isDraftDelete := g.isRowDeleted(i)
 		draftCols := make(map[int]bool)
 		if !isDraftDelete {

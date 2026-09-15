@@ -1178,6 +1178,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Where:     m.grid.WhereClause(),
 				CursorRow: m.grid.CursorRow(),
 				CursorCol: m.grid.CursorCol(),
+				ScrollRow: m.grid.ScrollRow(),
 				ScrollCol: m.grid.ScrollCol(),
 			})
 		}

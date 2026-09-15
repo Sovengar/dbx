@@ -21,11 +21,17 @@ func (mh *MouseHandler) HandleClick(x, y int) bool {
 	}
 
 	dataY := y - headerHeight
-	if dataY >= mh.grid.visibleRows() {
+	ch := mh.grid.contentHeight()
+	totalRows := mh.grid.visibleRows()
+	if dataY >= ch && dataY >= totalRows {
 		return false
 	}
 
+	mh.grid.scrollRow = 0
 	mh.grid.cursorRow = dataY
+	if mh.grid.cursorRow >= totalRows {
+		mh.grid.cursorRow = totalRows - 1
+	}
 	return true
 }
 
