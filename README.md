@@ -119,6 +119,7 @@ The editor detects what you're typing and shows relevant suggestions:
 | Top bar               | Shows active pane, `schema.table`, row count, WHERE filter, breadcrumbs |
 | Bottom bar            | Global keybinds (always visible) + contextual keybinds per pane      |
 | Focus cycling (`e`)  | Toggle Explorer ↔ Grid                                               |
+| Query Browser (`Q`) | Browse history & favorites, load into editor                         |
 | Grid Preview (`Tab`) | Focus row preview (from grid), Tab/Esc to return                     |
 | Explorer Preview (`Tab`) | Focus table details (from explorer), full-screen                  |
 | JQ Filter (`/`)     | Filter JSON in preview with jq expressions, autocomplete, history    |
@@ -175,6 +176,7 @@ dbx ask "show me all active users"
 | `:` | Command palette            |
 | `e` | Toggle explorer            |
 | `E` | Toggle editor              |
+| `Q` | Query Browser              |
 | `a` | Ask AI (NL→SQL)            |
 | `x` | Export                     |
 

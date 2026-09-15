@@ -37,6 +37,7 @@ func DefaultCommands() []command {
 		{Name: "Focus Explorer", Alias: "explorer", Action: "global.focus_explorer", Section: SectionNav},
 		{Name: "Focus Grid", Alias: "grid", Action: "global.focus_grid", Section: SectionNav},
 		{Name: "Toggle Editor", Alias: "editor", Action: "global.focus_editor", Section: SectionNav},
+		{Name: "Query Browser", Alias: "queries", Action: "global.query_browser", Section: SectionNav},
 		{Name: "Toggle Explorer", Alias: "toggle-explorer", Action: "global.cycle_focus", Section: SectionNav},
 		{Name: "Focus Grid Preview", Alias: "preview", Action: "grid.focus_preview", Section: SectionNav},
 		{Name: "Preview Cursor Up", Alias: "preview-up", Action: "grid-preview.cursor_up", Section: SectionNav},

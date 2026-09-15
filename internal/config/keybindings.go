@@ -66,6 +66,7 @@ func DefaultKeybindings() map[string]string {
 		"global.focus_editor":   "E",
 		"global.ask":            "a",
 		"global.export":         "x",
+		"global.query_browser":  "Q",
 
 		"explorer.down":          "j",
 		"explorer.up":            "k",
@@ -155,6 +156,7 @@ func defaultBindings() map[string][]string {
 		"global.focus_editor":   {"E"},
 		"global.ask":            {"a"},
 		"global.export":         {"x"},
+		"global.query_browser":  {"Q"},
 
 		"explorer.down":          {"j", "down"},
 		"explorer.up":            {"k", "up"},

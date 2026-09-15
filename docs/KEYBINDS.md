@@ -21,6 +21,7 @@ Actions follow the **first-letter rule** — the primary key is the first letter
 | `o` | **o**pen FK reference |
 | `p` | **p**revious page |
 | `q` | **q**uit |
+| `Q` | **Q**uery browser |
 | `r` | **r**efresh |
 | `s` | **s**ort |
 | `v` | **v**iew DDL |
@@ -41,6 +42,7 @@ Each action has a primary key and may have alternatives. All are overridable.
 | `global.focus_editor` | `E` | Toggle Editor pane |
 | `global.ask` | `a` | Open NL→SQL prompt |
 | `global.export` | `x` | Export current data |
+| `global.query_browser` | `Q` | Open query browser (history + favorites) |
 
 ### Explorer Pane
 
@@ -276,4 +278,7 @@ Tab/Esc back · j/k navigate · Enter expand FK · g/G first/last · e explorer 
 
 [Editor-focused]
 Ctrl+Enter execute · Ctrl+U clear · Ctrl+Y copy · Ctrl+P/N history
+
+[Query Browser-focused]
+j/k navigate · Enter load · f favorite · d delete · / filter · Tab switch · Esc close
 ```

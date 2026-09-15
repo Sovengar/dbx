@@ -82,6 +82,7 @@ func (s *StatusBar) renderActions() string {
 	segments = append(segments, s.keyFor("global.help")+" help")
 	segments = append(segments, s.keyFor("global.quit")+" quit")
 	segments = append(segments, s.keyFor("global.focus_editor")+" editor")
+	segments = append(segments, s.keyFor("global.query_browser")+" queries")
 	segments = append(segments, ": palette")
 
 	return strings.Join(segments, " · ")

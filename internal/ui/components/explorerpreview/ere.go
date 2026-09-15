@@ -312,8 +312,6 @@ func (n *ERDiagramNav) MoveDown() {
 func (n *ERDiagramNav) MoveUp() {
 	if n.activeRow > 0 {
 		n.activeRow--
-	} else if n.activeRow == 0 {
-		n.activeRow = -1
 	}
 }
 
@@ -464,8 +462,8 @@ func renderBox(name string, columns []ColumnBadge, width int, cardinality string
 	return strings.Join(lines, "\n")
 }
 
-// renderCompactBox renders a compact box for neighbor tables (3-4 lines).
-func renderCompactBox(name string, fkColumn string, width int, cardinality string, isJunction bool, selected bool) string {
+// renderCompactBox renders a compact box for neighbor tables (3 lines).
+func renderCompactBox(name string, fkColumn string, width int, selected bool) string {
 	var lines []string
 	innerWidth := width - 2
 	displayName := TruncateTableName(name)
@@ -501,22 +499,6 @@ func renderCompactBox(name string, fkColumn string, width int, cardinality strin
 	}
 	lines = append(lines, "│"+fkEntry+strings.Repeat(" ", fkPad)+"│")
 
-	// Cardinality or N:N badge
-	if isJunction {
-		label := "N:N"
-		pad := innerWidth - ansi.StringWidth(label)
-		if pad < 0 {
-			pad = 0
-		}
-		lines = append(lines, "│"+label+strings.Repeat(" ", pad)+"│")
-	} else if cardinality != "" {
-		pad := innerWidth - ansi.StringWidth(cardinality)
-		if pad < 0 {
-			pad = 0
-		}
-		lines = append(lines, "│"+cardinality+strings.Repeat(" ", pad)+"│")
-	}
-
 	lines = append(lines, "└"+strings.Repeat("─", innerWidth)+"┘")
 	return strings.Join(lines, "\n")
 }
@@ -537,7 +519,7 @@ func renderColumn(title string, rels []Relationship, overflow int, width int, se
 			lines = append(lines, "") // spacing between boxes
 		}
 		isSelected := selectedRow == i
-		box := renderCompactBox(rel.ToTable, rel.FromColumn, width, rel.Cardinality, rel.IsJunction, isSelected)
+		box := renderCompactBox(rel.ToTable, rel.FromColumn, width, isSelected)
 		boxLines := strings.Split(box, "\n")
 		lines = append(lines, boxLines...)
 	}

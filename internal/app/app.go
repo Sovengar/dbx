@@ -31,6 +31,8 @@ import (
 	"github.com/buble/dbx/internal/ui/components/palette"
 	"github.com/buble/dbx/internal/ui/components/picker"
 	"github.com/buble/dbx/internal/ui/components/gridsidebarpreview"
+	"github.com/buble/dbx/internal/ui/components/querybrowser"
+	"github.com/buble/dbx/internal/store"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -83,6 +85,9 @@ type Model struct {
 	spinnerActive              bool
 	spinnerFrame               int
 	schemaForeignKeys          map[string][]postgres.ForeignKeyInfo
+	queryStore                 *store.QueryStore
+	queryBrowser               *querybrowser.QueryBrowser
+	queryBrowserOpen           bool
 }
 
 var spinnerChars = [9]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"}
@@ -101,6 +106,8 @@ func NewModel(cfg *config.Config) Model {
 	}
 	g := grid.New(t.Styles(), pageSize, kbs)
 	g.SetYankMaxRows(yankMaxRows)
+	qs := store.NewQueryStore(cfg.UI.QueryHistoryPath)
+	qb := querybrowser.New(t.Styles(), qs)
 	return Model{
 		config:          cfg,
 		theme:           t,
@@ -120,6 +127,8 @@ func NewModel(cfg *config.Config) Model {
 		statusbar:       ui.NewStatusBar(t.Styles(), kbs),
 		state:           StatePicker,
 		yankMaxRows:     yankMaxRows,
+		queryStore:      qs,
+		queryBrowser:    qb,
 	}
 }
 
@@ -932,6 +941,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.explorer.SetWidth(msg.Width / 3)
 			m.explorer.SetHeight(msg.Height - 2)
 		}
+		if m.queryBrowser != nil {
+			m.queryBrowser.SetWidth(msg.Width)
+			m.queryBrowser.SetHeight(msg.Height)
+		}
 		return m, tickToast()
 
 	case toastTickMsg:
@@ -1295,6 +1308,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editor.Blur()
 		m.statusbar.SetEditorOpen(false)
 		m.editor.PushHistory(msg.sql)
+		m.queryStore.Add(msg.sql)
 
 		if m.isDDL(msg.sql) && m.conn != nil && m.project != nil {
 			schema, table := extractDDLTableName(msg.sql)
@@ -1306,6 +1320,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.grid.SetData(msg.result, "", "query")
 		m.router.FocusPane(FocusGrid)
 		m.toast.ShowSuccess(fmt.Sprintf("Query returned %d rows", msg.result.Count))
+		return m, nil
+
+	case querybrowser.QuerySelectedMsg:
+		m.queryBrowserOpen = false
+		m.editorOpen = true
+		m.editor.Focus()
+		m.editor.SetContent(msg.SQL)
+		m.statusbar.SetEditorOpen(true)
 		return m, nil
 
 	case explorer.TableSelectedMsg:
@@ -1446,6 +1468,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.palette.IsVisible() {
 			if cmd, handled := m.palette.Update(msg); handled {
+				return m, cmd
+			}
+			return m, nil
+		}
+
+		if m.queryBrowserOpen && m.queryBrowser != nil {
+			if cmd, handled := m.queryBrowser.Update(msg); handled {
 				return m, cmd
 			}
 			return m, nil
@@ -1592,6 +1621,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			if key == m.keybinds["global.query_browser"] {
+				if !m.queryBrowserOpen && !m.editorOpen {
+					m.queryBrowserOpen = true
+					m.queryBrowser.Show()
+				}
+				return m, nil
+			}
+
 			if key == m.keybinds["grid.focus_preview"] && m.router.Focus() == FocusGrid && !m.grid.IsEditing() && !m.grid.IsWhereFiltering() {
 				m.router.FocusPane(FocusGridPreview)
 				if m.gridPreview != nil {
@@ -1676,6 +1713,11 @@ func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 		m.statusbar.SetEditorOpen(m.editorOpen)
 	case "global.help":
 		m.helpModal.Show()
+	case "global.query_browser":
+		if !m.queryBrowserOpen && !m.editorOpen {
+			m.queryBrowserOpen = true
+			m.queryBrowser.Show()
+		}
 	case "grid.focus_preview":
 		if m.router.Focus() == FocusGrid && m.grid.HasData() {
 			m.router.FocusPane(FocusGridPreview)
@@ -2039,6 +2081,13 @@ func (m Model) View() tea.View {
 		paletteView := m.palette.View()
 		if paletteView != "" {
 			content = overlay(content, paletteView, m.width, m.height)
+		}
+	}
+
+	if m.queryBrowserOpen && m.queryBrowser != nil {
+		browserView := m.queryBrowser.View()
+		if browserView != "" {
+			content = overlay(content, browserView, m.width, m.height)
 		}
 	}
 

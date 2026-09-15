@@ -11,6 +11,11 @@ func SessionDir() string {
 	return filepath.Join(os.TempDir(), "dbx", "sessions")
 }
 
+func StateDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "state", "dbx")
+}
+
 func GetHomeDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -62,11 +67,12 @@ type SessionConfig struct {
 }
 
 type UIConfig struct {
-	StatusBar     bool `mapstructure:"statusbar"`
-	StatusBarHelp bool `mapstructure:"statusbar_help"`
-	HistorySize   int  `mapstructure:"history_size"`
-	PageSize      int  `mapstructure:"page_size"`
-	YankMaxRows   int  `mapstructure:"yank_max_rows"`
+	StatusBar        bool   `mapstructure:"statusbar"`
+	StatusBarHelp    bool   `mapstructure:"statusbar_help"`
+	HistorySize      int    `mapstructure:"history_size"`
+	PageSize         int    `mapstructure:"page_size"`
+	YankMaxRows      int    `mapstructure:"yank_max_rows"`
+	QueryHistoryPath string `mapstructure:"query_history_path"`
 }
 
 func Load() (*Config, error) {
@@ -115,4 +121,5 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("ui.history_size", 100)
 	v.SetDefault("ui.page_size", 100)
 	v.SetDefault("ui.yank_max_rows", 10)
+	v.SetDefault("ui.query_history_path", filepath.Join(StateDir(), "query_history.json"))
 }

@@ -624,11 +624,14 @@ func TestERDiagramNav_2DCursorMovement(t *testing.T) {
 		t.Errorf("expected column 1 after MoveLeft, got %d", nav.ActiveColumn())
 	}
 
-	// Move up — deselect
+	// Move up — stays at row 0 (no deselect)
 	nav.MoveUp()
 	nav.MoveUp()
-	if nav.HasSelection() {
-		t.Error("expected no selection after moving up past row 0")
+	if !nav.HasSelection() {
+		t.Error("expected selection to remain after moving up past row 0")
+	}
+	if nav.ActiveRow() != 0 {
+		t.Errorf("expected row to stay at 0, got %d", nav.ActiveRow())
 	}
 }
 

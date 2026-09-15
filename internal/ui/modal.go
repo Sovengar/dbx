@@ -116,6 +116,7 @@ func (m *HelpModal) View() string {
 	lines = append(lines, m.renderKeybind("global.cycle_focus", "Toggle Explorer"))
 	lines = append(lines, m.renderKeybind("global.focus_editor", "Toggle Editor"))
 	lines = append(lines, m.renderKeybind("global.export", "Export"))
+	lines = append(lines, m.renderKeybind("global.query_browser", "Query Browser"))
 	lines = append(lines, "")
 
 	lines = append(lines, m.styles.Header.Render("Explorer"))
@@ -191,6 +192,15 @@ func (m *HelpModal) View() string {
 	lines = append(lines, m.renderKeybind("editor.autocomplete", "Autocomplete"))
 	lines = append(lines, m.renderKeybind("editor.history_prev", "History Previous"))
 	lines = append(lines, m.renderKeybind("editor.history_next", "History Next"))
+	lines = append(lines, "")
+
+	lines = append(lines, m.styles.Header.Render("Query Browser"))
+	lines = append(lines, "  j/k         Navigate up/down")
+	lines = append(lines, "  Enter       Load query into editor")
+	lines = append(lines, "  f           Toggle favorite")
+	lines = append(lines, "  d           Delete entry")
+	lines = append(lines, "  /           Filter queries")
+	lines = append(lines, "  Tab         Switch History/Favorites")
 	lines = append(lines, "")
 
 	lines = append(lines, m.styles.Help.Render("  j/k scroll · Esc close"))
