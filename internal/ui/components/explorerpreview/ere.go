@@ -2,6 +2,7 @@ package explorerpreview
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -42,10 +43,12 @@ type Relationship struct {
 
 type ERDiagram struct {
 	Center            TableBox
-	Outgoing          []Relationship
-	Incoming          []Relationship
+	Outgoing          []Relationship // N:1 (direct FKs, no junction)
+	Incoming          []Relationship // 1:N (direct FKs, no junction)
+	Junction          []Relationship // N:N (junction tables)
 	OutgoingOverflow  int
 	IncomingOverflow  int
+	JunctionOverflow  int
 }
 
 func TruncateTableName(name string) string {
@@ -118,14 +121,25 @@ func BuildERDiagram(
 		fkCols[fk.Column] = true
 	}
 
-	centerCols := make([]ColumnBadge, len(columns))
-	for i, c := range columns {
-		centerCols[i] = ColumnBadge{
+	// Build all columns with badges, then filter to PK/FK only
+	allCols := make([]ColumnBadge, 0, len(columns))
+	for _, c := range columns {
+		allCols = append(allCols, ColumnBadge{
 			Name:     c.Name,
 			DataType: c.DataType,
 			IsPK:     pks[c.Name],
 			IsFK:     fkCols[c.Name],
+		})
+	}
+
+	centerCols := make([]ColumnBadge, 0, len(allCols))
+	for _, col := range allCols {
+		if col.IsPK || col.IsFK {
+			centerCols = append(centerCols, col)
 		}
+	}
+	if len(centerCols) == 0 {
+		centerCols = allCols
 	}
 
 	diagram := ERDiagram{
@@ -137,9 +151,40 @@ func BuildERDiagram(
 		},
 	}
 
+	// Collect all junction candidates (tables that reference center AND are junction)
+	junctionFixed := make([]Relationship, 0)
+	incomingFixed := make([]Relationship, 0)
+	seenIncoming := make(map[string]bool)
+
+	for tableName, fks := range schemaFKs {
+		if seenIncoming[tableName] {
+			continue
+		}
+		for _, fk := range fks {
+			if fk.RefTable == table && fk.RefSchema == schema {
+				sourceIsJunction := isJunctionTable(fks)
+				rel := Relationship{
+					FromColumn:  fk.Column,
+					ToTable:     tableName,
+					ToColumn:    fk.RefColumn,
+					Cardinality: "1:N",
+					IsJunction:  sourceIsJunction,
+				}
+				if sourceIsJunction {
+					junctionFixed = append(junctionFixed, rel)
+				} else {
+					incomingFixed = append(incomingFixed, rel)
+				}
+				seenIncoming[tableName] = true
+				break
+			}
+		}
+	}
+
 	// Outgoing: current table's FKs → other tables
-	// Deduplicate by target table — one box per table
+	// Deduplicate by target table, separate junction from direct
 	seenOutgoing := make(map[string]bool)
+	outgoingDirect := make([]Relationship, 0)
 	for _, fk := range outgoingFKs {
 		targetTable := fk.RefTable
 		if fk.RefSchema != schema && fk.RefSchema != "" {
@@ -148,47 +193,36 @@ func BuildERDiagram(
 		if seenOutgoing[targetTable] {
 			continue
 		}
-		// Check if target table is a junction table
 		targetIsJunction := false
 		if targetFKs, ok := schemaFKs[fk.RefTable]; ok {
 			targetIsJunction = isJunctionTable(targetFKs)
 		}
-		diagram.Outgoing = append(diagram.Outgoing, Relationship{
+		rel := Relationship{
 			FromColumn:  fk.Column,
 			ToTable:     targetTable,
 			ToColumn:    fk.RefColumn,
 			Cardinality: "N:1",
 			IsJunction:  targetIsJunction,
-		})
+		}
+		if targetIsJunction {
+			// Only add to junction if not already there
+			alreadyJunction := false
+			for _, j := range junctionFixed {
+				if j.ToTable == targetTable {
+					alreadyJunction = true
+					break
+				}
+			}
+			if !alreadyJunction {
+				junctionFixed = append(junctionFixed, rel)
+			}
+		} else {
+			outgoingDirect = append(outgoingDirect, rel)
+		}
 		seenOutgoing[targetTable] = true
 	}
 
-	// Incoming: other tables' FKs → current table
-	// Deduplicate by source table — one box per table, even with multiple FKs
-	seenIncoming := make(map[string]bool)
-	incomingFixed := make([]Relationship, 0)
-	for tableName, fks := range schemaFKs {
-		if seenIncoming[tableName] {
-			continue
-		}
-		for _, fk := range fks {
-			if fk.RefTable == table && fk.RefSchema == schema {
-				// Check if source table is a junction table
-				sourceIsJunction := isJunctionTable(fks)
-				incomingFixed = append(incomingFixed, Relationship{
-					FromColumn:  fk.Column,
-					ToTable:     tableName,
-					ToColumn:    fk.RefColumn,
-					Cardinality: "1:N",
-					IsJunction:  sourceIsJunction,
-				})
-				seenIncoming[tableName] = true
-				break
-			}
-		}
-	}
-
-	// Apply hub cap
+	// Apply hub cap to each category
 	if len(incomingFixed) > MaxNeighbors {
 		diagram.IncomingOverflow = len(incomingFixed) - MaxNeighbors
 		diagram.Incoming = incomingFixed[:MaxNeighbors]
@@ -196,9 +230,26 @@ func BuildERDiagram(
 		diagram.Incoming = incomingFixed
 	}
 
-	if len(diagram.Outgoing) > MaxNeighbors {
-		diagram.OutgoingOverflow = len(diagram.Outgoing) - MaxNeighbors
-		diagram.Outgoing = diagram.Outgoing[:MaxNeighbors]
+	if len(outgoingDirect) > MaxNeighbors {
+		diagram.OutgoingOverflow = len(outgoingDirect) - MaxNeighbors
+		diagram.Outgoing = outgoingDirect[:MaxNeighbors]
+	} else {
+		diagram.Outgoing = outgoingDirect
+	}
+
+	if len(junctionFixed) > MaxNeighbors {
+		diagram.JunctionOverflow = len(junctionFixed) - MaxNeighbors
+		diagram.Junction = junctionFixed[:MaxNeighbors]
+	} else {
+		diagram.Junction = junctionFixed
+	}
+
+	// Debug log
+	if f, err := os.OpenFile("/tmp/dbx_ere_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+		fmt.Fprintf(f, "BuildERE: table=%s totalCols=%d centerCols=%d(out of %d) outgoing=%d incoming=%d junction=%d\n",
+			table, len(columns), len(diagram.Center.Columns), len(allCols),
+			len(diagram.Outgoing), len(diagram.Incoming), len(diagram.Junction))
+		f.Close()
 	}
 
 	return diagram
@@ -207,47 +258,91 @@ func BuildERDiagram(
 // --- Navigation ---
 
 type ERDiagramNav struct {
-	totalNeighbors int
-	selectedIndex  int // -1 = no selection
+	activeColumn int  // 0=1:N, 1=N:1, 2=N:N
+	activeRow    int  // row within column, -1 = no selection
+	columnCounts [3]int
 }
 
-func NewERDiagramNav(totalNeighbors int) *ERDiagramNav {
+func NewERDiagramNav(incoming, outgoing, junction int) *ERDiagramNav {
 	return &ERDiagramNav{
-		totalNeighbors: totalNeighbors,
-		selectedIndex:  -1,
+		activeColumn: 0,
+		activeRow:    -1,
+		columnCounts: [3]int{incoming, outgoing, junction},
 	}
 }
 
 func (n *ERDiagramNav) HasSelection() bool {
-	return n.selectedIndex >= 0
+	return n.activeRow >= 0
 }
 
-func (n *ERDiagramNav) SelectedIndex() int {
-	return n.selectedIndex
+func (n *ERDiagramNav) ActiveColumn() int {
+	return n.activeColumn
+}
+
+func (n *ERDiagramNav) ActiveRow() int {
+	return n.activeRow
+}
+
+func (n *ERDiagramNav) MoveLeft() {
+	if n.activeColumn > 0 {
+		n.activeColumn--
+		n.clampRow()
+	}
+}
+
+func (n *ERDiagramNav) MoveRight() {
+	if n.activeColumn < 2 {
+		n.activeColumn++
+		n.clampRow()
+	}
 }
 
 func (n *ERDiagramNav) MoveDown() {
-	if n.totalNeighbors == 0 {
+	count := n.columnCounts[n.activeColumn]
+	if count == 0 {
 		return
 	}
-	if n.selectedIndex < n.totalNeighbors-1 {
-		n.selectedIndex++
+	if n.activeRow < count-1 {
+		n.activeRow++
+	} else if n.activeRow == -1 {
+		n.activeRow = 0
 	}
 }
 
 func (n *ERDiagramNav) MoveUp() {
-	if n.selectedIndex > 0 {
-		n.selectedIndex--
-	} else if n.selectedIndex == 0 {
-		n.selectedIndex = -1
+	if n.activeRow > 0 {
+		n.activeRow--
+	} else if n.activeRow == 0 {
+		n.activeRow = -1
 	}
 }
 
-func (n *ERDiagramNav) GetSelectedNeighbor(neighbors []Relationship) *Relationship {
-	if !n.HasSelection() || n.selectedIndex >= len(neighbors) {
+func (n *ERDiagramNav) clampRow() {
+	count := n.columnCounts[n.activeColumn]
+	if count == 0 {
+		n.activeRow = -1
+	} else if n.activeRow >= count {
+		n.activeRow = count - 1
+	}
+}
+
+func (n *ERDiagramNav) GetSelectedRelationship(diagram *ERDiagram) *Relationship {
+	if !n.HasSelection() {
 		return nil
 	}
-	return &neighbors[n.selectedIndex]
+	var list []Relationship
+	switch n.activeColumn {
+	case 0:
+		list = diagram.Incoming
+	case 1:
+		list = diagram.Outgoing
+	case 2:
+		list = diagram.Junction
+	}
+	if n.activeRow >= len(list) {
+		return nil
+	}
+	return &list[n.activeRow]
 }
 
 // --- Viewport ---
@@ -299,12 +394,15 @@ func (v *ERDiagramViewport) Reset() {
 
 // --- Renderer ---
 
-func renderBox(name string, columns []ColumnBadge, width int, cardinality string, isJunction bool) string {
+// renderBox renders a box for the center table (full detail).
+func renderBox(name string, columns []ColumnBadge, width int, cardinality string, isJunction bool, selected bool) string {
 	var lines []string
-
-	// Truncate name to fit within box inner width (width-2)
 	innerWidth := width - 2
 	displayName := TruncateTableName(name)
+
+	if selected {
+		displayName = "► " + displayName + " ◄"
+	}
 	if ansi.StringWidth(displayName) > innerWidth {
 		if innerWidth > 1 {
 			displayName = displayName[:innerWidth-1] + "…"
@@ -313,10 +411,8 @@ func renderBox(name string, columns []ColumnBadge, width int, cardinality string
 		}
 	}
 
-	// Top border
 	lines = append(lines, "┌"+strings.Repeat("─", innerWidth)+"┐")
 
-	// Name line — centered
 	namePad := innerWidth - ansi.StringWidth(displayName)
 	if namePad < 0 {
 		namePad = 0
@@ -325,10 +421,8 @@ func renderBox(name string, columns []ColumnBadge, width int, cardinality string
 	rightPad := namePad - leftPad
 	lines = append(lines, "│"+strings.Repeat(" ", leftPad)+displayName+strings.Repeat(" ", rightPad)+"│")
 
-	// Separator
 	lines = append(lines, "├"+strings.Repeat("─", innerWidth)+"┤")
 
-	// Columns
 	for _, col := range columns {
 		badge := "   "
 		if col.IsPK {
@@ -348,7 +442,6 @@ func renderBox(name string, columns []ColumnBadge, width int, cardinality string
 		lines = append(lines, "│"+entry+strings.Repeat(" ", pad)+"│")
 	}
 
-	// N:N badge for junction tables (inside box, before cardinality/bottom border)
 	if isJunction {
 		label := "  N:N"
 		if ansi.StringWidth(label) > innerWidth {
@@ -358,7 +451,6 @@ func renderBox(name string, columns []ColumnBadge, width int, cardinality string
 		lines = append(lines, "│"+label+strings.Repeat(" ", pad)+"│")
 	}
 
-	// Cardinality label (inside box, before bottom border)
 	if cardinality != "" {
 		label := "  " + cardinality
 		if ansi.StringWidth(label) > innerWidth {
@@ -368,92 +460,179 @@ func renderBox(name string, columns []ColumnBadge, width int, cardinality string
 		lines = append(lines, "│"+label+strings.Repeat(" ", pad)+"│")
 	}
 
-	// Bottom border
 	lines = append(lines, "└"+strings.Repeat("─", innerWidth)+"┘")
-
 	return strings.Join(lines, "\n")
 }
 
-// RenderERDiagram renders a complete ERE diagram as text.
-func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int) string {
-	if len(diagram.Outgoing) == 0 && len(diagram.Incoming) == 0 {
+// renderCompactBox renders a compact box for neighbor tables (3-4 lines).
+func renderCompactBox(name string, fkColumn string, width int, cardinality string, isJunction bool, selected bool) string {
+	var lines []string
+	innerWidth := width - 2
+	displayName := TruncateTableName(name)
+
+	if selected {
+		displayName = "► " + displayName + " ◄"
+	}
+	if ansi.StringWidth(displayName) > innerWidth {
+		if innerWidth > 1 {
+			displayName = displayName[:innerWidth-1] + "…"
+		} else {
+			displayName = "…"
+		}
+	}
+
+	lines = append(lines, "┌"+strings.Repeat("─", innerWidth)+"┐")
+
+	// Name line — left-aligned (more compact)
+	namePad := innerWidth - ansi.StringWidth(displayName)
+	if namePad < 0 {
+		namePad = 0
+	}
+	lines = append(lines, "│"+displayName+strings.Repeat(" ", namePad)+"│")
+
+	// FK column line
+	fkEntry := "FK " + fkColumn
+	if ansi.StringWidth(fkEntry) > innerWidth {
+		fkEntry = fkEntry[:innerWidth]
+	}
+	fkPad := innerWidth - ansi.StringWidth(fkEntry)
+	if fkPad < 0 {
+		fkPad = 0
+	}
+	lines = append(lines, "│"+fkEntry+strings.Repeat(" ", fkPad)+"│")
+
+	// Cardinality or N:N badge
+	if isJunction {
+		label := "N:N"
+		pad := innerWidth - ansi.StringWidth(label)
+		if pad < 0 {
+			pad = 0
+		}
+		lines = append(lines, "│"+label+strings.Repeat(" ", pad)+"│")
+	} else if cardinality != "" {
+		pad := innerWidth - ansi.StringWidth(cardinality)
+		if pad < 0 {
+			pad = 0
+		}
+		lines = append(lines, "│"+cardinality+strings.Repeat(" ", pad)+"│")
+	}
+
+	lines = append(lines, "└"+strings.Repeat("─", innerWidth)+"┘")
+	return strings.Join(lines, "\n")
+}
+
+// renderColumn renders a single column with title and boxes.
+func renderColumn(title string, rels []Relationship, overflow int, width int, selectedRow int) []string {
+	var lines []string
+
+	// Title line — padded to column width
+	titlePad := width - ansi.StringWidth(title)
+	if titlePad < 0 {
+		titlePad = 0
+	}
+	lines = append(lines, title+strings.Repeat(" ", titlePad))
+
+	for i, rel := range rels {
+		if i > 0 {
+			lines = append(lines, "") // spacing between boxes
+		}
+		isSelected := selectedRow == i
+		box := renderCompactBox(rel.ToTable, rel.FromColumn, width, rel.Cardinality, rel.IsJunction, isSelected)
+		boxLines := strings.Split(box, "\n")
+		lines = append(lines, boxLines...)
+	}
+	if overflow > 0 {
+		if len(lines) > 1 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, fmt.Sprintf(" +%d more", overflow))
+	}
+
+	return lines
+}
+
+// RenderERDiagram renders a complete ERE diagram as text with3-column layout.
+func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int, nav *ERDiagramNav) string {
+	if len(diagram.Outgoing) == 0 && len(diagram.Incoming) == 0 && len(diagram.Junction) == 0 {
 		return "  No relationships for this table"
 	}
 
+	// Center box width
 	centerWidth := ComputeBoxWidth(diagram.Center.Columns)
-	centerBox := renderBox(diagram.Center.Name, diagram.Center.Columns, centerWidth, "", diagram.Center.IsJunction)
+
+	// Column widths: divide available width by 3 (with minimum)
+	colWidth := (paneWidth - 4) / 3 // 4 = margins
+	if colWidth < MinBoxWidth {
+		colWidth = MinBoxWidth
+	}
+	if colWidth > MaxBoxWidth {
+		colWidth = MaxBoxWidth
+	}
+
+	// Render center box
+	centerBox := renderBox(diagram.Center.Name, diagram.Center.Columns, centerWidth, "", diagram.Center.IsJunction, false)
 	centerLines := strings.Split(centerBox, "\n")
-	centerHeight := len(centerLines)
 
-	// Build neighbor boxes with cardinality inside
-	var rightLines []string
-
-	for _, rel := range diagram.Outgoing {
-		if len(rightLines) > 0 {
-			rightLines = append(rightLines, "") // spacing between boxes
-		}
-		cols := []ColumnBadge{
-			{Name: rel.FromColumn, DataType: "", IsFK: true},
-		}
-		box := renderBox(rel.ToTable, cols, centerWidth, rel.Cardinality, rel.IsJunction)
-		rightLines = append(rightLines, strings.Split(box, "\n")...)
+	// Center the center box horizontally
+	centerTotalWidth := centerWidth + 2 // box width + border chars
+	leftPad := (paneWidth - centerTotalWidth) / 2
+	if leftPad < 0 {
+		leftPad = 0
 	}
-	if diagram.OutgoingOverflow > 0 {
-		if len(rightLines) > 0 {
-			rightLines = append(rightLines, "")
-		}
-		rightLines = append(rightLines, fmt.Sprintf("  +%d more", diagram.OutgoingOverflow))
+	paddedCenter := make([]string, len(centerLines))
+	for i, line := range centerLines {
+		paddedCenter[i] = strings.Repeat(" ", leftPad) + line
 	}
 
-	if len(diagram.Incoming) > 0 {
-		if len(rightLines) > 0 {
-			rightLines = append(rightLines, "") // spacing between sections
-			rightLines = append(rightLines, "")
-		}
-		for _, rel := range diagram.Incoming {
-			if len(rightLines) > 0 && rightLines[len(rightLines)-1] != "" {
-				rightLines = append(rightLines, "") // spacing between boxes
-			}
-			cols := []ColumnBadge{
-				{Name: rel.FromColumn, DataType: "", IsFK: true},
-			}
-			box := renderBox(rel.ToTable, cols, centerWidth, rel.Cardinality, rel.IsJunction)
-			rightLines = append(rightLines, strings.Split(box, "\n")...)
-		}
-		if diagram.IncomingOverflow > 0 {
-			if len(rightLines) > 0 {
-				rightLines = append(rightLines, "")
-			}
-			rightLines = append(rightLines, fmt.Sprintf("  +%d more", diagram.IncomingOverflow))
-		}
+	// Selection state per column
+	selCol := -1
+	selRow := -1
+	if nav != nil && nav.HasSelection() {
+		selCol = nav.ActiveColumn()
+		selRow = nav.ActiveRow()
 	}
 
-	// Layout: center box on the left, neighbors on the right
-	leftWidth := centerWidth + 4 // box + invisible gap
+	// Render3 columns
+	col1 := renderColumn("1:N", diagram.Incoming, diagram.IncomingOverflow, colWidth, -1)
+	col2 := renderColumn("N:1", diagram.Outgoing, diagram.OutgoingOverflow, colWidth, -1)
+	col3 := renderColumn("N:N", diagram.Junction, diagram.JunctionOverflow, colWidth, -1)
 
-	// Merge side by side
-	maxLines := centerHeight
-	if len(rightLines) > maxLines {
-		maxLines = len(rightLines)
+	if selCol == 0 {
+		col1 = renderColumn("1:N", diagram.Incoming, diagram.IncomingOverflow, colWidth, selRow)
+	} else if selCol == 1 {
+		col2 = renderColumn("N:1", diagram.Outgoing, diagram.OutgoingOverflow, colWidth, selRow)
+	} else if selCol == 2 {
+		col3 = renderColumn("N:N", diagram.Junction, diagram.JunctionOverflow, colWidth, selRow)
 	}
 
+	// Build final output: center on top, then3 columns below
 	var result []string
-	for i := 0; i < maxLines; i++ {
+	result = append(result, paddedCenter...)
+	result = append(result, "") // spacing
+
+	// Merge3 columns line by line
+	maxColLines := len(col1)
+	if len(col2) > maxColLines {
+		maxColLines = len(col2)
+	}
+	if len(col3) > maxColLines {
+		maxColLines = len(col3)
+	}
+
+	for i := 0; i < maxColLines; i++ {
 		left := ""
-		if i < len(centerLines) {
-			left = centerLines[i]
+		if i < len(col1) {
+			left = col1[i]
 		}
-		// Pad to fixed left width (invisible whitespace)
-		if len(left) < leftWidth {
-			left += strings.Repeat(" ", leftWidth-len(left))
+		mid := ""
+		if i < len(col2) {
+			mid = col2[i]
 		}
-
 		right := ""
-		if i < len(rightLines) {
-			right = rightLines[i]
+		if i < len(col3) {
+			right = col3[i]
 		}
-
-		result = append(result, left+right)
+		result = append(result, left+"  "+mid+"  "+right)
 	}
 
 	return strings.Join(result, "\n")

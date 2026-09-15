@@ -2,6 +2,7 @@ package explorerpreview
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -139,9 +140,17 @@ func (e *ExplorerPreview) buildEREDiagram() {
 		e.schemaForeignKeys,
 	)
 	e.ereDiagram = &diagram
-	totalNeighbors := len(diagram.Outgoing) + len(diagram.Incoming)
-	e.ereNav = NewERDiagramNav(totalNeighbors)
-	e.ereViewport = NewERDiagramViewport(e.height, totalNeighbors*6+4) // rough estimate
+	e.ereNav = NewERDiagramNav(len(diagram.Incoming), len(diagram.Outgoing), len(diagram.Junction))
+	// Content height: center box (6 lines) + spacing (1) + columns (each box ~5 lines + 1 spacing)
+	colHeight := 0
+	for _, count := range [3]int{len(diagram.Incoming), len(diagram.Outgoing), len(diagram.Junction)} {
+		h := count * 6 // 5 lines per box + 1 spacing
+		if h > colHeight {
+			colHeight = h
+		}
+	}
+	contentHeight := 7 + 1 + colHeight // center + spacing + columns
+	e.ereViewport = NewERDiagramViewport(e.height, contentHeight)
 }
 
 func (e *ExplorerPreview) Update(msg tea.Msg) (tea.Cmd, bool) {
@@ -184,9 +193,19 @@ func (e *ExplorerPreview) Update(msg tea.Msg) (tea.Cmd, bool) {
 			switch key {
 			case "up", "k":
 				e.ereNav.MoveUp()
+				e.ensureERESelectionVisible()
 				return nil, true
 			case "down", "j":
 				e.ereNav.MoveDown()
+				e.ensureERESelectionVisible()
+				return nil, true
+			case "left", "h":
+				e.ereNav.MoveLeft()
+				e.ensureERESelectionVisible()
+				return nil, true
+			case "right", "l":
+				e.ereNav.MoveRight()
+				e.ensureERESelectionVisible()
 				return nil, true
 			case "g":
 				if e.ereViewport != nil {
@@ -200,12 +219,9 @@ func (e *ExplorerPreview) Update(msg tea.Msg) (tea.Cmd, bool) {
 				return nil, true
 			case "enter":
 				if e.ereNav.HasSelection() {
-					allNeighbors := append(e.ereDiagram.Outgoing, e.ereDiagram.Incoming...)
-					if rel := e.ereNav.GetSelectedNeighbor(allNeighbors); rel != nil {
-						// Re-center on the selected table
+					if rel := e.ereNav.GetSelectedRelationship(e.ereDiagram); rel != nil {
 						newTable := rel.ToTable
 						newSchema := e.centerSchema
-						// Handle cross-schema
 						if idx := strings.Index(newTable, "."); idx > 0 {
 							newSchema = newTable[:idx]
 							newTable = newTable[idx+1:]
@@ -216,7 +232,6 @@ func (e *ExplorerPreview) Update(msg tea.Msg) (tea.Cmd, bool) {
 						if e.ereViewport != nil {
 							e.ereViewport.Reset()
 						}
-						// Return a message so app.go can update explorer selection
 						return func() tea.Msg {
 							return ERENavigateMsg{Schema: newSchema, Table: newTable}
 						}, true
@@ -265,7 +280,44 @@ func (e *ExplorerPreview) renderERE() string {
 	if e.ereDiagram == nil {
 		return e.styles.TextMuted.Render("  No data available for ERE diagram")
 	}
-	return RenderERDiagram(*e.ereDiagram, e.width, e.height)
+
+	fullOutput := RenderERDiagram(*e.ereDiagram, e.width, e.height, e.ereNav)
+
+	// Apply scroll
+	if e.ereViewport != nil {
+		lines := strings.Split(fullOutput, "\n")
+		start := e.ereViewport.ScrollOffset
+		end := start + e.ereViewport.PaneHeight
+		if end > len(lines) {
+			end = len(lines)
+		}
+		if start > len(lines) {
+			start = len(lines)
+		}
+		return strings.Join(lines[start:end], "\n")
+	}
+
+	return fullOutput
+}
+
+func (e *ExplorerPreview) ensureERESelectionVisible() {
+	if e.ereViewport == nil || e.ereNav == nil || !e.ereNav.HasSelection() {
+		return
+	}
+
+	// Estimate line of selected item: center (7) + spacing (1) + row * 6
+	row := e.ereNav.ActiveRow()
+	if row < 0 {
+		return
+	}
+	selLine := 8 + row*6 // rough: center box ~7 lines + 1 spacing + row*6 per box
+
+	// Adjust scroll to keep selection visible
+	if selLine < e.ereViewport.ScrollOffset {
+		e.ereViewport.ScrollOffset = selLine
+	} else if selLine >= e.ereViewport.ScrollOffset+e.ereViewport.PaneHeight {
+		e.ereViewport.ScrollOffset = selLine - e.ereViewport.PaneHeight + 1
+	}
 }
 
 func (e *ExplorerPreview) renderOverview() string {
@@ -397,4 +449,28 @@ func formatTime(t *time.Time) string {
 		return "—"
 	}
 	return t.Format("2006-01-02 15:04:05")
+}
+
+func debugLogERE(diagram *ERDiagram, selectedIdx int) {
+	f, err := os.OpenFile("/tmp/dbx_ere_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	centerColsPKFK := 0
+	for _, col := range diagram.Center.Columns {
+		if col.IsPK || col.IsFK {
+			centerColsPKFK++
+		}
+	}
+
+	fmt.Fprintf(f, "ERE: center=%s centerCols=%d(out of all) pkfkCols=%d outgoing=%d incoming=%d selectedIdx=%d\n",
+		diagram.Center.Name,
+		len(diagram.Center.Columns),
+		centerColsPKFK,
+		len(diagram.Outgoing),
+		len(diagram.Incoming),
+		selectedIdx,
+	)
 }

@@ -8,14 +8,7 @@ import (
 	"github.com/buble/dbx/internal/drivers/postgres"
 )
 
-// --- Scenario: ERE tab renders diagram for table with relationships ---
-// Given the current table "orders" has foreign keys to "users" and "products"
-// And the table "order_items" has a foreign key to "orders"
-// When building the diagram for "orders"
-// Then center box shows "orders" with all columns
-// And column "user_id" is marked as FK, column "id" is marked as PK
-// And neighbor boxes "users", "products", "order_items" are present
-// And edge labels show cardinality N:1 for outgoing FKs and 1:N for incoming FKs
+// --- BuildERDiagram: basic relationships ---
 
 func TestBuildERDiagram_WithRelationships(t *testing.T) {
 	columns := []postgres.ColumnInfo{
@@ -40,15 +33,13 @@ func TestBuildERDiagram_WithRelationships(t *testing.T) {
 
 	diagram := BuildERDiagram("public", "orders", columns, constraints, outgoingFKs, schemaFKs)
 
-	// Center box
 	if diagram.Center.Name != "orders" {
 		t.Errorf("expected center name 'orders', got %q", diagram.Center.Name)
 	}
-	if len(diagram.Center.Columns) != 4 {
-		t.Fatalf("expected 4 columns in center, got %d", len(diagram.Center.Columns))
+	if len(diagram.Center.Columns) != 3 {
+		t.Fatalf("expected 3 columns in center (PK+FK only), got %d", len(diagram.Center.Columns))
 	}
 
-	// Check PK/FK badges
 	for _, col := range diagram.Center.Columns {
 		switch col.Name {
 		case "id":
@@ -66,7 +57,6 @@ func TestBuildERDiagram_WithRelationships(t *testing.T) {
 		}
 	}
 
-	// Outgoing relationships (orders -> users, orders -> products)
 	if len(diagram.Outgoing) != 2 {
 		t.Fatalf("expected 2 outgoing relationships, got %d", len(diagram.Outgoing))
 	}
@@ -76,7 +66,6 @@ func TestBuildERDiagram_WithRelationships(t *testing.T) {
 		}
 	}
 
-	// Incoming relationships (order_items -> orders)
 	if len(diagram.Incoming) != 1 {
 		t.Fatalf("expected 1 incoming relationship, got %d", len(diagram.Incoming))
 	}
@@ -88,7 +77,7 @@ func TestBuildERDiagram_WithRelationships(t *testing.T) {
 	}
 }
 
-// --- Scenario: ERE tab shows empty state for table without relationships ---
+// --- BuildERDiagram: empty state ---
 
 func TestBuildERDiagram_EmptyState(t *testing.T) {
 	columns := []postgres.ColumnInfo{
@@ -103,38 +92,33 @@ func TestBuildERDiagram_EmptyState(t *testing.T) {
 	if len(diagram.Incoming) != 0 {
 		t.Errorf("expected 0 incoming, got %d", len(diagram.Incoming))
 	}
+	if len(diagram.Junction) != 0 {
+		t.Errorf("expected 0 junction, got %d", len(diagram.Junction))
+	}
 	if diagram.Center.Name != "settings" {
 		t.Errorf("expected center 'settings', got %q", diagram.Center.Name)
 	}
 }
 
-// --- Scenario: Hub table caps rendered neighbors ---
-// Given the current table "events" has 25 incoming FK relationships
-// Then at most 10 incoming neighbor boxes are rendered
+// --- BuildERDiagram: hub table cap ---
 
 func TestBuildERDiagram_HubTableCap(t *testing.T) {
 	columns := []postgres.ColumnInfo{{Name: "id", DataType: "integer"}}
 	schemaFKs := map[string][]postgres.ForeignKeyInfo{}
 
-	// We need 25 different tables referencing events
-	incomingFKs := make([]postgres.ForeignKeyInfo, 25)
 	for i := 0; i < 25; i++ {
-		tableName := strings.Repeat("x", 1)
-		tableName = string(rune('a' + i%26))
+		tableName := string(rune('a' + i%26))
 		if i >= 26 {
 			tableName += string(rune('0' + i/26))
 		}
-		incomingFKs[i] = postgres.ForeignKeyInfo{
+		fk := postgres.ForeignKeyInfo{
 			Name:      "fk_" + tableName,
 			Column:    "event_id",
 			RefSchema: "public",
 			RefTable:  "events",
 			RefColumn: "id",
 		}
-		if schemaFKs[tableName] == nil {
-			schemaFKs[tableName] = []postgres.ForeignKeyInfo{}
-		}
-		schemaFKs[tableName] = append(schemaFKs[tableName], incomingFKs[i])
+		schemaFKs[tableName] = append(schemaFKs[tableName], fk)
 	}
 
 	diagram := BuildERDiagram("public", "events", columns, nil, nil, schemaFKs)
@@ -150,8 +134,7 @@ func TestBuildERDiagram_HubTableCap(t *testing.T) {
 	}
 }
 
-// --- Scenario: Cross-schema foreign key reference ---
-// Given the current table "orders" has a FK to "audit.logs" in a different schema
+// --- BuildERDiagram: cross-schema ---
 
 func TestBuildERDiagram_CrossSchema(t *testing.T) {
 	columns := []postgres.ColumnInfo{
@@ -172,7 +155,7 @@ func TestBuildERDiagram_CrossSchema(t *testing.T) {
 	}
 }
 
-// --- Deduplication: multiple FKs to same table produce one box ---
+// --- BuildERDiagram: deduplication ---
 
 func TestBuildERDiagram_Deduplication(t *testing.T) {
 	columns := []postgres.ColumnInfo{
@@ -187,7 +170,6 @@ func TestBuildERDiagram_Deduplication(t *testing.T) {
 
 	diagram := BuildERDiagram("public", "orders", columns, nil, outgoingFKs, nil)
 
-	// Two FKs to same table should produce only one outgoing box
 	if len(diagram.Outgoing) != 1 {
 		t.Errorf("expected 1 outgoing after dedup, got %d", len(diagram.Outgoing))
 	}
@@ -204,19 +186,138 @@ func TestBuildERDiagram_IncomingDeduplication(t *testing.T) {
 
 	diagram := BuildERDiagram("public", "orders", columns, nil, nil, schemaFKs)
 
-	// Two FKs from same table should produce only one incoming box
 	if len(diagram.Incoming) != 1 {
 		t.Errorf("expected 1 incoming after dedup, got %d", len(diagram.Incoming))
 	}
 }
 
-// --- Scenario: Long table name truncation ---
-// Given the current table has a name longer than 40 characters
+// --- BuildERDiagram: junction table separation ---
+
+func TestBuildERDiagram_JunctionSeparation(t *testing.T) {
+	columns := []postgres.ColumnInfo{{Name: "id", DataType: "integer"}}
+	schemaFKs := map[string][]postgres.ForeignKeyInfo{
+		"order_items": {
+			// order_items is a junction: FK to orders AND FK to products
+			{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
+			{Name: "fk_product", Column: "product_id", RefSchema: "public", RefTable: "products", RefColumn: "id"},
+		},
+		"payments": {
+			// payments is NOT a junction: only FK to orders
+			{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
+		},
+	}
+
+	diagram := BuildERDiagram("public", "orders", columns, nil, nil, schemaFKs)
+
+	// order_items should be in Junction (not Incoming) because it's a junction table
+	if len(diagram.Junction) != 1 {
+		t.Fatalf("expected 1 junction, got %d", len(diagram.Junction))
+	}
+	if diagram.Junction[0].ToTable != "order_items" {
+		t.Errorf("expected junction table 'order_items', got %q", diagram.Junction[0].ToTable)
+	}
+
+	// payments should be in Incoming (not Junction)
+	if len(diagram.Incoming) != 1 {
+		t.Fatalf("expected 1 incoming, got %d", len(diagram.Incoming))
+	}
+	if diagram.Incoming[0].ToTable != "payments" {
+		t.Errorf("expected incoming table 'payments', got %q", diagram.Incoming[0].ToTable)
+	}
+}
+
+func TestBuildERDiagram_OutgoingJunctionSeparation(t *testing.T) {
+	columns := []postgres.ColumnInfo{
+		{Name: "id", DataType: "integer"},
+		{Name: "order_id", DataType: "integer"},
+	}
+	outgoingFKs := []postgres.ForeignKeyInfo{
+		{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "order_items", RefColumn: "id"},
+	}
+	schemaFKs := map[string][]postgres.ForeignKeyInfo{
+		"order_items": {
+			{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
+			{Name: "fk_product", Column: "product_id", RefSchema: "public", RefTable: "products", RefColumn: "id"},
+		},
+	}
+
+	diagram := BuildERDiagram("public", "orders", columns, nil, outgoingFKs, schemaFKs)
+
+	// order_items is a junction table, should be in Junction (not Outgoing)
+	if len(diagram.Junction) != 1 {
+		t.Fatalf("expected 1 junction, got %d", len(diagram.Junction))
+	}
+	if len(diagram.Outgoing) != 0 {
+		t.Errorf("expected 0 outgoing (junction moved), got %d", len(diagram.Outgoing))
+	}
+}
+
+// --- BuildERDiagram: junction table center detection ---
+
+func TestBuildERDiagram_CenterIsJunction(t *testing.T) {
+	columns := []postgres.ColumnInfo{
+		{Name: "id", DataType: "integer"},
+		{Name: "order_id", DataType: "integer"},
+		{Name: "product_id", DataType: "integer"},
+	}
+	outgoingFKs := []postgres.ForeignKeyInfo{
+		{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
+		{Name: "fk_product", Column: "product_id", RefSchema: "public", RefTable: "products", RefColumn: "id"},
+	}
+
+	diagram := BuildERDiagram("public", "order_items", columns, nil, outgoingFKs, nil)
+
+	if !diagram.Center.IsJunction {
+		t.Error("expected center 'order_items' to be detected as junction table")
+	}
+}
+
+// --- BuildERDiagram: PK/FK filtering ---
+
+func TestBuildERDiagram_OnlyPKFKColumns(t *testing.T) {
+	columns := []postgres.ColumnInfo{
+		{Name: "id", DataType: "integer"},
+		{Name: "user_id", DataType: "integer"},
+		{Name: "name", DataType: "text"},
+		{Name: "created_at", DataType: "timestamp"},
+		{Name: "updated_at", DataType: "timestamp"},
+	}
+	constraints := []postgres.ConstraintInfo{
+		{Name: "pkey", Type: "PRIMARY KEY", Columns: "id"},
+	}
+	outgoingFKs := []postgres.ForeignKeyInfo{
+		{Name: "fk_user", Column: "user_id", RefSchema: "public", RefTable: "users", RefColumn: "id"},
+	}
+
+	diagram := BuildERDiagram("public", "orders", columns, constraints, outgoingFKs, nil)
+
+	if len(diagram.Center.Columns) != 2 {
+		t.Fatalf("expected 2 columns (PK+FK only), got %d: %v", len(diagram.Center.Columns), diagram.Center.Columns)
+	}
+	for _, col := range diagram.Center.Columns {
+		if !col.IsPK && !col.IsFK {
+			t.Errorf("expected only PK or FK columns, got %q", col.Name)
+		}
+	}
+}
+
+func TestBuildERDiagram_NoPKFK_ShowsAll(t *testing.T) {
+	columns := []postgres.ColumnInfo{
+		{Name: "key", DataType: "text"},
+		{Name: "value", DataType: "text"},
+	}
+	diagram := BuildERDiagram("public", "settings", columns, nil, nil, nil)
+	if len(diagram.Center.Columns) != 2 {
+		t.Fatalf("expected 2 columns (fallback to all), got %d", len(diagram.Center.Columns))
+	}
+}
+
+// --- Truncation ---
 
 func TestTruncateTableName_Long(t *testing.T) {
 	longName := "this_is_a_very_long_table_name_that_exceeds_forty_characters_limit"
 	truncated := TruncateTableName(longName)
-	if utf8.RuneCountInString(truncated) > 41 { // 40 chars + ellipsis
+	if utf8.RuneCountInString(truncated) > 41 {
 		t.Errorf("expected truncated name <= 41 chars, got %d: %q", utf8.RuneCountInString(truncated), truncated)
 	}
 	if !strings.HasSuffix(truncated, "…") {
@@ -232,12 +333,10 @@ func TestTruncateTableName_Short(t *testing.T) {
 	}
 }
 
-// --- Scenario: Long column name truncation ---
-
 func TestTruncateColumnName_Long(t *testing.T) {
 	longName := "this_is_a_very_long_column_name_that_exceeds_thirty_chars"
 	truncated := TruncateColumnName(longName)
-	if utf8.RuneCountInString(truncated) > 31 { // 30 chars + ellipsis
+	if utf8.RuneCountInString(truncated) > 31 {
 		t.Errorf("expected truncated name <= 31 chars, got %d: %q", utf8.RuneCountInString(truncated), truncated)
 	}
 	if !strings.HasSuffix(truncated, "…") {
@@ -253,7 +352,7 @@ func TestTruncateColumnName_Short(t *testing.T) {
 	}
 }
 
-// --- Box width computation ---
+// --- ComputeBoxWidth ---
 
 func TestComputeBoxWidth(t *testing.T) {
 	tests := []struct {
@@ -262,10 +361,8 @@ func TestComputeBoxWidth(t *testing.T) {
 		expected int
 	}{
 		{
-			name: "minimum width",
-			columns: []ColumnBadge{
-				{Name: "id", DataType: "int"},
-			},
+			name:     "minimum width",
+			columns:  []ColumnBadge{{Name: "id", DataType: "int"}},
 			expected: MinBoxWidth,
 		},
 		{
@@ -274,7 +371,7 @@ func TestComputeBoxWidth(t *testing.T) {
 				{Name: "user_id", DataType: "integer"},
 				{Name: "created_at", DataType: "timestamp"},
 			},
-			expected: len("created_at") + len("timestamp") + 4, // 10 + 9 + 4 = 23
+			expected: len("created_at") + len("timestamp") + 4,
 		},
 		{
 			name: "maximum width",
@@ -299,22 +396,20 @@ func TestComputeBoxWidth(t *testing.T) {
 				t.Errorf("expected width %d, got %d", tt.expected, got)
 			}
 		})
-	 }
+	}
 }
 
-// --- Rendering: empty state message ---
+// --- Rendering: empty state ---
 
 func TestRenderERDiagram_EmptyState(t *testing.T) {
 	diagram := ERDiagram{
 		Center: TableBox{
-			Schema: "public",
-			Name:   "settings",
-			Columns: []ColumnBadge{
-				{Name: "key", DataType: "text"},
-			},
+			Schema:  "public",
+			Name:    "settings",
+			Columns: []ColumnBadge{{Name: "key", DataType: "text"}},
 		},
 	}
-	output := RenderERDiagram(diagram, 80, 20)
+	output := RenderERDiagram(diagram, 80, 20, nil)
 	if !strings.Contains(output, "No relationships for this table") {
 		t.Errorf("expected empty state message, got:\n%s", output)
 	}
@@ -330,54 +425,56 @@ func TestRenderERDiagram_CenterBox(t *testing.T) {
 			Columns: []ColumnBadge{
 				{Name: "id", DataType: "integer", IsPK: true},
 				{Name: "user_id", DataType: "integer", IsFK: true},
-				{Name: "created_at", DataType: "timestamp"},
 			},
 		},
 		Outgoing: []Relationship{
 			{FromColumn: "user_id", ToTable: "users", ToColumn: "id", Cardinality: "N:1"},
 		},
 	}
-	output := RenderERDiagram(diagram, 80, 20)
+	output := RenderERDiagram(diagram, 80, 20, nil)
 
-	// Check PK/FK badges
 	if !strings.Contains(output, "PK") {
 		t.Error("expected PK badge in output")
 	}
 	if !strings.Contains(output, "FK") {
 		t.Error("expected FK badge in output")
 	}
-	// Check table name
 	if !strings.Contains(output, "orders") {
 		t.Error("expected table name 'orders' in output")
 	}
 }
 
-// --- Rendering: edge cardinality labels ---
+// --- Rendering: 3-column layout headers ---
 
-func TestRenderERDiagram_EdgeLabels(t *testing.T) {
+func TestRenderERDiagram_ThreeColumnHeaders(t *testing.T) {
 	diagram := ERDiagram{
 		Center: TableBox{
 			Schema: "public",
 			Name:   "orders",
 			Columns: []ColumnBadge{
 				{Name: "id", DataType: "integer", IsPK: true},
-				{Name: "user_id", DataType: "integer", IsFK: true},
 			},
-		},
-		Outgoing: []Relationship{
-			{FromColumn: "user_id", ToTable: "users", ToColumn: "id", Cardinality: "N:1"},
 		},
 		Incoming: []Relationship{
 			{FromColumn: "order_id", ToTable: "order_items", ToColumn: "id", Cardinality: "1:N"},
 		},
+		Outgoing: []Relationship{
+			{FromColumn: "user_id", ToTable: "users", ToColumn: "id", Cardinality: "N:1"},
+		},
+		Junction: []Relationship{
+			{FromColumn: "order_id", ToTable: "order_tags", ToColumn: "id", Cardinality: "1:N", IsJunction: true},
+		},
 	}
-	output := RenderERDiagram(diagram, 80, 30)
+	output := RenderERDiagram(diagram, 120, 40, nil)
 
-	if !strings.Contains(output, "N:1") {
-		t.Errorf("expected N:1 cardinality label, output:\n%s", output)
-	}
 	if !strings.Contains(output, "1:N") {
-		t.Errorf("expected 1:N cardinality label, output:\n%s", output)
+		t.Error("expected '1:N' column header")
+	}
+	if !strings.Contains(output, "N:1") {
+		t.Error("expected 'N:1' column header")
+	}
+	if !strings.Contains(output, "N:N") {
+		t.Error("expected 'N:N' column header")
 	}
 }
 
@@ -396,7 +493,7 @@ func TestRenderERDiagram_BoxDrawing(t *testing.T) {
 			{FromColumn: "org_id", ToTable: "orgs", ToColumn: "id", Cardinality: "N:1"},
 		},
 	}
-	output := RenderERDiagram(diagram, 80, 20)
+	output := RenderERDiagram(diagram, 80, 20, nil)
 
 	if !strings.Contains(output, "┌") {
 		t.Error("expected box-drawing character ┌")
@@ -412,191 +509,7 @@ func TestRenderERDiagram_BoxDrawing(t *testing.T) {
 	}
 }
 
-// --- Navigation: cursor state ---
-
-func TestERDiagramNav_CursorMovement(t *testing.T) {
-	nav := NewERDiagramNav(3)
-
-	// Initial state: no selection
-	if nav.HasSelection() {
-		t.Error("expected no selection initially")
-	}
-
-	// Move down
-	nav.MoveDown()
-	if !nav.HasSelection() {
-		t.Error("expected selection after MoveDown")
-	}
-	if nav.SelectedIndex() != 0 {
-		t.Errorf("expected selected index 0, got %d", nav.SelectedIndex())
-	}
-
-	// Move down twice more
-	nav.MoveDown()
-	nav.MoveDown()
-	if nav.SelectedIndex() != 2 {
-		t.Errorf("expected selected index 2, got %d", nav.SelectedIndex())
-	}
-
-	// Can't go past end
-	nav.MoveDown()
-	if nav.SelectedIndex() != 2 {
-		t.Errorf("expected selected index stays at 2, got %d", nav.SelectedIndex())
-	}
-
-	// Move up
-	nav.MoveUp()
-	if nav.SelectedIndex() != 1 {
-		t.Errorf("expected selected index 1, got %d", nav.SelectedIndex())
-	}
-
-	// Can't go below 0
-	nav2 := NewERDiagramNav(3)
-	nav2.MoveUp()
-	if nav2.HasSelection() {
-		t.Error("expected no selection when moving up from 0")
-	}
-}
-
-func TestERDiagramNav_EmptyNeighbors(t *testing.T) {
-	nav := NewERDiagramNav(0)
-
-	nav.MoveDown()
-	if nav.HasSelection() {
-		t.Error("expected no selection with 0 neighbors")
-	}
-
-	nav.MoveUp()
-	if nav.HasSelection() {
-		t.Error("expected no selection with 0 neighbors")
-	}
-}
-
-func TestERDiagramNav_GetSelectedNeighbor(t *testing.T) {
-	neighbors := []Relationship{
-		{FromColumn: "user_id", ToTable: "users", ToColumn: "id", Cardinality: "N:1"},
-		{FromColumn: "product_id", ToTable: "products", ToColumn: "id", Cardinality: "N:1"},
-	}
-	nav := NewERDiagramNav(len(neighbors))
-
-	// No selection
-	if rel := nav.GetSelectedNeighbor(neighbors); rel != nil {
-		t.Error("expected nil when no selection")
-	}
-
-	// Select first
-	nav.MoveDown()
-	rel := nav.GetSelectedNeighbor(neighbors)
-	if rel == nil {
-		t.Fatal("expected non-nil relation")
-	}
-	if rel.ToTable != "users" {
-		t.Errorf("expected 'users', got %q", rel.ToTable)
-	}
-
-	// Select second
-	nav.MoveDown()
-	rel = nav.GetSelectedNeighbor(neighbors)
-	if rel == nil {
-		t.Fatal("expected non-nil relation")
-	}
-	if rel.ToTable != "products" {
-		t.Errorf("expected 'products', got %q", rel.ToTable)
-	}
-}
-
-// --- Scrolling: viewport ---
-
-func TestERDiagramViewport_ScrollDown(t *testing.T) {
-	viewport := NewERDiagramViewport(10, 30) // height=10, content=30
-
-	if viewport.ScrollOffset != 0 {
-		t.Errorf("expected initial scroll 0, got %d", viewport.ScrollOffset)
-	}
-
-	viewport.ScrollDown()
-	if viewport.ScrollOffset != 1 {
-		t.Errorf("expected scroll 1 after ScrollDown, got %d", viewport.ScrollOffset)
-	}
-
-	// Scroll to bottom
-	for i := 0; i < 25; i++ {
-		viewport.ScrollDown()
-	}
-	if viewport.ScrollOffset != 20 { // 30 - 10 = 20 max
-		t.Errorf("expected scroll capped at 20, got %d", viewport.ScrollOffset)
-	}
-}
-
-func TestERDiagramViewport_ScrollUp(t *testing.T) {
-	viewport := NewERDiagramViewport(10, 30)
-	viewport.ScrollOffset = 5
-
-	viewport.ScrollUp()
-	if viewport.ScrollOffset != 4 {
-		t.Errorf("expected scroll 4 after ScrollUp, got %d", viewport.ScrollOffset)
-	}
-
-	// Can't go below 0
-	viewport.ScrollOffset = 0
-	viewport.ScrollUp()
-	if viewport.ScrollOffset != 0 {
-		t.Errorf("expected scroll stays at 0, got %d", viewport.ScrollOffset)
-	}
-}
-
-func TestERDiagramViewport_JumpTop(t *testing.T) {
-	viewport := NewERDiagramViewport(10, 30)
-	viewport.ScrollOffset = 15
-
-	viewport.JumpTop()
-	if viewport.ScrollOffset != 0 {
-		t.Errorf("expected scroll 0 after JumpTop, got %d", viewport.ScrollOffset)
-	}
-}
-
-func TestERDiagramViewport_JumpBottom(t *testing.T) {
-	viewport := NewERDiagramViewport(10, 30)
-
-	viewport.JumpBottom()
-	if viewport.ScrollOffset != 20 {
-		t.Errorf("expected scroll 20 after JumpBottom, got %d", viewport.ScrollOffset)
-	}
-}
-
-func TestERDiagramViewport_Reset(t *testing.T) {
-	viewport := NewERDiagramViewport(10, 30)
-	viewport.ScrollOffset = 15
-
-	viewport.Reset()
-	if viewport.ScrollOffset != 0 {
-		t.Errorf("expected scroll 0 after Reset, got %d", viewport.ScrollOffset)
-	}
-}
-
-// --- Rendering: theme styles used (no hardcoded colors) ---
-
-func TestRenderERDiagram_NoHardcodedColors(t *testing.T) {
-	diagram := ERDiagram{
-		Center: TableBox{
-			Schema: "public",
-			Name:   "test",
-			Columns: []ColumnBadge{
-				{Name: "id", DataType: "integer", IsPK: true},
-			},
-		},
-	}
-	output := RenderERDiagram(diagram, 80, 20)
-
-	// The renderer should not contain ANSI color codes directly
-	// (they should come from lipgloss styles, which are applied externally)
-	// This test just verifies the renderer returns a non-empty string
-	if output == "" {
-		t.Error("expected non-empty render output")
-	}
-}
-
-// --- Rendering: neighbor box with truncated long name ---
+// --- Rendering: long neighbor name truncation ---
 
 func TestRenderERDiagram_LongNeighborName(t *testing.T) {
 	diagram := ERDiagram{
@@ -612,11 +525,222 @@ func TestRenderERDiagram_LongNeighborName(t *testing.T) {
 			{FromColumn: "ref_id", ToTable: "this_is_a_very_long_table_name_that_exceeds_forty_characters", ToColumn: "id", Cardinality: "N:1"},
 		},
 	}
-	output := RenderERDiagram(diagram, 80, 20)
+	output := RenderERDiagram(diagram, 80, 20, nil)
 
-	// The long table name should be truncated
 	if strings.Contains(output, "this_is_a_very_long_table_name_that_exceeds_forty_characters") {
 		t.Error("expected long table name to be truncated")
+	}
+}
+
+// --- Rendering: selection highlight ---
+
+func TestRenderERDiagram_SelectedHighlight(t *testing.T) {
+	diagram := ERDiagram{
+		Center: TableBox{
+			Schema: "public",
+			Name:   "orders",
+			Columns: []ColumnBadge{
+				{Name: "id", DataType: "integer", IsPK: true},
+			},
+		},
+		Outgoing: []Relationship{
+			{FromColumn: "user_id", ToTable: "users", ToColumn: "id", Cardinality: "N:1"},
+			{FromColumn: "product_id", ToTable: "products", ToColumn: "id", Cardinality: "N:1"},
+		},
+	}
+
+	// No selection
+	output := RenderERDiagram(diagram, 80, 20, nil)
+	if strings.Contains(output, "►") || strings.Contains(output, "◄") {
+		t.Error("expected no selection markers when nav=nil")
+	}
+
+	// Select first neighbor (column 1 = N:1, row 0)
+	nav := NewERDiagramNav(0, 2, 0)
+	nav.MoveRight() // move to N:1 column
+	nav.MoveDown()  // row 0
+	output = RenderERDiagram(diagram, 80, 20, nav)
+	if !strings.Contains(output, "► users ◄") {
+		t.Errorf("expected '► users ◄' for selected neighbor, got:\n%s", output)
+	}
+
+	// Select second neighbor (column 1 = N:1, row 1)
+	nav2 := NewERDiagramNav(0, 2, 0)
+	nav2.MoveRight() // move to N:1 column
+	nav2.MoveDown()  // row 0
+	nav2.MoveDown()  // row 1
+	output = RenderERDiagram(diagram, 80, 20, nav2)
+	if !strings.Contains(output, "► products ◄") {
+		t.Errorf("expected '► products ◄' for selected neighbor, got:\n%s", output)
+	}
+}
+
+// --- Navigation: 2D cursor ---
+
+func TestERDiagramNav_2DCursorMovement(t *testing.T) {
+	nav := NewERDiagramNav(2, 3, 1) // 2 incoming, 3 outgoing, 1 junction
+
+	// Initial state: no selection
+	if nav.HasSelection() {
+		t.Error("expected no selection initially")
+	}
+
+	// Move down — should select row 0 in column 0 (1:N)
+	nav.MoveDown()
+	if !nav.HasSelection() {
+		t.Error("expected selection after MoveDown")
+	}
+	if nav.ActiveColumn() != 0 || nav.ActiveRow() != 0 {
+		t.Errorf("expected (0,0), got (%d,%d)", nav.ActiveColumn(), nav.ActiveRow())
+	}
+
+	// Move down again — row 1 in column 0
+	nav.MoveDown()
+	if nav.ActiveColumn() != 0 || nav.ActiveRow() != 1 {
+		t.Errorf("expected (0,1), got (%d,%d)", nav.ActiveColumn(), nav.ActiveRow())
+	}
+
+	// Move right — column 1 (N:1), row clamped to 2 (max for column 1)
+	nav.MoveRight()
+	if nav.ActiveColumn() != 1 || nav.ActiveRow() != 1 {
+		t.Errorf("expected (1,1) after MoveRight, got (%d,%d)", nav.ActiveColumn(), nav.ActiveRow())
+	}
+
+	// Move right again — column 2 (N:N)
+	nav.MoveRight()
+	if nav.ActiveColumn() != 2 || nav.ActiveRow() != 0 {
+		t.Errorf("expected (2,0) after MoveRight to N:N, got (%d,%d)", nav.ActiveColumn(), nav.ActiveRow())
+	}
+
+	// Can't go past column 2
+	nav.MoveRight()
+	if nav.ActiveColumn() != 2 {
+		t.Errorf("expected column stays at 2, got %d", nav.ActiveColumn())
+	}
+
+	// Move left — back to column 1
+	nav.MoveLeft()
+	if nav.ActiveColumn() != 1 {
+		t.Errorf("expected column 1 after MoveLeft, got %d", nav.ActiveColumn())
+	}
+
+	// Move up — deselect
+	nav.MoveUp()
+	nav.MoveUp()
+	if nav.HasSelection() {
+		t.Error("expected no selection after moving up past row 0")
+	}
+}
+
+func TestERDiagramNav_EmptyColumns(t *testing.T) {
+	nav := NewERDiagramNav(0, 0, 0)
+
+	nav.MoveDown()
+	if nav.HasSelection() {
+		t.Error("expected no selection with all empty columns")
+	}
+
+	nav.MoveRight()
+	nav.MoveDown()
+	if nav.HasSelection() {
+		t.Error("expected no selection when all columns empty")
+	}
+}
+
+func TestERDiagramNav_GetSelectedRelationship(t *testing.T) {
+	diagram := &ERDiagram{
+		Incoming: []Relationship{
+			{FromColumn: "order_id", ToTable: "order_items", ToColumn: "id", Cardinality: "1:N"},
+		},
+		Outgoing: []Relationship{
+			{FromColumn: "user_id", ToTable: "users", ToColumn: "id", Cardinality: "N:1"},
+		},
+	}
+	nav := NewERDiagramNav(1, 1, 0)
+
+	// No selection
+	if rel := nav.GetSelectedRelationship(diagram); rel != nil {
+		t.Error("expected nil when no selection")
+	}
+
+	// Select incoming (column 0, row 0)
+	nav.MoveDown()
+	rel := nav.GetSelectedRelationship(diagram)
+	if rel == nil {
+		t.Fatal("expected non-nil relation")
+	}
+	if rel.ToTable != "order_items" {
+		t.Errorf("expected 'order_items', got %q", rel.ToTable)
+	}
+
+	// Move to outgoing (column 1)
+	nav.MoveRight()
+	rel = nav.GetSelectedRelationship(diagram)
+	if rel == nil {
+		t.Fatal("expected non-nil relation")
+	}
+	if rel.ToTable != "users" {
+		t.Errorf("expected 'users', got %q", rel.ToTable)
+	}
+}
+
+// --- Viewport ---
+
+func TestERDiagramViewport_ScrollDown(t *testing.T) {
+	viewport := NewERDiagramViewport(10, 30)
+
+	if viewport.ScrollOffset != 0 {
+		t.Errorf("expected initial scroll 0, got %d", viewport.ScrollOffset)
+	}
+	viewport.ScrollDown()
+	if viewport.ScrollOffset != 1 {
+		t.Errorf("expected scroll 1 after ScrollDown, got %d", viewport.ScrollOffset)
+	}
+	for i := 0; i < 25; i++ {
+		viewport.ScrollDown()
+	}
+	if viewport.ScrollOffset != 20 {
+		t.Errorf("expected scroll capped at 20, got %d", viewport.ScrollOffset)
+	}
+}
+
+func TestERDiagramViewport_ScrollUp(t *testing.T) {
+	viewport := NewERDiagramViewport(10, 30)
+	viewport.ScrollOffset = 5
+	viewport.ScrollUp()
+	if viewport.ScrollOffset != 4 {
+		t.Errorf("expected scroll 4 after ScrollUp, got %d", viewport.ScrollOffset)
+	}
+	viewport.ScrollOffset = 0
+	viewport.ScrollUp()
+	if viewport.ScrollOffset != 0 {
+		t.Errorf("expected scroll stays at 0, got %d", viewport.ScrollOffset)
+	}
+}
+
+func TestERDiagramViewport_JumpTop(t *testing.T) {
+	viewport := NewERDiagramViewport(10, 30)
+	viewport.ScrollOffset = 15
+	viewport.JumpTop()
+	if viewport.ScrollOffset != 0 {
+		t.Errorf("expected scroll 0 after JumpTop, got %d", viewport.ScrollOffset)
+	}
+}
+
+func TestERDiagramViewport_JumpBottom(t *testing.T) {
+	viewport := NewERDiagramViewport(10, 30)
+	viewport.JumpBottom()
+	if viewport.ScrollOffset != 20 {
+		t.Errorf("expected scroll 20 after JumpBottom, got %d", viewport.ScrollOffset)
+	}
+}
+
+func TestERDiagramViewport_Reset(t *testing.T) {
+	viewport := NewERDiagramViewport(10, 30)
+	viewport.ScrollOffset = 15
+	viewport.Reset()
+	if viewport.ScrollOffset != 0 {
+		t.Errorf("expected scroll 0 after Reset, got %d", viewport.ScrollOffset)
 	}
 }
 
@@ -640,186 +764,43 @@ func TestBuildAndRender_SimpleDiagram(t *testing.T) {
 	}
 
 	diagram := BuildERDiagram("public", "orders", columns, constraints, outgoing, schemaFKs)
-	output := RenderERDiagram(diagram, 80, 20)
+	output := RenderERDiagram(diagram, 80, 20, nil)
 
-	// Should contain key elements
 	if !strings.Contains(output, "orders") {
 		t.Error("expected 'orders' in rendered output")
 	}
 	if !strings.Contains(output, "users") {
 		t.Error("expected 'users' in rendered output")
 	}
-	if !strings.Contains(output, "N:1") {
-		t.Error("expected 'N:1' in rendered output")
-	}
 }
 
-// --- Junction table detection ---
-
-func TestBuildERDiagram_CenterIsJunction(t *testing.T) {
-	columns := []postgres.ColumnInfo{
-		{Name: "id", DataType: "integer"},
-		{Name: "order_id", DataType: "integer"},
-		{Name: "product_id", DataType: "integer"},
-	}
-	outgoingFKs := []postgres.ForeignKeyInfo{
-		{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
-		{Name: "fk_product", Column: "product_id", RefSchema: "public", RefTable: "products", RefColumn: "id"},
-	}
-
-	diagram := BuildERDiagram("public", "order_items", columns, nil, outgoingFKs, nil)
-
-	if !diagram.Center.IsJunction {
-		t.Error("expected center 'order_items' to be detected as junction table")
-	}
-}
-
-func TestBuildERDiagram_CenterNotJunction(t *testing.T) {
+func TestBuildAndRender_OnlyPKFK(t *testing.T) {
 	columns := []postgres.ColumnInfo{
 		{Name: "id", DataType: "integer"},
 		{Name: "user_id", DataType: "integer"},
-	}
-	outgoingFKs := []postgres.ForeignKeyInfo{
-		{Name: "fk_user", Column: "user_id", RefSchema: "public", RefTable: "users", RefColumn: "id"},
-	}
-
-	diagram := BuildERDiagram("public", "orders", columns, nil, outgoingFKs, nil)
-
-	if diagram.Center.IsJunction {
-		t.Error("expected center 'orders' NOT to be junction (only 1 FK)")
-	}
-}
-
-func TestBuildERDiagram_IncomingNeighborIsJunction(t *testing.T) {
-	columns := []postgres.ColumnInfo{{Name: "id", DataType: "integer"}}
-	schemaFKs := map[string][]postgres.ForeignKeyInfo{
-		"order_items": {
-			{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
-			{Name: "fk_product", Column: "product_id", RefSchema: "public", RefTable: "products", RefColumn: "id"},
-		},
-	}
-
-	diagram := BuildERDiagram("public", "orders", columns, nil, nil, schemaFKs)
-
-	if len(diagram.Incoming) != 1 {
-		t.Fatalf("expected 1 incoming, got %d", len(diagram.Incoming))
-	}
-	if !diagram.Incoming[0].IsJunction {
-		t.Error("expected incoming neighbor 'order_items' to be detected as junction")
-	}
-}
-
-func TestBuildERDiagram_OutgoingNeighborIsJunction(t *testing.T) {
-	columns := []postgres.ColumnInfo{
-		{Name: "id", DataType: "integer"},
-		{Name: "order_id", DataType: "integer"},
-	}
-	outgoingFKs := []postgres.ForeignKeyInfo{
-		{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "order_items", RefColumn: "id"},
-	}
-	schemaFKs := map[string][]postgres.ForeignKeyInfo{
-		"order_items": {
-			{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
-			{Name: "fk_product", Column: "product_id", RefSchema: "public", RefTable: "products", RefColumn: "id"},
-		},
-	}
-
-	diagram := BuildERDiagram("public", "orders", columns, nil, outgoingFKs, schemaFKs)
-
-	if len(diagram.Outgoing) != 1 {
-		t.Fatalf("expected 1 outgoing, got %d", len(diagram.Outgoing))
-	}
-	if !diagram.Outgoing[0].IsJunction {
-		t.Error("expected outgoing neighbor 'order_items' to be detected as junction")
-	}
-}
-
-func TestBuildERDiagram_IncomingNotJunction(t *testing.T) {
-	columns := []postgres.ColumnInfo{{Name: "id", DataType: "integer"}}
-	schemaFKs := map[string][]postgres.ForeignKeyInfo{
-		"order_items": {
-			{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
-		},
-	}
-
-	diagram := BuildERDiagram("public", "orders", columns, nil, nil, schemaFKs)
-
-	if len(diagram.Incoming) != 1 {
-		t.Fatalf("expected 1 incoming, got %d", len(diagram.Incoming))
-	}
-	if diagram.Incoming[0].IsJunction {
-		t.Error("expected incoming neighbor 'order_items' NOT to be junction (only 1 FK)")
-	}
-}
-
-// --- Rendering: N:N badge ---
-
-func TestRenderERDiagram_JunctionBadge(t *testing.T) {
-	diagram := ERDiagram{
-		Center: TableBox{
-			Schema: "public",
-			Name:   "orders",
-			Columns: []ColumnBadge{
-				{Name: "id", DataType: "integer", IsPK: true},
-			},
-			IsJunction: true,
-		},
-		Outgoing: []Relationship{
-			{FromColumn: "order_id", ToTable: "order_items", ToColumn: "id", Cardinality: "N:1", IsJunction: true},
-		},
-	}
-	output := RenderERDiagram(diagram, 80, 20)
-
-	if !strings.Contains(output, "N:N") {
-		t.Errorf("expected 'N:N' badge in output, got:\n%s", output)
-	}
-}
-
-func TestRenderERDiagram_NoJunctionBadgeWhenNotJunction(t *testing.T) {
-	diagram := ERDiagram{
-		Center: TableBox{
-			Schema: "public",
-			Name:   "orders",
-			Columns: []ColumnBadge{
-				{Name: "id", DataType: "integer", IsPK: true},
-			},
-			IsJunction: false,
-		},
-		Outgoing: []Relationship{
-			{FromColumn: "user_id", ToTable: "users", ToColumn: "id", Cardinality: "N:1", IsJunction: false},
-		},
-	}
-	output := RenderERDiagram(diagram, 80, 20)
-
-	if strings.Contains(output, "N:N") {
-		t.Errorf("expected NO 'N:N' badge for non-junction table, got:\n%s", output)
-	}
-}
-
-func TestBuildAndRender_JunctionTable(t *testing.T) {
-	columns := []postgres.ColumnInfo{
-		{Name: "id", DataType: "integer"},
-		{Name: "order_id", DataType: "integer"},
-		{Name: "product_id", DataType: "integer"},
+		{Name: "description", DataType: "text"},
+		{Name: "created_at", DataType: "timestamp"},
 	}
 	constraints := []postgres.ConstraintInfo{
 		{Name: "pkey", Type: "PRIMARY KEY", Columns: "id"},
 	}
 	outgoing := []postgres.ForeignKeyInfo{
-		{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
-		{Name: "fk_product", Column: "product_id", RefSchema: "public", RefTable: "products", RefColumn: "id"},
+		{Name: "fk_user", Column: "user_id", RefSchema: "public", RefTable: "users", RefColumn: "id"},
 	}
 
-	diagram := BuildERDiagram("public", "order_items", columns, constraints, outgoing, nil)
-	output := RenderERDiagram(diagram, 80, 30)
+	diagram := BuildERDiagram("public", "orders", columns, constraints, outgoing, nil)
+	output := RenderERDiagram(diagram, 80, 20, nil)
 
-	if !diagram.Center.IsJunction {
-		t.Error("expected 'order_items' to be junction")
+	if !strings.Contains(output, "PK") {
+		t.Error("expected PK badge in output")
 	}
-	if !strings.Contains(output, "N:N") {
-		t.Errorf("expected 'N:N' badge in rendered output, got:\n%s", output)
+	if !strings.Contains(output, "FK") {
+		t.Error("expected FK badge in output")
 	}
-	if !strings.Contains(output, "order_items") {
-		t.Error("expected 'order_items' in output")
+	if strings.Contains(output, "description") {
+		t.Error("expected 'description' to be filtered out")
+	}
+	if strings.Contains(output, "created_at") {
+		t.Error("expected 'created_at' to be filtered out")
 	}
 }

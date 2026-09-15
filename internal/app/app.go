@@ -2050,20 +2050,18 @@ func (m Model) View() tea.View {
 
 func (m Model) renderMainView() string {
 	var selSchema, selTable string
-	var rowCount int
 	if m.explorer != nil {
 		if selected := m.explorer.Selected(); selected != nil && selected.Type == explorer.NodeTable {
 			if s, ok := selected.Metadata["schema"].(string); ok {
 				selSchema = s
 			}
 			selTable = selected.Name
-			rowCount = selected.RowCount()
 		}
 	}
 
 	m.statusbar.SetFocus(m.router.Context())
 	m.statusbar.SetHeight(m.height)
-	topLine := m.renderTopLine(selSchema, selTable, rowCount)
+	topLine := m.renderTopLine(selSchema, selTable)
 
 	countLines := func(s string) int {
 		if s == "" {
@@ -2121,7 +2119,7 @@ func (m Model) renderMainView() string {
 	return content
 }
 
-func (m Model) renderBreadcrumbs(selSchema, selTable string, rowCount int) string {
+func (m Model) renderBreadcrumbs(selSchema, selTable string) string {
 	if len(m.navStack) == 0 && selTable == "" {
 		return ""
 	}
@@ -2132,9 +2130,6 @@ func (m Model) renderBreadcrumbs(selSchema, selTable string, rowCount int) strin
 	}
 	if selTable != "" {
 		entry := fmt.Sprintf("%s.%s", selSchema, selTable)
-		if rowCount > 0 {
-			entry += fmt.Sprintf(" · %d rows", rowCount)
-		}
 		parts = append(parts, m.styles.Text.Render(entry))
 	}
 
@@ -2142,8 +2137,8 @@ func (m Model) renderBreadcrumbs(selSchema, selTable string, rowCount int) strin
 	return "  " + bread + "\n"
 }
 
-func (m Model) renderTopLine(selSchema, selTable string, rowCount int) string {
-	breadcrumb := m.renderBreadcrumbs(selSchema, selTable, rowCount)
+func (m Model) renderTopLine(selSchema, selTable string) string {
+	breadcrumb := m.renderBreadcrumbs(selSchema, selTable)
 
 	var content string
 	if m.spinnerActive {

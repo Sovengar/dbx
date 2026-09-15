@@ -219,26 +219,21 @@ func buildContentLines(style *ansi.Style, leftChar, rightChar, content string, i
 	return result
 }
 
-// wrapLine breaks a line into chunks that fit within maxDisplayWidth.
-// ANSI escape sequences are treated as atomic units — never split mid-sequence.
-func wrapLine(line string, maxDisplayWidth int) []string {
-	if maxDisplayWidth <= 0 {
-		return []string{line}
-	}
+// ansiSegment represents a piece of text with its ANSI style code.
+type ansiSegment struct {
+	style string // the ANSI escape sequence (e.g. "\033[38;2;R;G;Bm"), empty for plain text
+	text  string // the visible text
+}
 
-	var chunks []string
-	currentChunk := ""
-	currentWidth := 0
+// parseAnsiSegments breaks a string into alternating style+text segments.
+// E.g. "\033[32mhello\033[0m world" → [{style:"\033[32m",text:"hello"}, {style:"",text:"\033[0m world"}]
+func parseAnsiSegments(s string) []ansiSegment {
+	var segments []ansiSegment
+	runes := []rune(s)
 	i := 0
-	runes := []rune(line)
-
 	for i < len(runes) {
-		r := runes[i]
-
-		// ANSI escape sequence: ESC [ ... final_byte
-		// Treat the entire sequence as one unit with 0 display width.
-		if r == '\033' && i+1 < len(runes) && runes[i+1] == '[' {
-			// Find the final byte (0x40–0x7E)
+		if runes[i] == '\033' && i+1 < len(runes) && runes[i+1] == '[' {
+			// Collect the full escape sequence
 			j := i + 2
 			for j < len(runes) {
 				b := runes[j]
@@ -248,27 +243,71 @@ func wrapLine(line string, maxDisplayWidth int) []string {
 				}
 				j++
 			}
-			// Append the entire escape sequence to current chunk (0 display width)
-			currentChunk += string(runes[i:j])
+			segments = append(segments, ansiSegment{style: string(runes[i:j]), text: ""})
 			i = j
 			continue
 		}
-
-		runeWidth := ansi.StringWidth(string(r))
-
-		if currentWidth+runeWidth > maxDisplayWidth {
-			chunks = append(chunks, currentChunk)
-			currentChunk = string(r)
-			currentWidth = runeWidth
-		} else {
-			currentChunk += string(r)
-			currentWidth += runeWidth
+		// Collect plain text until next escape
+		j := i
+		for j < len(runes) && !(runes[j] == '\033' && j+1 < len(runes) && runes[j+1] == '[') {
+			j++
 		}
-		i++
+		segments = append(segments, ansiSegment{style: "", text: string(runes[i:j])})
+		i = j
+	}
+	return segments
+}
+
+// wrapLine breaks a line into chunks that fit within maxDisplayWidth.
+// ANSI styles are preserved: each chunk starts with the active style and ends with \033[0m.
+func wrapLine(line string, maxDisplayWidth int) []string {
+	if maxDisplayWidth <= 0 {
+		return []string{line}
 	}
 
-	if currentChunk != "" {
-		chunks = append(chunks, currentChunk)
+	segments := parseAnsiSegments(line)
+
+	var chunks []string
+	var current []rune
+	currentWidth := 0
+	activeStyle := ""
+
+	flush := func() {
+		if len(current) == 0 {
+			return
+		}
+		text := string(current)
+		if activeStyle != "" {
+			text = activeStyle + text + "\033[0m"
+		}
+		chunks = append(chunks, text)
+		current = current[:0]
+		currentWidth = 0
+	}
+
+	for _, seg := range segments {
+		for _, r := range seg.text {
+			rw := ansi.StringWidth(string(r))
+			if currentWidth+rw > maxDisplayWidth {
+				flush()
+			}
+			current = append(current, r)
+			currentWidth += rw
+		}
+		// Apply style changes after text, so accumulated text uses the previous style.
+		// On reset, flush first to preserve the current style for remaining text.
+		if seg.style == "\033[0m" {
+			flush()
+			activeStyle = ""
+		} else if seg.style != "" {
+			activeStyle = seg.style
+		}
+	}
+
+	flush()
+
+	if len(chunks) == 0 {
+		chunks = append(chunks, "")
 	}
 
 	return chunks
