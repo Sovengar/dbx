@@ -2,6 +2,7 @@ package grid
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/buble/dbx/internal/theme"
 )
@@ -113,5 +114,31 @@ func (p *Pager) Render() string {
 		info += fmt.Sprintf(" · %d pending", p.pendingCount)
 	}
 
+	return p.styles.Help.Render(info)
+}
+
+// RenderFooter returns pagination text suitable for a border footer (right-aligned).
+// The text includes ANSI codes for styling — ansi.StringWidth handles measurement.
+func (p *Pager) RenderFooter() string {
+	total := p.totalRows + p.pendingCount
+	if total == 0 {
+		return ""
+	}
+
+	totalPages := p.TotalPages()
+	startRow := (p.page-1)*p.pageSize + 1
+	endRow := p.page * p.pageSize
+	if endRow > total {
+		endRow = total
+	}
+
+	var parts []string
+	parts = append(parts, fmt.Sprintf("%d-%d of %d", startRow, endRow, total))
+	parts = append(parts, fmt.Sprintf("Page %d/%d", p.page, totalPages))
+	if p.pendingCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d pending", p.pendingCount))
+	}
+
+	info := " " + strings.Join(parts, " · ") + " "
 	return p.styles.Help.Render(info)
 }

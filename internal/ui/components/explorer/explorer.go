@@ -2,12 +2,15 @@ package explorer
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/buble/dbx/internal/theme"
+	"github.com/buble/dbx/internal/ui/bordered"
 )
 
 type TableSelectedMsg struct {
@@ -55,12 +58,12 @@ func (e *Explorer) SetNodes(nodes []*Node) {
 
 func (e *Explorer) SetWidth(w int) {
 	e.width = w
-	e.tree.SetWidth(w - 4)
+	e.tree.SetWidth(w - 2) // border takes 1 col per side
 }
 
 func (e *Explorer) SetHeight(h int) {
 	e.height = h
-	e.tree.SetHeight(h - 4)
+	e.tree.SetHeight(h - 2) // border takes 1 row top + 1 row bottom
 }
 
 func (e *Explorer) Focus() {
@@ -222,16 +225,16 @@ func (e *Explorer) View() string {
 
 	output := s.String()
 
-	border := e.styles.Border
+	// Choose border style and color based on focus
+	border := lipgloss.RoundedBorder()
+	var borderFg color.Color
 	if e.focused {
-		border = e.styles.BorderActive
+		borderFg = e.styles.BorderActive.GetBorderTopForeground()
+	} else {
+		borderFg = e.styles.Border.GetBorderTopForeground()
 	}
 
-	return border.
-		Width(e.width - 2).
-		Height(e.height).
-		MaxHeight(e.height).
-		Render(output)
+	return bordered.RenderWithTitle(border, borderFg, " Explorer ", output, e.width)
 }
 
 func (e *Explorer) StartFilter() {

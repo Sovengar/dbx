@@ -2,12 +2,15 @@ package grid
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/buble/dbx/internal/theme"
+	"github.com/buble/dbx/internal/ui/bordered"
 )
 
 type CellEditCommitMsg struct {
@@ -332,7 +335,7 @@ func (g *Grid) calculateWidths() {
 	}
 
 	// Cap individual column widths so multiple columns fit in viewport
-	available := g.width - 4
+	available := g.width - 2 // border takes 1 col per side
 	if available > 0 && len(g.widths) > 0 {
 		minCols := 5
 		if len(g.widths) < minCols {
@@ -353,7 +356,7 @@ func (g *Grid) calculateWidths() {
 }
 
 func (g *Grid) syncScroll() {
-	available := g.width - 4
+	available := g.width - 2 // border takes 1 col per side
 	if available <= 0 || len(g.widths) == 0 {
 		return
 	}
@@ -395,7 +398,7 @@ func (g *Grid) visibleColumns() ([]string, []int) {
 		return nil, nil
 	}
 
-	available := g.width - 4
+	available := g.width - 2 // border takes 1 col per side
 	var visCols []string
 	var visWidths []int
 	total := 0
@@ -1866,21 +1869,25 @@ func (g *Grid) View() string {
 
 	output := g.renderRecordsView()
 
-	border := g.styles.Border
+	// Choose border style and color based on focus
+	border := lipgloss.ThickBorder()
+	var borderFg color.Color
 	if g.focused {
-		border = g.styles.BorderActive
+		borderFg = g.styles.BorderActive.GetBorderTopForeground()
+	} else {
+		borderFg = g.styles.Border.GetBorderTopForeground()
 	}
 
-	return border.
-		Width(g.width - 2).
-		Height(g.height).
-		MaxHeight(g.height).
-		Render(output)
+	// Pagination footer — right-aligned in bottom border
+	footer := g.pager.RenderFooter()
+
+	return bordered.RenderWithTitleAndFooterEx(border, borderFg, bordered.AlignLeft, " Grid ", footer, output, g.width)
 }
 
 func (g *Grid) renderRecordsView() string {
 	// Calculate dynamic overhead: header(1) + mode(1) + buffer(2) = 4 base
-	overhead := 4
+	// Plus 2 for border (top + bottom lines)
+	overhead := 6
 	if g.commitPending || g.refreshPending || g.discardPending || g.HasDrafts() {
 		overhead++ // prefix message line
 	}
@@ -2009,8 +2016,6 @@ func (g *Grid) renderRecordsView() string {
 		rows = append(rows, "")
 	}
 
-	pager := g.pager.Render()
-
 	var modeIndicator string
 	if g.editing {
 		modeIndicator = g.styles.ModeEdit.Render(" EDIT ")
@@ -2048,17 +2053,17 @@ func (g *Grid) renderRecordsView() string {
 		if popup != "" {
 			result += popup + "\n"
 		}
-		result += header + "\n" + strings.Join(rows, "\n") + "\n" + modeIndicator + " " + pager
+		result += header + "\n" + strings.Join(rows, "\n") + "\n" + modeIndicator
 	} else if g.whereClause != "" {
 		activeFilter := g.styles.FilterIndicator.
 			Width(g.width - 2).
 			Render("  WHERE " + g.whereClause)
-		result = prefix + activeFilter + "\n" + header + "\n" + strings.Join(rows, "\n") + "\n" + modeIndicator + " " + pager
+		result = prefix + activeFilter + "\n" + header + "\n" + strings.Join(rows, "\n") + "\n" + modeIndicator
 	} else if g.filtering {
 		filterLine := g.styles.Text.Render("Column: " + g.filter + "_")
-		result = prefix + filterLine + "\n" + header + "\n" + strings.Join(rows, "\n") + "\n" + modeIndicator + " " + pager
+		result = prefix + filterLine + "\n" + header + "\n" + strings.Join(rows, "\n") + "\n" + modeIndicator
 	} else {
-		result = prefix + header + "\n" + strings.Join(rows, "\n") + "\n" + modeIndicator + " " + pager
+		result = prefix + header + "\n" + strings.Join(rows, "\n") + "\n" + modeIndicator
 	}
 	return result
 }

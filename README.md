@@ -219,6 +219,7 @@ dbx ask "show me all active users"
 | `r` | Refresh data              |
 | `Ctrl+S` | Dump drafts SQL to editor |
 | `D` | Discard drafts            |
+| `u` | Undo draft on selected row |
 
 ### Grid — EDIT mode
 

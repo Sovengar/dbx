@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/buble/dbx/internal/drivers/postgres"
 )
 
@@ -281,7 +283,7 @@ func renderBox(name string, columns []ColumnBadge, width int, cardinality string
 	// Truncate name to fit within box inner width (width-2)
 	innerWidth := width - 2
 	displayName := TruncateTableName(name)
-	if len(displayName) > innerWidth {
+	if ansi.StringWidth(displayName) > innerWidth {
 		if innerWidth > 1 {
 			displayName = displayName[:innerWidth-1] + "…"
 		} else {
@@ -293,7 +295,7 @@ func renderBox(name string, columns []ColumnBadge, width int, cardinality string
 	lines = append(lines, "┌"+strings.Repeat("─", innerWidth)+"┐")
 
 	// Name line — centered
-	namePad := innerWidth - len(displayName)
+	namePad := innerWidth - ansi.StringWidth(displayName)
 	if namePad < 0 {
 		namePad = 0
 	}
@@ -314,10 +316,10 @@ func renderBox(name string, columns []ColumnBadge, width int, cardinality string
 		}
 		colName := TruncateColumnName(col.Name)
 		entry := badge + colName + " " + col.DataType
-		if len(entry) > innerWidth {
+		if ansi.StringWidth(entry) > innerWidth {
 			entry = entry[:innerWidth]
 		}
-		pad := innerWidth - len(entry)
+		pad := innerWidth - ansi.StringWidth(entry)
 		if pad < 0 {
 			pad = 0
 		}
@@ -327,10 +329,10 @@ func renderBox(name string, columns []ColumnBadge, width int, cardinality string
 	// Cardinality label (inside box, before bottom border)
 	if cardinality != "" {
 		label := "  " + cardinality
-		if len(label) > innerWidth {
+		if ansi.StringWidth(label) > innerWidth {
 			label = label[:innerWidth]
 		}
-		pad := innerWidth - len(label)
+		pad := innerWidth - ansi.StringWidth(label)
 		lines = append(lines, "│"+label+strings.Repeat(" ", pad)+"│")
 	}
 
