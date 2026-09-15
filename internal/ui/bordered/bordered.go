@@ -20,6 +20,11 @@ func RenderWithTitle(border lipgloss.Border, borderFg color.Color, title, conten
 	return renderBox(border, borderFg, AlignCenter, title, "", content, width)
 }
 
+// RenderWithTitleEx renders a bordered box with configurable title alignment and no footer.
+func RenderWithTitleEx(border lipgloss.Border, borderFg color.Color, align int, title, content string, width int) string {
+	return renderBox(border, borderFg, align, title, "", content, width)
+}
+
 // RenderWithTitleAndFooter renders a bordered box with a centered title and footer.
 func RenderWithTitleAndFooter(border lipgloss.Border, borderFg color.Color, title, footer, content string, width int) string {
 	return renderBox(border, borderFg, AlignCenter, title, footer, content, width)
@@ -157,7 +162,7 @@ func buildTopLine(style *ansi.Style, topLeft, topChar, topRight string, tlW, trW
 func buildBottomLine(style *ansi.Style, bottomLeft, bottomChar, bottomRight string, innerWidth int, footer string) string {
 	if footer == "" {
 		bottomFill := repeatStyled(style, bottomChar, innerWidth)
-		return bottomLeft + bottomFill + bottomRight
+		return styledChar(style, bottomLeft) + bottomFill + styledChar(style, bottomRight)
 	}
 
 	// Strip ANSI from footer to get display width
@@ -174,7 +179,7 @@ func buildBottomLine(style *ansi.Style, bottomLeft, bottomChar, bottomRight stri
 	leftPad := remaining // all padding on the left (right-align)
 	leftPadStr := repeatStyled(style, bottomChar, leftPad)
 
-	return bottomLeft + leftPadStr + footer + styledChar(style, bottomRight)
+	return styledChar(style, bottomLeft) + leftPadStr + footer + styledChar(style, bottomRight)
 }
 
 // buildContentLines wraps content lines to fit inside the bordered area.

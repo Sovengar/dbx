@@ -1,11 +1,14 @@
 package ui
 
 import (
+	"image/color"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/buble/dbx/internal/theme"
+	"github.com/buble/dbx/internal/ui/bordered"
 )
 
 type StatusBar struct {
@@ -50,7 +53,6 @@ func (s *StatusBar) View() string {
 		return ""
 	}
 
-	innerW := s.width - 2
 	line1 := s.renderActions()
 	contextLines := s.renderContextual()
 
@@ -62,11 +64,15 @@ func (s *StatusBar) View() string {
 
 	content := strings.Join(parts, "\n")
 
-	return s.styles.BorderActive.
-		Width(innerW).
-		Height(6).
-		MaxHeight(6).
-		Render(content)
+	border := lipgloss.RoundedBorder()
+	var borderFg color.Color
+	if s.focused {
+		borderFg = s.styles.BorderActive.GetBorderTopForeground()
+	} else {
+		borderFg = s.styles.Border.GetBorderTopForeground()
+	}
+
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Status ", content, s.width)
 }
 
 func (s *StatusBar) renderActions() string {

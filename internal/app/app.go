@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"image/color"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/buble/dbx/internal/theme"
 	"github.com/buble/dbx/internal/ui"
+	"github.com/buble/dbx/internal/ui/bordered"
 	"github.com/buble/dbx/internal/ui/components/editor"
 	"github.com/buble/dbx/internal/ui/components/explorer"
 	"github.com/buble/dbx/internal/ui/components/explorerpreview"
@@ -2182,14 +2184,17 @@ func (m Model) renderExplorerPreview(w, h int) string {
 	m.explorerPreview.SetWidth(w)
 	m.explorerPreview.SetHeight(h)
 
-	border := m.styles.BorderActive
+	border := lipgloss.ThickBorder()
+	var borderFg color.Color
+	if m.router.Focus() == FocusExplorerPreview {
+		borderFg = m.styles.BorderActive.GetBorderTopForeground()
+	} else {
+		borderFg = m.styles.Border.GetBorderTopForeground()
+	}
+
 	content := m.explorerPreview.View()
 
-	return border.
-		Width(w - 2).
-		Height(h - 2).
-		MaxHeight(h - 2).
-		Render(content)
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Explorer Preview ", content, w)
 }
 
 func (m Model) renderGrid(w, h int) string {
@@ -2209,11 +2214,11 @@ func (m Model) renderGridSidebarPreview(w, h int) string {
 	m.gridSidebarPreview.SetWidth(w)
 	m.gridSidebarPreview.SetHeight(h)
 
-	return m.styles.Border.
-		Width(w - 2).
-		Height(h - 2).
-		MaxHeight(h - 2).
-		Render(m.gridSidebarPreview.Render())
+	border := lipgloss.ThickBorder()
+	borderFg := m.styles.Border.GetBorderTopForeground()
+	content := m.gridSidebarPreview.Render()
+
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Sidebar ", content, w)
 }
 
 func (m Model) renderGridPreview(w, h int) string {
@@ -2223,14 +2228,11 @@ func (m Model) renderGridPreview(w, h int) string {
 	m.grid.Blur()
 	m.gridPreview.Focus()
 
-	border := m.styles.BorderActive
+	border := lipgloss.ThickBorder()
+	borderFg := m.styles.BorderActive.GetBorderTopForeground()
 	content := m.gridPreview.Render()
 
-	return border.
-		Width(w - 2).
-		Height(h - 2).
-		MaxHeight(h - 2).
-		Render(content)
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Grid Preview ", content, w)
 }
 
 func (m Model) syncGridPreview() {

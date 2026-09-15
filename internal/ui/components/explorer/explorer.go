@@ -226,7 +226,7 @@ func (e *Explorer) View() string {
 	output := s.String()
 
 	// Choose border style and color based on focus
-	border := lipgloss.RoundedBorder()
+	border := lipgloss.ThickBorder()
 	var borderFg color.Color
 	if e.focused {
 		borderFg = e.styles.BorderActive.GetBorderTopForeground()
@@ -234,7 +234,7 @@ func (e *Explorer) View() string {
 		borderFg = e.styles.Border.GetBorderTopForeground()
 	}
 
-	return bordered.RenderWithTitle(border, borderFg, " Explorer ", output, e.width)
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Explorer ", output, e.width)
 }
 
 func (e *Explorer) StartFilter() {
