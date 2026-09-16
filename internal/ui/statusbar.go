@@ -20,6 +20,7 @@ type StatusBar struct {
 	focus             string
 	editorOpen        bool
 	autocompleteReady bool
+	queryBrowserOpen  bool
 }
 
 func NewStatusBar(styles *theme.Styles, keybinds map[string]string) *StatusBar {
@@ -29,13 +30,14 @@ func NewStatusBar(styles *theme.Styles, keybinds map[string]string) *StatusBar {
 	}
 }
 
-func (s *StatusBar) SetWidth(w int)              { s.width = w }
-func (s *StatusBar) SetHeight(h int)             { s.height = h }
-func (s *StatusBar) SetFocus(f string)           { s.focus = f }
-func (s *StatusBar) SetEditorOpen(open bool)     { s.editorOpen = open }
-func (s *StatusBar) SetAutocompleteReady(r bool) { s.autocompleteReady = r }
-func (s *StatusBar) Focus()                      { s.focused = true }
-func (s *StatusBar) Blur()                       { s.focused = false }
+func (s *StatusBar) SetWidth(w int)                 { s.width = w }
+func (s *StatusBar) SetHeight(h int)                { s.height = h }
+func (s *StatusBar) SetFocus(f string)              { s.focus = f }
+func (s *StatusBar) SetEditorOpen(open bool)        { s.editorOpen = open }
+func (s *StatusBar) SetAutocompleteReady(r bool)    { s.autocompleteReady = r }
+func (s *StatusBar) SetQueryBrowserOpen(open bool)  { s.queryBrowserOpen = open }
+func (s *StatusBar) Focus()                         { s.focused = true }
+func (s *StatusBar) Blur()                          { s.focused = false }
 
 func (s *StatusBar) Update(msg tea.Msg) (tea.Cmd, bool) {
 	return nil, false
@@ -72,7 +74,7 @@ func (s *StatusBar) View() string {
 		borderFg = s.styles.Border.GetBorderTopForeground()
 	}
 
-	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Status ", content, s.width)
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Status ", content, s.width, 0)
 }
 
 func (s *StatusBar) renderActions() string {
@@ -91,7 +93,9 @@ func (s *StatusBar) renderActions() string {
 func (s *StatusBar) renderContextual() []string {
 	var lines []string
 
-	if s.editorOpen {
+	if s.queryBrowserOpen {
+		lines = append(lines, "j/k navigate · g/G first/last · Enter select · f favorite · d delete · / filter · Tab switch tabs · Esc close")
+	} else if s.editorOpen {
 		if s.autocompleteReady {
 			lines = append(lines, "Ctrl+Enter execute · Tab autocomplete · Ctrl+U clear · Ctrl+Y copy · Ctrl+P/N history")
 		} else {

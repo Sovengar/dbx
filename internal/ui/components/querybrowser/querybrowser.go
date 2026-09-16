@@ -2,6 +2,7 @@ package querybrowser
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -17,6 +18,8 @@ import (
 type QuerySelectedMsg struct {
 	SQL string
 }
+
+type QueryBrowserClosedMsg struct{}
 
 type QueryBrowser struct {
 	styles      *theme.Styles
@@ -40,6 +43,7 @@ func New(styles *theme.Styles, qs *store.QueryStore) *QueryBrowser {
 }
 
 func (b *QueryBrowser) Show() {
+	qbDebugLog("Show: opening query browser, store entries=%d", b.store.Len())
 	b.visible = true
 	b.tab = 0
 	b.cursor = 0
@@ -47,6 +51,7 @@ func (b *QueryBrowser) Show() {
 	b.filter = ""
 	b.filterActive = false
 	b.refreshEntries()
+	qbDebugLog("Show: after refresh, entries=%d", len(b.entries))
 }
 
 func (b *QueryBrowser) Hide() {
@@ -96,6 +101,7 @@ func (b *QueryBrowser) Update(msg tea.Msg) (tea.Cmd, bool) {
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		qbDebugLog("Update: key=%q visible=%v", msg.String(), b.visible)
 		return b.handleKey(msg)
 	}
 
@@ -104,6 +110,7 @@ func (b *QueryBrowser) Update(msg tea.Msg) (tea.Cmd, bool) {
 
 func (b *QueryBrowser) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	key := msg.String()
+	qbDebugLog("handleKey: key=%q filterActive=%v entries=%d cursor=%d", key, b.filterActive, len(b.entries), b.cursor)
 
 	if b.filterActive {
 		switch key {
@@ -139,7 +146,7 @@ func (b *QueryBrowser) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch key {
 	case "esc":
 		b.Hide()
-		return nil, true
+		return func() tea.Msg { return QueryBrowserClosedMsg{} }, true
 
 	case "tab":
 		b.tab = (b.tab + 1) % 2
@@ -217,7 +224,11 @@ func (b *QueryBrowser) ensureVisible() {
 }
 
 func (b *QueryBrowser) maxVisibleEntries() int {
-	h := b.height - 10 // title + tabs + filter + footer
+	modalH := b.height * 8 / 10
+	if modalH < 10 {
+		modalH = 10
+	}
+	h := modalH - 4 // title + tabs + filter + footer
 	if h < 3 {
 		h = 3
 	}
@@ -229,7 +240,10 @@ func (b *QueryBrowser) View() string {
 		return ""
 	}
 
-	modalW := b.width * 6 / 10
+	qbDebugLog("View: visible=%v width=%d height=%d entries=%d cursor=%d scroll=%d tab=%d filter=%q filterActive=%v",
+		b.visible, b.width, b.height, len(b.entries), b.cursor, b.scroll, b.tab, b.filter, b.filterActive)
+
+	modalW := b.width * 3 / 4
 	if modalW < 50 {
 		modalW = 50
 	}
@@ -237,8 +251,15 @@ func (b *QueryBrowser) View() string {
 		modalW = 90
 	}
 
+	modalH := b.height * 8 / 10
+	if modalH < 10 {
+		modalH = 10
+	}
+
 	contentW := modalW - 4
-	maxVisible := b.maxVisibleEntries()
+	maxVisible := modalH - 4 // title + tabs + filter + footer
+
+	qbDebugLog("View: modalW=%d modalH=%d contentW=%d maxVisible=%d", modalW, modalH, contentW, maxVisible)
 
 	var lines []string
 
@@ -277,6 +298,8 @@ func (b *QueryBrowser) View() string {
 			end = len(b.entries)
 		}
 
+		qbDebugLog("View: rendering entries %d to %d (of %d)", b.scroll, end, len(b.entries))
+
 		for i := b.scroll; i < end; i++ {
 			e := b.entries[i]
 			line := b.renderEntry(i, e, contentW)
@@ -285,7 +308,7 @@ func (b *QueryBrowser) View() string {
 	}
 
 	// Pad to fill
-	for len(lines) < maxVisible+5 {
+	for len(lines) < maxVisible+2 {
 		lines = append(lines, "")
 	}
 
@@ -299,13 +322,20 @@ func (b *QueryBrowser) View() string {
 	border := lipgloss.ThickBorder()
 	borderFg := b.styles.BorderActive.GetBorderTopForeground()
 
-	modal := bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, title, content, modalW)
+	modal := bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, title, content, modalW, modalH)
 
-	return lipgloss.Place(
-		b.width, b.height,
-		lipgloss.Center, lipgloss.Center,
-		modal,
-	)
+	qbDebugLog("View: modal generated, returning raw (no lipgloss.Place)")
+
+	return modal
+}
+
+func qbDebugLog(format string, args ...interface{}) {
+	f, err := os.OpenFile("/tmp/dbx_qb_debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "QueryBrowser: "+format+"\n", args...)
 }
 
 func (b *QueryBrowser) renderEntry(idx int, e store.QueryEntry, maxW int) string {

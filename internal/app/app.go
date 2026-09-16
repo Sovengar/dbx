@@ -106,7 +106,7 @@ func NewModel(cfg *config.Config) Model {
 	}
 	g := grid.New(t.Styles(), pageSize, kbs)
 	g.SetYankMaxRows(yankMaxRows)
-	qs := store.NewQueryStore(cfg.UI.QueryHistoryPath)
+	qs := store.NewQueryStore(filepath.Dir(cfg.UI.QueryHistoryPath))
 	qb := querybrowser.New(t.Styles(), qs)
 	return Model{
 		config:          cfg,
@@ -1328,6 +1328,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editor.Focus()
 		m.editor.SetContent(msg.SQL)
 		m.statusbar.SetEditorOpen(true)
+		m.statusbar.SetQueryBrowserOpen(false)
+		return m, nil
+
+	case querybrowser.QueryBrowserClosedMsg:
+		m.queryBrowserOpen = false
+		m.statusbar.SetQueryBrowserOpen(false)
 		return m, nil
 
 	case explorer.TableSelectedMsg:
@@ -1622,9 +1628,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if key == m.keybinds["global.query_browser"] {
+				appDebugLog("QueryBrowser: key=%q queryBrowserOpen=%v editorOpen=%v", key, m.queryBrowserOpen, m.editorOpen)
 				if !m.queryBrowserOpen && !m.editorOpen {
 					m.queryBrowserOpen = true
 					m.queryBrowser.Show()
+					m.statusbar.SetQueryBrowserOpen(true)
+					appDebugLog("QueryBrowser: opened, queryBrowserOpen=%v", m.queryBrowserOpen)
 				}
 				return m, nil
 			}
@@ -1717,6 +1726,7 @@ func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 		if !m.queryBrowserOpen && !m.editorOpen {
 			m.queryBrowserOpen = true
 			m.queryBrowser.Show()
+			m.statusbar.SetQueryBrowserOpen(true)
 		}
 	case "grid.focus_preview":
 		if m.router.Focus() == FocusGrid && m.grid.HasData() {
@@ -2087,7 +2097,11 @@ func (m Model) View() tea.View {
 	if m.queryBrowserOpen && m.queryBrowser != nil {
 		browserView := m.queryBrowser.View()
 		if browserView != "" {
+			appDebugLog("QueryBrowser View: browserView length=%d, overlaying on content length=%d", len(browserView), len(content))
 			content = overlay(content, browserView, m.width, m.height)
+			appDebugLog("QueryBrowser View: overlay done, content length=%d", len(content))
+		} else {
+			appDebugLog("QueryBrowser View: browserView is empty!")
 		}
 	}
 
@@ -2207,7 +2221,7 @@ func (m Model) renderTopLine(selSchema, selTable string) string {
 	border := lipgloss.RoundedBorder()
 	borderFg := m.styles.Border.GetBorderTopForeground()
 
-	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Breadcrumbs ", content, m.width) + "\n"
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Breadcrumbs ", content, m.width, 0) + "\n"
 }
 
 func (m Model) renderExplorer(w, h int) string {
@@ -2245,7 +2259,7 @@ func (m Model) renderExplorerPreview(w, h int) string {
 
 	content := m.explorerPreview.View()
 
-	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Explorer Preview ", content, w)
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Explorer Preview ", content, w, h)
 }
 
 func (m Model) renderGrid(w, h int) string {
@@ -2269,7 +2283,7 @@ func (m Model) renderGridSidebarPreview(w, h int) string {
 	borderFg := m.styles.Border.GetBorderTopForeground()
 	content := m.gridSidebarPreview.Render()
 
-	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Sidebar ", content, w)
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Sidebar ", content, w, h)
 }
 
 func (m Model) renderGridPreview(w, h int) string {
@@ -2283,7 +2297,7 @@ func (m Model) renderGridPreview(w, h int) string {
 	borderFg := m.styles.BorderActive.GetBorderTopForeground()
 	content := m.gridPreview.Render()
 
-	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Grid Preview ", content, w)
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Grid Preview ", content, w, h)
 }
 
 func (m Model) syncGridPreview() {
@@ -2336,6 +2350,11 @@ func overlay(base, box string, width, height int) string {
 	if y < 0 {
 		y = 0
 	}
+	for len(lines) < y+bh {
+		lines = append(lines, strings.Repeat(" ", width))
+	}
+	appDebugLog("overlay: baseLines=%d boxLines=%d bw=%d bh=%d width=%d height=%d x=%d y=%d",
+		len(lines), len(blocks), bw, bh, width, height, x, y)
 	for j := 0; j < bh && y+j < len(lines); j++ {
 		line := lines[y+j]
 		lines[y+j] = ansi.Truncate(line, x, "") + blocks[j] + ansi.TruncateLeft(line, x+bw, "")

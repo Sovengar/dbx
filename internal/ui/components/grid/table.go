@@ -1971,7 +1971,7 @@ func (g *Grid) View() string {
 	// Pagination footer — right-aligned in bottom border
 	footer := g.pager.RenderFooter()
 
-	return bordered.RenderWithTitleAndFooterEx(border, borderFg, bordered.AlignLeft, " Grid ", footer, output, g.width)
+	return bordered.RenderWithTitleAndFooterEx(border, borderFg, bordered.AlignLeft, " Grid ", footer, output, g.width, g.height)
 }
 
 func (g *Grid) renderRecordsView() string {

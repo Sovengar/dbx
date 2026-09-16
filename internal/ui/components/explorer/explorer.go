@@ -234,7 +234,7 @@ func (e *Explorer) View() string {
 		borderFg = e.styles.Border.GetBorderTopForeground()
 	}
 
-	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Explorer ", output, e.width)
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Explorer ", output, e.width, e.height+2)
 }
 
 func (e *Explorer) StartFilter() {

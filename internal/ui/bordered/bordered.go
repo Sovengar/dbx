@@ -16,27 +16,28 @@ const (
 )
 
 // RenderWithTitle renders a bordered box with a centered title in the top border.
-func RenderWithTitle(border lipgloss.Border, borderFg color.Color, title, content string, width int) string {
-	return renderBox(border, borderFg, AlignCenter, title, "", content, width)
+func RenderWithTitle(border lipgloss.Border, borderFg color.Color, title, content string, width, height int) string {
+	return renderBox(border, borderFg, AlignCenter, title, "", content, width, height)
 }
 
 // RenderWithTitleEx renders a bordered box with configurable title alignment and no footer.
-func RenderWithTitleEx(border lipgloss.Border, borderFg color.Color, align int, title, content string, width int) string {
-	return renderBox(border, borderFg, align, title, "", content, width)
+// If height > 0, the box is padded to exactly height lines total (including borders).
+func RenderWithTitleEx(border lipgloss.Border, borderFg color.Color, align int, title, content string, width, height int) string {
+	return renderBox(border, borderFg, align, title, "", content, width, height)
 }
 
 // RenderWithTitleAndFooter renders a bordered box with a centered title and footer.
-func RenderWithTitleAndFooter(border lipgloss.Border, borderFg color.Color, title, footer, content string, width int) string {
-	return renderBox(border, borderFg, AlignCenter, title, footer, content, width)
+func RenderWithTitleAndFooter(border lipgloss.Border, borderFg color.Color, title, footer, content string, width, height int) string {
+	return renderBox(border, borderFg, AlignCenter, title, footer, content, width, height)
 }
 
 // RenderWithTitleAndFooterEx renders a bordered box with configurable title alignment.
 // align: AlignCenter, AlignLeft, or AlignRight.
-func RenderWithTitleAndFooterEx(border lipgloss.Border, borderFg color.Color, align int, title, footer, content string, width int) string {
-	return renderBox(border, borderFg, align, title, footer, content, width)
+func RenderWithTitleAndFooterEx(border lipgloss.Border, borderFg color.Color, align int, title, footer, content string, width, height int) string {
+	return renderBox(border, borderFg, align, title, footer, content, width, height)
 }
 
-func renderBox(border lipgloss.Border, borderFg color.Color, align int, title, footer, content string, width int) string {
+func renderBox(border lipgloss.Border, borderFg color.Color, align int, title, footer, content string, width, height int) string {
 	if width < 2 {
 		width = 2
 	}
@@ -85,6 +86,21 @@ func renderBox(border lipgloss.Border, borderFg color.Color, align int, title, f
 
 	// Build content lines
 	contentLines := buildContentLines(borderStyle, leftChar, rightChar, content, innerWidth)
+
+	// Pad content to fill target height (height includes top and bottom borders)
+	if height > 0 {
+		targetContent := height - 2 // subtract top and bottom border lines
+		if targetContent < 1 {
+			targetContent = 1
+		}
+		for len(contentLines) < targetContent {
+			emptyLine := styledChar(borderStyle, leftChar) + strings.Repeat(" ", innerWidth) + styledChar(borderStyle, rightChar)
+			contentLines = append(contentLines, emptyLine)
+		}
+		if len(contentLines) > targetContent {
+			contentLines = contentLines[:targetContent]
+		}
+	}
 
 	// Build bottom line with optional footer (right-aligned)
 	bottomLine := buildBottomLine(borderStyle, bottomLeft, bottomChar, bottomRight, innerWidth, footer)

@@ -243,9 +243,5 @@ func (p *Palette) View() string {
 		Width(modalW - 2).
 		Render(content)
 
-	return lipgloss.Place(
-		p.width, p.height,
-		lipgloss.Center, lipgloss.Center,
-		modal,
-	)
+	return modal
 }

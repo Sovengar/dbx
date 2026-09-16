@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/buble/dbx/internal/theme"
 )
 
@@ -229,7 +228,7 @@ func (m *HelpModal) View() string {
 		Width(contentW).
 		Render(m.styles.Header.Render("Help") + "\n" + content)
 
-	return overlayModal(m.width, m.height, modal)
+	return modal
 }
 
 func (m *HelpModal) renderKeybind(action, description string) string {
@@ -242,12 +241,4 @@ func (m *HelpModal) renderKeybind(action, description string) string {
 	descStyled := m.styles.Text.Render(description)
 
 	return "  " + keyStyled + descStyled
-}
-
-func overlayModal(width, height int, modal string) string {
-	return lipgloss.Place(
-		width, height,
-		lipgloss.Center, lipgloss.Center,
-		modal,
-	)
 }

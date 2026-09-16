@@ -140,10 +140,10 @@ func (e *ExplorerPreview) buildEREDiagram() {
 		e.schemaForeignKeys,
 	)
 	e.ereDiagram = &diagram
-	e.ereNav = NewERDiagramNav(len(diagram.Incoming), len(diagram.Outgoing), len(diagram.Junction))
+	e.ereNav = NewERDiagramNav(len(diagram.Incoming), len(diagram.Outgoing))
 	// Content height: center box (6 lines) + spacing (1) + columns (each box ~5 lines + 1 spacing)
 	colHeight := 0
-	for _, count := range [3]int{len(diagram.Incoming), len(diagram.Outgoing), len(diagram.Junction)} {
+	for _, count := range [2]int{len(diagram.Incoming), len(diagram.Outgoing)} {
 		h := count * 6 // 5 lines per box + 1 spacing
 		if h > colHeight {
 			colHeight = h

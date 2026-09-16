@@ -92,9 +92,6 @@ func TestBuildERDiagram_EmptyState(t *testing.T) {
 	if len(diagram.Incoming) != 0 {
 		t.Errorf("expected 0 incoming, got %d", len(diagram.Incoming))
 	}
-	if len(diagram.Junction) != 0 {
-		t.Errorf("expected 0 junction, got %d", len(diagram.Junction))
-	}
 	if diagram.Center.Name != "settings" {
 		t.Errorf("expected center 'settings', got %q", diagram.Center.Name)
 	}
@@ -191,13 +188,13 @@ func TestBuildERDiagram_IncomingDeduplication(t *testing.T) {
 	}
 }
 
-// --- BuildERDiagram: junction table separation ---
+// --- BuildERDiagram: junction table detection ---
 
-func TestBuildERDiagram_JunctionSeparation(t *testing.T) {
+func TestBuildERDiagram_JunctionDetection(t *testing.T) {
 	columns := []postgres.ColumnInfo{{Name: "id", DataType: "integer"}}
 	schemaFKs := map[string][]postgres.ForeignKeyInfo{
 		"order_items": {
-			// order_items is a junction: FK to orders AND FK to products
+			// order_items is a junction candidate: FK to orders AND FK to products
 			{Name: "fk_order", Column: "order_id", RefSchema: "public", RefTable: "orders", RefColumn: "id"},
 			{Name: "fk_product", Column: "product_id", RefSchema: "public", RefTable: "products", RefColumn: "id"},
 		},
@@ -209,24 +206,23 @@ func TestBuildERDiagram_JunctionSeparation(t *testing.T) {
 
 	diagram := BuildERDiagram("public", "orders", columns, nil, nil, schemaFKs)
 
-	// order_items should be in Junction (not Incoming) because it's a junction table
-	if len(diagram.Junction) != 1 {
-		t.Fatalf("expected 1 junction, got %d", len(diagram.Junction))
-	}
-	if diagram.Junction[0].ToTable != "order_items" {
-		t.Errorf("expected junction table 'order_items', got %q", diagram.Junction[0].ToTable)
+	// Both should be in Incoming (junction candidates stay in their column)
+	if len(diagram.Incoming) != 2 {
+		t.Fatalf("expected 2 incoming, got %d", len(diagram.Incoming))
 	}
 
-	// payments should be in Incoming (not Junction)
-	if len(diagram.Incoming) != 1 {
-		t.Fatalf("expected 1 incoming, got %d", len(diagram.Incoming))
-	}
-	if diagram.Incoming[0].ToTable != "payments" {
-		t.Errorf("expected incoming table 'payments', got %q", diagram.Incoming[0].ToTable)
+	// order_items should be marked as junction candidate
+	for _, rel := range diagram.Incoming {
+		if rel.ToTable == "order_items" && !rel.IsJunction {
+			t.Error("expected 'order_items' to be marked as junction candidate")
+		}
+		if rel.ToTable == "payments" && rel.IsJunction {
+			t.Error("expected 'payments' to NOT be marked as junction candidate")
+		}
 	}
 }
 
-func TestBuildERDiagram_OutgoingJunctionSeparation(t *testing.T) {
+func TestBuildERDiagram_OutgoingJunctionDetection(t *testing.T) {
 	columns := []postgres.ColumnInfo{
 		{Name: "id", DataType: "integer"},
 		{Name: "order_id", DataType: "integer"},
@@ -243,12 +239,12 @@ func TestBuildERDiagram_OutgoingJunctionSeparation(t *testing.T) {
 
 	diagram := BuildERDiagram("public", "orders", columns, nil, outgoingFKs, schemaFKs)
 
-	// order_items is a junction table, should be in Junction (not Outgoing)
-	if len(diagram.Junction) != 1 {
-		t.Fatalf("expected 1 junction, got %d", len(diagram.Junction))
+	// order_items should be in Outgoing (not separated) and marked as junction candidate
+	if len(diagram.Outgoing) != 1 {
+		t.Fatalf("expected 1 outgoing, got %d", len(diagram.Outgoing))
 	}
-	if len(diagram.Outgoing) != 0 {
-		t.Errorf("expected 0 outgoing (junction moved), got %d", len(diagram.Outgoing))
+	if !diagram.Outgoing[0].IsJunction {
+		t.Error("expected 'order_items' to be marked as junction candidate")
 	}
 }
 
@@ -444,9 +440,9 @@ func TestRenderERDiagram_CenterBox(t *testing.T) {
 	}
 }
 
-// --- Rendering: 3-column layout headers ---
+// --- Rendering: 2-column layout headers ---
 
-func TestRenderERDiagram_ThreeColumnHeaders(t *testing.T) {
+func TestRenderERDiagram_TwoColumnHeaders(t *testing.T) {
 	diagram := ERDiagram{
 		Center: TableBox{
 			Schema: "public",
@@ -461,9 +457,6 @@ func TestRenderERDiagram_ThreeColumnHeaders(t *testing.T) {
 		Outgoing: []Relationship{
 			{FromColumn: "user_id", ToTable: "users", ToColumn: "id", Cardinality: "N:1"},
 		},
-		Junction: []Relationship{
-			{FromColumn: "order_id", ToTable: "order_tags", ToColumn: "id", Cardinality: "1:N", IsJunction: true},
-		},
 	}
 	output := RenderERDiagram(diagram, 120, 40, nil)
 
@@ -473,8 +466,8 @@ func TestRenderERDiagram_ThreeColumnHeaders(t *testing.T) {
 	if !strings.Contains(output, "N:1") {
 		t.Error("expected 'N:1' column header")
 	}
-	if !strings.Contains(output, "N:N") {
-		t.Error("expected 'N:N' column header")
+	if strings.Contains(output, "N:N") {
+		t.Error("did not expect 'N:N' column header")
 	}
 }
 
@@ -556,7 +549,7 @@ func TestRenderERDiagram_SelectedHighlight(t *testing.T) {
 	}
 
 	// Select first neighbor (column 1 = N:1, row 0)
-	nav := NewERDiagramNav(0, 2, 0)
+	nav := NewERDiagramNav(0, 2)
 	nav.MoveRight() // move to N:1 column
 	nav.MoveDown()  // row 0
 	output = RenderERDiagram(diagram, 80, 20, nav)
@@ -565,7 +558,7 @@ func TestRenderERDiagram_SelectedHighlight(t *testing.T) {
 	}
 
 	// Select second neighbor (column 1 = N:1, row 1)
-	nav2 := NewERDiagramNav(0, 2, 0)
+	nav2 := NewERDiagramNav(0, 2)
 	nav2.MoveRight() // move to N:1 column
 	nav2.MoveDown()  // row 0
 	nav2.MoveDown()  // row 1
@@ -578,7 +571,7 @@ func TestRenderERDiagram_SelectedHighlight(t *testing.T) {
 // --- Navigation: 2D cursor ---
 
 func TestERDiagramNav_2DCursorMovement(t *testing.T) {
-	nav := NewERDiagramNav(2, 3, 1) // 2 incoming, 3 outgoing, 1 junction
+	nav := NewERDiagramNav(2, 3) // 2 incoming, 3 outgoing
 
 	// Initial state: no selection
 	if nav.HasSelection() {
@@ -606,22 +599,16 @@ func TestERDiagramNav_2DCursorMovement(t *testing.T) {
 		t.Errorf("expected (1,1) after MoveRight, got (%d,%d)", nav.ActiveColumn(), nav.ActiveRow())
 	}
 
-	// Move right again — column 2 (N:N)
+	// Can't go past column 1 (only 2 columns now)
 	nav.MoveRight()
-	if nav.ActiveColumn() != 2 || nav.ActiveRow() != 0 {
-		t.Errorf("expected (2,0) after MoveRight to N:N, got (%d,%d)", nav.ActiveColumn(), nav.ActiveRow())
-	}
-
-	// Can't go past column 2
-	nav.MoveRight()
-	if nav.ActiveColumn() != 2 {
-		t.Errorf("expected column stays at 2, got %d", nav.ActiveColumn())
-	}
-
-	// Move left — back to column 1
-	nav.MoveLeft()
 	if nav.ActiveColumn() != 1 {
-		t.Errorf("expected column 1 after MoveLeft, got %d", nav.ActiveColumn())
+		t.Errorf("expected column stays at 1, got %d", nav.ActiveColumn())
+	}
+
+	// Move left — back to column 0
+	nav.MoveLeft()
+	if nav.ActiveColumn() != 0 {
+		t.Errorf("expected column 0 after MoveLeft, got %d", nav.ActiveColumn())
 	}
 
 	// Move up — stays at row 0 (no deselect)
@@ -636,7 +623,7 @@ func TestERDiagramNav_2DCursorMovement(t *testing.T) {
 }
 
 func TestERDiagramNav_EmptyColumns(t *testing.T) {
-	nav := NewERDiagramNav(0, 0, 0)
+	nav := NewERDiagramNav(0, 0)
 
 	nav.MoveDown()
 	if nav.HasSelection() {
@@ -659,7 +646,7 @@ func TestERDiagramNav_GetSelectedRelationship(t *testing.T) {
 			{FromColumn: "user_id", ToTable: "users", ToColumn: "id", Cardinality: "N:1"},
 		},
 	}
-	nav := NewERDiagramNav(1, 1, 0)
+	nav := NewERDiagramNav(1, 1)
 
 	// No selection
 	if rel := nav.GetSelectedRelationship(diagram); rel != nil {
