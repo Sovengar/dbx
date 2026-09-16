@@ -26,13 +26,32 @@ type SQLEditor struct {
 	schema       *context.SchemaExport
 	schemaLoaded bool
 	commitOnRun  bool
+
+	autocompleteEnabled   bool
+	autocompleteMinPrefix int
 }
 
 func NewSQLEditor(styles *theme.Styles) *SQLEditor {
 	return &SQLEditor{
-		styles:       styles,
-		lines:        []string{""},
-		autocomplete: NewAutocompleteState(),
+		styles:                styles,
+		lines:                 []string{""},
+		autocomplete:          NewAutocompleteState(),
+		autocompleteEnabled:   true,
+		autocompleteMinPrefix: 1,
+	}
+}
+
+// SetAutocompleteConfig enables or disables real-time suggestions and sets the
+// minimum token length before the popup opens on its own. Manual triggering is
+// unaffected by the minimum.
+func (e *SQLEditor) SetAutocompleteConfig(enabled bool, minPrefix int) {
+	e.autocompleteEnabled = enabled
+	if minPrefix < 0 {
+		minPrefix = 0
+	}
+	e.autocompleteMinPrefix = minPrefix
+	if !enabled {
+		e.autocomplete.Cancel()
 	}
 }
 
@@ -77,6 +96,7 @@ func (e *SQLEditor) Clear() {
 	e.cursorCol = 0
 	e.modified = false
 	e.commitOnRun = false
+	e.autocomplete.Cancel()
 }
 
 func (e *SQLEditor) SetContent(s string) {
@@ -87,6 +107,7 @@ func (e *SQLEditor) SetContent(s string) {
 	e.cursorRow = 0
 	e.cursorCol = 0
 	e.modified = false
+	e.autocomplete.Cancel()
 	// New content carries no commit intent unless the caller sets it after.
 	e.commitOnRun = false
 }
@@ -328,57 +349,51 @@ func (e *SQLEditor) clampCol() {
 }
 
 func (e *SQLEditor) triggerAutocomplete() {
-	if !e.schemaLoaded {
-		autocompleteDebugLog("triggerAutocomplete: SCHEMA NOT LOADED, skipping")
-		return
-	}
-	line := e.lines[e.cursorRow]
-	autocompleteDebugLog("triggerAutocomplete: line=%q cursorCol=%d cursorRow=%d", line, e.cursorCol, e.cursorRow)
-	ctx := e.autocomplete.detectContext(line, e.cursorCol)
-	autocompleteDebugLog("triggerAutocomplete: context kind=%d prefix=%q schema=%q table=%q", ctx.kind, ctx.prefix, ctx.schema, ctx.table)
-	e.autocomplete.UpdateContext(ctx)
-	autocompleteDebugLog("triggerAutocomplete: after UpdateContext visible=%v filtered=%d", e.autocomplete.Visible(), len(e.autocomplete.filtered))
+	e.refreshAutocomplete(true)
 }
 
 func (e *SQLEditor) updateAutocompleteAfterEdit() {
+	e.refreshAutocomplete(false)
+}
+
+func (e *SQLEditor) refreshAutocomplete(force bool) {
 	if !e.schemaLoaded {
-		autocompleteDebugLog("updateAutocompleteAfterEdit: schema not loaded, skipping")
+		autocompleteDebugLog("refreshAutocomplete: schema not loaded, skipping")
+		return
+	}
+	if !e.autocompleteEnabled {
+		e.autocomplete.Cancel()
 		return
 	}
 	line := e.lines[e.cursorRow]
-	autocompleteDebugLog("updateAutocompleteAfterEdit: line=%q cursorCol=%d", line, e.cursorCol)
 	ctx := e.autocomplete.detectContext(line, e.cursorCol)
-	autocompleteDebugLog("updateAutocompleteAfterEdit: context kind=%d prefix=%q schema=%q table=%q", ctx.kind, ctx.prefix, ctx.schema, ctx.table)
+	if !force && e.autocompleteMinPrefix > 0 && ctx.tokenText != "" && len(ctx.tokenText) < e.autocompleteMinPrefix {
+		autocompleteDebugLog("refreshAutocomplete: token %q shorter than min=%d, hiding", ctx.tokenText, e.autocompleteMinPrefix)
+		e.autocomplete.Cancel()
+		return
+	}
 	e.autocomplete.UpdateContext(ctx)
-	autocompleteDebugLog("updateAutocompleteAfterEdit: after UpdateContext visible=%v filtered=%d contextItems=%d", e.autocomplete.Visible(), len(e.autocomplete.filtered), len(e.autocomplete.contextItems))
+	autocompleteDebugLog("refreshAutocomplete: force=%v line=%q col=%d visible=%v filtered=%d",
+		force, line, e.cursorCol, e.autocomplete.Visible(), len(e.autocomplete.filtered))
 }
 
+// acceptCompletion replaces the token under the cursor with the chosen item,
+// which keeps acceptance idempotent: accepting the keyword you already typed
+// never duplicates it.
 func (e *SQLEditor) acceptCompletion(item *CompletionItem) {
 	line := e.lines[e.cursorRow]
-	before := line[:e.cursorCol]
-	after := line[e.cursorCol:]
-
-	wordStart := len(before)
-	for wordStart > 0 {
-		ch := before[wordStart-1]
-		if ch == ' ' || ch == '\t' || ch == '\n' || ch == ',' || ch == '(' || ch == ')' || ch == ';' {
-			break
-		}
-		if ch == '.' {
-			break
-		}
-		wordStart--
+	start, end := e.autocomplete.CompletionSpan()
+	if start < 0 || start > len(line) {
+		start = e.cursorCol
 	}
-
-	word := strings.ToUpper(before[wordStart:])
-	if isFullSQLKeyword(word) || item.Kind == CompletionOperator || item.Kind == CompletionValue {
-		wordStart = len(before)
+	if end < start || end > len(line) {
+		end = e.cursorCol
 	}
 
 	completion := item.Label()
 	suffix := completionSuffix(item)
-	e.lines[e.cursorRow] = before[:wordStart] + completion + suffix + after
-	e.cursorCol = wordStart + len(completion) + len(suffix)
+	e.lines[e.cursorRow] = line[:start] + completion + suffix + line[end:]
+	e.cursorCol = start + len(completion) + len(suffix)
 	e.modified = true
 	e.triggerAutocomplete()
 }

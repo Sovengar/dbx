@@ -120,15 +120,28 @@ Storage: `~/.local/state/dbx/projects/{project_name}/query_history.json`. Querie
 
 #### Autocomplete Context
 
-The editor detects what you're typing and shows relevant suggestions:
+Suggestions are derived from the tokens of the current statement, so they follow
+the active clause and ignore text inside strings and comments:
 
 | Context | Shows |
 |---------|-------|
-| After `FROM`/`JOIN`/`INTO`/`UPDATE` | Schemas + tables |
+| After `FROM`/`JOIN`/`INTO`/`UPDATE` (table position) | Schemas + tables |
 | `schema_name.` | Tables in that schema |
-| `schema_name.table_name.` | Columns of that table |
-| `SELECT`/`WHERE`/`AND`/`ON`/`SET` | Columns |
+| `table_name.` / `alias.` / `schema_name.table_name.` | Columns of that table |
+| `SELECT` list | `*`, `DISTINCT`, referenced columns and functions |
+| `WHERE`/`ON`/`AND`/`HAVING` | Columns, then operators, then values |
+| `ORDER BY`/`GROUP BY`/`RETURNING`/`SET` | Columns |
 | Default (typing a keyword) | SQL keywords + functions |
+
+Prefix matches are ranked above fuzzy matches, a token you already typed is
+never offered back, and `Tab`/`Enter` replaces that token in place (accepting a
+keyword twice never duplicates it).
+
+```toml
+[editor]
+autocomplete = true
+autocomplete_trigger = 1   # min characters before the popup opens on its own
+```
 
 ### AI (NL → SQL)
 

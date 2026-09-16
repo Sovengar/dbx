@@ -274,27 +274,12 @@ edit_mode = "inline"
 
 # ─── Editor ────────────────────────────────────────────────────
 [editor]
-# Syntax highlighting
-highlight = true
-
-# Tab size
-tab_size = 4
-
-# Auto-complete enabled
+# Real-time autocomplete popup in the SQL editor
 autocomplete = true
 
-# Auto-complete trigger characters
-autocomplete_trigger = 3
-
-# External editor command (if empty, disabled)
-# Uses $SQL_EDITOR, $EDITOR, or $VISUAL
-external_editor = ""
-
-# Max history size
-history_size = 100
-
-# Preserve editor content on execute
-preserve_on_execute = false
+# Minimum token length before the popup opens on its own (0 = always show).
+# Ctrl+Space always opens it manually.
+autocomplete_trigger = 1
 
 # ─── Export ────────────────────────────────────────────────────
 [export]

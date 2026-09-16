@@ -2,7 +2,6 @@ package editor
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/buble/dbx/internal/theme"
 )
@@ -70,36 +69,39 @@ type sqlToken struct {
 	end   int
 }
 
+// tokenizeSQL scans the input by byte so token offsets line up with the
+// editor's cursor column. Bytes >= 0x80 are treated as part of a word so UTF-8
+// runes are never split.
 func tokenizeSQL(input string) []sqlToken {
 	var tokens []sqlToken
 	i := 0
-	runes := []rune(input)
+	n := len(input)
 
-	for i < len(runes) {
-		ch := runes[i]
+	for i < n {
+		ch := input[i]
 
 		// Single-line comment
-		if ch == '-' && i+1 < len(runes) && runes[i+1] == '-' {
+		if ch == '-' && i+1 < n && input[i+1] == '-' {
 			start := i
-			for i < len(runes) && runes[i] != '\n' {
+			for i < n && input[i] != '\n' {
 				i++
 			}
-			tokens = append(tokens, sqlToken{tokenComment, string(runes[start:i]), start, i})
+			tokens = append(tokens, sqlToken{tokenComment, input[start:i], start, i})
 			continue
 		}
 
 		// Block comment
-		if ch == '/' && i+1 < len(runes) && runes[i+1] == '*' {
+		if ch == '/' && i+1 < n && input[i+1] == '*' {
 			start := i
 			i += 2
-			for i < len(runes)-1 {
-				if runes[i] == '*' && runes[i+1] == '/' {
+			for i < n-1 {
+				if input[i] == '*' && input[i+1] == '/' {
 					i += 2
 					break
 				}
 				i++
 			}
-			tokens = append(tokens, sqlToken{tokenComment, string(runes[start:i]), start, i})
+			tokens = append(tokens, sqlToken{tokenComment, input[start:i], start, i})
 			continue
 		}
 
@@ -107,9 +109,9 @@ func tokenizeSQL(input string) []sqlToken {
 		if ch == '\'' {
 			start := i
 			i++
-			for i < len(runes) {
-				if runes[i] == '\'' {
-					if i+1 < len(runes) && runes[i+1] == '\'' {
+			for i < n {
+				if input[i] == '\'' {
+					if i+1 < n && input[i+1] == '\'' {
 						i += 2
 						continue
 					}
@@ -118,27 +120,27 @@ func tokenizeSQL(input string) []sqlToken {
 				}
 				i++
 			}
-			tokens = append(tokens, sqlToken{tokenString, string(runes[start:i]), start, i})
+			tokens = append(tokens, sqlToken{tokenString, input[start:i], start, i})
 			continue
 		}
 
 		// Number
-		if unicode.IsDigit(ch) {
+		if isASCIIDigit(ch) {
 			start := i
-			for i < len(runes) && (unicode.IsDigit(runes[i]) || runes[i] == '.') {
+			for i < n && (isASCIIDigit(input[i]) || input[i] == '.') {
 				i++
 			}
-			tokens = append(tokens, sqlToken{tokenNumber, string(runes[start:i]), start, i})
+			tokens = append(tokens, sqlToken{tokenNumber, input[start:i], start, i})
 			continue
 		}
 
 		// Word (keyword or identifier)
-		if unicode.IsLetter(ch) || ch == '_' {
+		if isASCIILetter(ch) || ch == '_' || ch >= 0x80 {
 			start := i
-			for i < len(runes) && (unicode.IsLetter(runes[i]) || unicode.IsDigit(runes[i]) || runes[i] == '_') {
+			for i < n && (isASCIILetter(input[i]) || isASCIIDigit(input[i]) || input[i] == '_' || input[i] >= 0x80) {
 				i++
 			}
-			word := string(runes[start:i])
+			word := input[start:i]
 			upper := strings.ToUpper(word)
 
 			token := sqlToken{tokenDefault, word, start, i}
@@ -152,43 +154,59 @@ func tokenizeSQL(input string) []sqlToken {
 		}
 
 		// Operators
-		if ch == '=' || ch == '<' || ch == '>' || ch == '!' || ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '%' {
+		if isOperatorByte(ch) {
 			start := i
 			i++
-			// Handle <=, >=, <>, !=, <>
-			if i < len(runes) && (runes[i] == '=' || runes[i] == '>') {
-				next := runes[i]
+			// Handle <=, >=, <>, !=
+			if i < n && (input[i] == '=' || input[i] == '>') {
+				next := input[i]
 				if (ch == '<' && next == '>') || (ch == '!' && next == '=') || (ch == '<' && next == '=') || (ch == '>' && next == '=') {
 					i++
 				}
 			}
-			tokens = append(tokens, sqlToken{tokenOperator, string(runes[start:i]), start, i})
+			tokens = append(tokens, sqlToken{tokenOperator, input[start:i], start, i})
 			continue
 		}
 
 		// Parentheses, commas, semicolons, dots
 		if ch == '(' || ch == ')' || ch == ',' || ch == ';' || ch == '.' {
-			tokens = append(tokens, sqlToken{tokenDefault, string(ch), i, i + 1})
+			tokens = append(tokens, sqlToken{tokenDefault, input[i : i+1], i, i + 1})
 			i++
 			continue
 		}
 
 		// Whitespace
-		if unicode.IsSpace(ch) {
+		if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
 			start := i
-			for i < len(runes) && unicode.IsSpace(runes[i]) {
+			for i < n && (input[i] == ' ' || input[i] == '\t' || input[i] == '\n' || input[i] == '\r') {
 				i++
 			}
-			tokens = append(tokens, sqlToken{tokenDefault, string(runes[start:i]), start, i})
+			tokens = append(tokens, sqlToken{tokenDefault, input[start:i], start, i})
 			continue
 		}
 
 		// Unknown character
-		tokens = append(tokens, sqlToken{tokenDefault, string(ch), i, i + 1})
+		tokens = append(tokens, sqlToken{tokenDefault, input[i : i+1], i, i + 1})
 		i++
 	}
 
 	return tokens
+}
+
+func isASCIILetter(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+}
+
+func isASCIIDigit(ch byte) bool {
+	return ch >= '0' && ch <= '9'
+}
+
+func isOperatorByte(ch byte) bool {
+	switch ch {
+	case '=', '<', '>', '!', '+', '-', '*', '/', '%':
+		return true
+	}
+	return false
 }
 
 func HighlightSQL(input string, styles *theme.Styles) string {

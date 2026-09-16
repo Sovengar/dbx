@@ -119,13 +119,15 @@ func NewModel(cfg *config.Config) Model {
 	// QueryStore is initialized later in initQueryStore after project selection
 	qs := &store.QueryStore{}
 	qb := querybrowser.New(t.Styles(), qs)
+	ed := editor.NewSQLEditor(t.Styles())
+	ed.SetAutocompleteConfig(cfg.Editor.Autocomplete, cfg.Editor.AutocompleteTrigger)
 	return Model{
 		config:          cfg,
 		theme:           t,
 		styles:          t.Styles(),
 		picker:          picker.New(t.Styles()),
 		grid:            g,
-		editor:          editor.NewSQLEditor(t.Styles()),
+		editor:          ed,
 		gridSidebarPreview: gridsidebarpreview.New(t.Styles()),
 		gridPreview:     gridpreview.New(t.Styles(), kbs),
 		explorerPreview: explorerpreview.New(t.Styles(), kbs),

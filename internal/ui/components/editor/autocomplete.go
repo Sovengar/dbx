@@ -3,6 +3,7 @@ package editor
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -22,6 +23,7 @@ const (
 	CompletionOperator
 	CompletionValue
 	CompletionEmpty
+	CompletionSelectList
 )
 
 type CompletionItem struct {
@@ -83,9 +85,9 @@ var defaultValues = []CompletionItem{
 	{Name: "FALSE", Kind: CompletionValue, Detail: "boolean"},
 }
 
-var defaultSelectItems = []CompletionItem{
-	{Name: "*", Kind: CompletionKeyword, Detail: "all columns"},
-	{Name: "DISTINCT", Kind: CompletionKeyword, Detail: "unique rows"},
+// defaultSelectFunctions are the select-list staples that Postgres exposes as
+// aggregates but that the generic keyword/function vocabularies do not cover.
+var defaultSelectFunctions = []CompletionItem{
 	{Name: "COUNT", Kind: CompletionFunction, Detail: "aggregate"},
 	{Name: "SUM", Kind: CompletionFunction, Detail: "aggregate"},
 	{Name: "AVG", Kind: CompletionFunction, Detail: "aggregate"},
@@ -95,11 +97,23 @@ var defaultSelectItems = []CompletionItem{
 	{Name: "CAST", Kind: CompletionFunction, Detail: "type conversion"},
 }
 
+// tableRef is a table (optionally schema-qualified and aliased) referenced by
+// the statement, used to narrow column suggestions.
+type tableRef struct {
+	schema string
+	table  string
+	alias  string
+}
+
 type completionContext struct {
 	kind          CompletionKind
 	prefix        string
+	tokenText     string
+	tokenStart    int
+	tokenEnd      int
 	schema        string
 	table         string
+	tables        []tableRef
 	selectContext bool
 }
 
@@ -153,18 +167,29 @@ func (a *AutocompleteState) LoadSchema(export *context.SchemaExport) {
 	autocompleteDebugLog("LoadSchema: total items=%d", len(a.all))
 }
 
+// SetKeywords merges the keyword and function vocabularies. Functions win when
+// a name exists in both maps, so e.g. NOW is offered once as NOW(). The result
+// is sorted so the suggestion order is deterministic across runs.
 func (a *AutocompleteState) SetKeywords(keywords, functions map[string]bool) {
-	for kw := range keywords {
-		a.all = append(a.all, CompletionItem{
-			Name: kw,
-			Kind: CompletionKeyword,
-		})
-	}
+	byName := make(map[string]CompletionItem, len(keywords)+len(functions))
 	for fn := range functions {
-		a.all = append(a.all, CompletionItem{
-			Name: fn,
-			Kind: CompletionFunction,
-		})
+		key := strings.ToUpper(fn)
+		byName[key] = CompletionItem{Name: fn, Kind: CompletionFunction}
+	}
+	for kw := range keywords {
+		key := strings.ToUpper(kw)
+		if _, ok := byName[key]; ok {
+			continue
+		}
+		byName[key] = CompletionItem{Name: kw, Kind: CompletionKeyword}
+	}
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		a.all = append(a.all, byName[name])
 	}
 }
 
@@ -209,6 +234,12 @@ func (a *AutocompleteState) Cancel() {
 	a.currentCtx = completionContext{}
 }
 
+// CompletionSpan reports the byte range of the token currently under the
+// cursor. Accepting a suggestion replaces exactly that range.
+func (a *AutocompleteState) CompletionSpan() (start, end int) {
+	return a.currentCtx.tokenStart, a.currentCtx.tokenEnd
+}
+
 func (a *AutocompleteState) UpdateContext(ctx completionContext) {
 	a.currentCtx = ctx
 	a.prefix = ctx.prefix
@@ -216,8 +247,8 @@ func (a *AutocompleteState) UpdateContext(ctx completionContext) {
 	a.selected = 0
 	a.applyFilter()
 	a.visible = len(a.filtered) > 0
-	autocompleteDebugLog("UpdateContext: kind=%d prefix=%q schema=%q table=%q selectCtx=%v filtered=%d visible=%v",
-		ctx.kind, ctx.prefix, ctx.schema, ctx.table, ctx.selectContext, len(a.filtered), a.visible)
+	autocompleteDebugLog("UpdateContext: kind=%d prefix=%q token=%q schema=%q table=%q tables=%d filtered=%d visible=%v",
+		ctx.kind, ctx.prefix, ctx.tokenText, ctx.schema, ctx.table, len(ctx.tables), len(a.filtered), a.visible)
 }
 
 func (a *AutocompleteState) rebuildContextItems() {
@@ -231,51 +262,11 @@ func (a *AutocompleteState) rebuildContextItems() {
 			}
 		}
 	case CompletionTable:
-		if a.currentCtx.schema != "" {
-			for _, item := range a.all {
-				if item.Kind == CompletionTable && strings.EqualFold(item.Schema, a.currentCtx.schema) {
-					a.contextItems = append(a.contextItems, item)
-				}
-			}
-		} else {
-			for _, item := range a.all {
-				if item.Kind == CompletionSchema || item.Kind == CompletionTable {
-					a.contextItems = append(a.contextItems, item)
-				}
-			}
-		}
+		a.contextItems = append(a.contextItems, a.tableItems(a.currentCtx.schema)...)
 	case CompletionColumn:
-		if a.currentCtx.schema != "" && a.currentCtx.table != "" {
-			for _, item := range a.all {
-				if item.Kind == CompletionColumn &&
-					strings.EqualFold(item.Schema, a.currentCtx.schema) &&
-					strings.EqualFold(item.Table, a.currentCtx.table) {
-					a.contextItems = append(a.contextItems, item)
-				}
-			}
-		} else if a.currentCtx.table != "" {
-			for _, item := range a.all {
-				if item.Kind == CompletionColumn && strings.EqualFold(item.Table, a.currentCtx.table) {
-					a.contextItems = append(a.contextItems, item)
-				}
-			}
-		} else {
-			for _, item := range a.all {
-				if item.Kind == CompletionColumn {
-					a.contextItems = append(a.contextItems, item)
-				}
-			}
-		}
-	case CompletionKeyword:
-		if a.currentCtx.selectContext {
-			a.contextItems = append(a.contextItems, defaultSelectItems...)
-		} else {
-			for _, item := range a.all {
-				if item.Kind == CompletionKeyword || item.Kind == CompletionFunction {
-					a.contextItems = append(a.contextItems, item)
-				}
-			}
-		}
+		a.contextItems = append(a.contextItems, a.columnItems(a.currentCtx)...)
+	case CompletionSelectList:
+		a.contextItems = append(a.contextItems, a.selectListItems(a.currentCtx)...)
 	case CompletionOperator:
 		a.contextItems = append(a.contextItems, defaultOperators...)
 	case CompletionValue:
@@ -291,23 +282,145 @@ func (a *AutocompleteState) rebuildContextItems() {
 	autocompleteDebugLog("rebuildContextItems: kind=%d → %d contextItems (from %d total)", a.currentCtx.kind, len(a.contextItems), len(a.all))
 }
 
+// tableItems returns tables; when a schema is given it is restricted to it,
+// otherwise schemas are included so the user can still drill down.
+func (a *AutocompleteState) tableItems(schema string) []CompletionItem {
+	var items []CompletionItem
+	for _, item := range a.all {
+		switch item.Kind {
+		case CompletionSchema:
+			if schema == "" {
+				items = append(items, item)
+			}
+		case CompletionTable:
+			if schema == "" || strings.EqualFold(item.Schema, schema) {
+				items = append(items, item)
+			}
+		}
+	}
+	return items
+}
+
+// columnItems narrows columns by the qualified name when present, falling back
+// to every table referenced by the statement. Without any table it returns
+// nothing rather than dumping the whole catalog.
+func (a *AutocompleteState) columnItems(ctx completionContext) []CompletionItem {
+	if ctx.schema == "" && ctx.table == "" && len(ctx.tables) == 0 {
+		return nil
+	}
+	var items []CompletionItem
+	seen := make(map[string]bool)
+	for _, item := range a.all {
+		if item.Kind != CompletionColumn {
+			continue
+		}
+		if !columnMatches(item, ctx) {
+			continue
+		}
+		key := strings.ToLower(item.Name) + "\x00" + strings.ToLower(item.Schema) + "\x00" + strings.ToLower(item.Table)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		items = append(items, item)
+	}
+	return items
+}
+
+func columnMatches(item CompletionItem, ctx completionContext) bool {
+	switch {
+	case ctx.schema != "" && ctx.table != "":
+		return strings.EqualFold(item.Schema, ctx.schema) && strings.EqualFold(item.Table, ctx.table)
+	case ctx.table != "":
+		return strings.EqualFold(item.Table, ctx.table)
+	default:
+		for _, ref := range ctx.tables {
+			if strings.EqualFold(item.Table, ref.table) && (ref.schema == "" || strings.EqualFold(item.Schema, ref.schema)) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func (a *AutocompleteState) selectListItems(ctx completionContext) []CompletionItem {
+	var items []CompletionItem
+	if ctx.selectContext {
+		items = append(items,
+			CompletionItem{Name: "*", Kind: CompletionKeyword, Detail: "all columns"},
+			CompletionItem{Name: "DISTINCT", Kind: CompletionKeyword, Detail: "unique rows"},
+		)
+	}
+	items = append(items, a.columnItems(ctx)...)
+	items = append(items, defaultSelectFunctions...)
+	for _, item := range a.all {
+		if item.Kind == CompletionFunction {
+			items = append(items, item)
+		}
+	}
+	return dedupeItems(items)
+}
+
+func dedupeItems(items []CompletionItem) []CompletionItem {
+	if len(items) == 0 {
+		return items
+	}
+	out := items[:0]
+	seen := make(map[string]bool, len(items))
+	for _, item := range items {
+		key := fmt.Sprintf("%d\x00%s", item.Kind, strings.ToLower(item.Name))
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, item)
+	}
+	return out
+}
+
+// applyFilter ranks prefix matches ahead of fuzzy subsequence matches and drops
+// the exact keyword the user already typed, so accepting a completion never
+// duplicates text.
 func (a *AutocompleteState) applyFilter() {
-	if a.prefix == "" {
-		a.filtered = make([]CompletionItem, len(a.contextItems))
-		copy(a.filtered, a.contextItems)
-		autocompleteDebugLog("applyFilter: empty prefix, showing all %d contextItems", len(a.contextItems))
+	if len(a.contextItems) == 0 {
+		a.filtered = nil
 		return
 	}
 
-	q := strings.ToLower(a.prefix)
-	var result []CompletionItem
-	for _, item := range a.contextItems {
-		if fuzzyMatchAutocomplete(q, strings.ToLower(item.Name)) {
+	exactKeyword := ""
+	if a.currentCtx.tokenText != "" && a.currentCtx.prefix == a.currentCtx.tokenText {
+		exactKeyword = strings.ToLower(a.currentCtx.tokenText)
+	}
+
+	if a.prefix == "" {
+		result := make([]CompletionItem, 0, len(a.contextItems))
+		for _, item := range a.contextItems {
+			if item.Kind == CompletionKeyword && strings.ToLower(item.Name) == exactKeyword {
+				continue
+			}
 			result = append(result, item)
 		}
+		a.filtered = result
+		return
 	}
-	autocompleteDebugLog("applyFilter: prefix=%q matched %d of %d contextItems", q, len(result), len(a.contextItems))
-	a.filtered = result
+
+	query := strings.ToLower(a.prefix)
+	var prefixHits, fuzzyHits []CompletionItem
+	for _, item := range a.contextItems {
+		name := strings.ToLower(item.Name)
+		if item.Kind == CompletionKeyword && name == exactKeyword {
+			continue
+		}
+		if strings.HasPrefix(name, query) {
+			prefixHits = append(prefixHits, item)
+			continue
+		}
+		if fuzzyMatchAutocomplete(query, name) {
+			fuzzyHits = append(fuzzyHits, item)
+		}
+	}
+	a.filtered = append(prefixHits, fuzzyHits...)
+	autocompleteDebugLog("applyFilter: prefix=%q exactKeyword=%q matched %d of %d contextItems", query, exactKeyword, len(a.filtered), len(a.contextItems))
 }
 
 func fuzzyMatchAutocomplete(query, target string) bool {
@@ -323,211 +436,144 @@ func fuzzyMatchAutocomplete(query, target string) bool {
 	return qi == len(query)
 }
 
+// detectContext resolves the suggestion context from the tokens of the current
+// line. It ignores strings and comments, tracks the active clause and, when the
+// cursor sits on a qualified name, narrows to tables or columns.
 func (a *AutocompleteState) detectContext(line string, col int) completionContext {
-	autocompleteDebugLog("detectContext: ENTER line=%q col=%d allItems=%d", line, col, len(a.all))
+	if col < 0 {
+		col = 0
+	}
 	if col > len(line) {
 		col = len(line)
 	}
-	before := line[:col]
 
-	dotIdx := strings.LastIndex(before, ".")
-	if dotIdx >= 0 {
-		afterDot := before[dotIdx+1:]
-		afterDotUpper := strings.ToUpper(strings.TrimSpace(afterDot))
-		dotHasKeywordAfter := false
-		dotKeywords := []string{"WHERE", "AND", "OR", "ON", "HAVING", "FROM", "JOIN", "SELECT", "ORDER", "GROUP", "SET", "INTO", "VALUES", "LIMIT", "OFFSET"}
-		for _, kw := range dotKeywords {
-			if strings.HasPrefix(afterDotUpper, kw+" ") || afterDotUpper == kw {
-				dotHasKeywordAfter = true
-				break
-			}
-			if strings.Contains(afterDotUpper, " "+kw+" ") || strings.HasSuffix(afterDotUpper, " "+kw) {
-				dotHasKeywordAfter = true
-				break
-			}
-		}
+	rawTokens := tokenizeSQL(line)
+	autocompleteDebugLog("detectContext: ENTER line=%q col=%d tokens=%d allItems=%d", line, col, len(rawTokens), len(a.all))
 
-		if !dotHasKeywordAfter {
-			qualifier := extractIdentifierBefore(before, dotIdx)
+	if insideLiteralOrComment(rawTokens, col) {
+		autocompleteDebugLog("detectContext: inside literal/comment → no suggestions")
+		return completionContext{kind: CompletionEmpty, tokenStart: col, tokenEnd: col}
+	}
 
-			if qualifier == "" {
-				autocompleteDebugLog("detectContext: dot empty qualifier, prefix=%q", afterDot)
-				return completionContext{
-					kind:   CompletionKeyword,
-					prefix: afterDot,
-				}
-			}
+	tokens := significantTokens(rawTokens)
 
-			dot2 := strings.LastIndex(qualifier, ".")
-			if dot2 >= 0 {
-				schema := qualifier[:dot2]
-				table := qualifier[dot2+1:]
-				autocompleteDebugLog("detectContext: double-dot schema=%q table=%q prefix=%q", schema, table, afterDot)
-				return completionContext{
-					kind:   CompletionColumn,
-					prefix: afterDot,
-					schema: schema,
-					table:  table,
-				}
-			}
+	refs := a.findTablesInStatement(tokens)
 
-			if a.isKnownSchema(qualifier) || a.hasTablesInSchema(qualifier) {
-				return completionContext{
-					kind:   CompletionTable,
-					prefix: afterDot,
-					schema: qualifier,
-				}
-			}
-
-			return completionContext{
-				kind:   CompletionColumn,
-				prefix: afterDot,
-				table:  qualifier,
-			}
+	currentIdx := -1
+	for i := range tokens {
+		if tokens[i].start < col && col <= tokens[i].end && isWordToken(tokens[i]) {
+			currentIdx = i
+			break
 		}
 	}
 
-	trimmed := strings.TrimRight(before, " \t\n\r")
-	upperTrimmed := strings.ToUpper(trimmed)
-	currentWord := extractLastWord(upperTrimmed)
-	lastKeyword := extractLastSQLKeyword(upperTrimmed)
-	hasTrailingSpace := len(before) > len(trimmed)
-	autocompleteDebugLog("detectContext: lastKeyword=%q currentWord=%q hasTrailingSpace=%v line=%q", lastKeyword, currentWord, hasTrailingSpace, before)
-
-	if lastKeyword == "FROM" && (hasTrailingSpace || currentWord != "FROM") {
-		prefix := currentWord
-		if isFullSQLKeyword(prefix) {
-			prefix = ""
+	passed := make([]sqlToken, 0, len(tokens))
+	for i := range tokens {
+		if i == currentIdx {
+			continue
 		}
-		autocompleteDebugLog("detectContext: FROM → schemas, prefix=%q", prefix)
-		return completionContext{
-			kind:   CompletionSchema,
-			prefix: prefix,
+		if tokens[i].end <= col {
+			passed = append(passed, tokens[i])
 		}
 	}
-
-	contextKeywords := map[string]bool{
-		"FROM": true, "JOIN": true, "INNER JOIN": true, "LEFT JOIN": true,
-		"RIGHT JOIN": true, "FULL JOIN": true, "FULL OUTER JOIN": true,
-		"LEFT OUTER JOIN": true, "RIGHT OUTER JOIN": true, "CROSS JOIN": true,
-		"LEFT OUTER": true, "RIGHT OUTER": true, "FULL OUTER": true,
-		"WHERE": true, "AND": true, "OR": true, "ON": true, "HAVING": true,
-		"ORDER BY": true, "GROUP BY": true, "SET": true, "DISTINCT": true,
-		"INTO": true, "UPDATE": true, "TABLE": true, "ALTER TABLE": true,
-		"CREATE TABLE": true, "DROP TABLE": true, "TRUNCATE TABLE": true,
-		"VALUES": true, "RETURNING": true, "AS": true,
+	if idx := lastIndexText(passed, ";"); idx >= 0 {
+		passed = passed[idx+1:]
 	}
 
-	if currentWord != "" && !isFullSQLKeyword(currentWord) && isSQLKeywordPrefix(currentWord) && !contextKeywords[lastKeyword] && !hasTrailingSpace {
-		autocompleteDebugLog("detectContext: keywordPrefixCheck HIT → CompletionKeyword prefix=%q", currentWord)
-		return completionContext{
-			kind:   CompletionKeyword,
-			prefix: currentWord,
-		}
+	ctx := completionContext{tokenStart: col, tokenEnd: col}
+	if currentIdx >= 0 {
+		current := tokens[currentIdx]
+		ctx.tokenStart = current.start
+		ctx.tokenEnd = current.end
+		ctx.tokenText = current.text
+		ctx.prefix = line[current.start:col]
 	}
 
-	if lastKeyword == "SELECT" {
-		if strings.EqualFold(currentWord, "SELECT") {
-			return completionContext{kind: CompletionEmpty}
-		}
-		return completionContext{
-			kind:          CompletionKeyword,
-			prefix:        currentWord,
-			selectContext: true,
-		}
+	if kind, schema, table, ok := a.qualifiedContext(passed, refs); ok {
+		ctx.kind = kind
+		ctx.schema = schema
+		ctx.table = table
+		autocompleteDebugLog("detectContext: qualified kind=%d schema=%q table=%q prefix=%q", kind, schema, table, ctx.prefix)
+		return ctx
 	}
 
-	switch lastKeyword {
+	clause, tail := lastClause(passed)
+	autocompleteDebugLog("detectContext: clause=%q tail=%d prefix=%q tokenText=%q", clause, len(tail), ctx.prefix, ctx.tokenText)
+
+	switch clause {
+	case "FROM", "JOIN", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", "CROSS JOIN",
+		"LEFT OUTER JOIN", "RIGHT OUTER JOIN", "FULL OUTER JOIN", "LEFT OUTER", "RIGHT OUTER", "FULL OUTER",
+		"INTO", "UPDATE", "TABLE", "CREATE TABLE", "DROP TABLE", "ALTER TABLE", "TRUNCATE TABLE":
+		if expectingTable(tail) {
+			ctx.kind = CompletionTable
+		} else {
+			ctx.kind = CompletionKeyword
+		}
+	case "SELECT":
+		ctx.kind = CompletionSelectList
+		ctx.selectContext = len(tail) == 0
+		ctx.tables = refs
 	case "WHERE", "AND", "OR", "ON", "HAVING":
-		if !hasTrailingSpace && currentWord == lastKeyword {
-			return completionContext{
-				kind:   CompletionKeyword,
-				prefix: currentWord,
-			}
-		}
-		if isOperatorContext(upperTrimmed) {
-			autocompleteDebugLog("detectContext: WHERE → operator ctx → values")
-			return completionContext{
-				kind:   CompletionValue,
-				prefix: "",
-			}
-		}
-		if isColumnContext(upperTrimmed, a.all) && hasTrailingSpace {
-			autocompleteDebugLog("detectContext: WHERE → column ctx → operators")
-			return completionContext{
-				kind:   CompletionOperator,
-				prefix: "",
-			}
-		}
-		if hasOperatorBefore(upperTrimmed) {
-			autocompleteDebugLog("detectContext: WHERE → has operator before → values")
-			return completionContext{
-				kind:   CompletionValue,
-				prefix: currentWord,
-			}
-		}
-		schema, table := a.findTableInFROM(upperTrimmed)
-		prefix := currentWord
-		if isFullSQLKeyword(prefix) {
-			prefix = ""
-		}
-		autocompleteDebugLog("detectContext: WHERE → default columns, schema=%q table=%q prefix=%q", schema, table, prefix)
-		return completionContext{
-			kind:   CompletionColumn,
-			prefix: prefix,
-			schema: schema,
-			table:  table,
-		}
-
-	case "JOIN", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN",
-		"FULL JOIN", "FULL OUTER JOIN", "LEFT OUTER JOIN", "RIGHT OUTER JOIN",
-		"CROSS JOIN", "LEFT OUTER", "RIGHT OUTER", "FULL OUTER":
-		prefix := currentWord
-		if isFullSQLKeyword(prefix) {
-			prefix = ""
-		}
-		return completionContext{
-			kind:   CompletionTable,
-			prefix: prefix,
-		}
-
-	case "INTO", "UPDATE", "TABLE", "ALTER TABLE",
-		"CREATE TABLE", "DROP TABLE", "TRUNCATE TABLE":
-		prefix := currentWord
-		if isFullSQLKeyword(prefix) {
-			prefix = ""
-		}
-		return completionContext{
-			kind:   CompletionTable,
-			prefix: prefix,
-		}
-
-	case "ORDER BY", "GROUP BY", "SET", "DISTINCT",
-		"VALUES", "RETURNING", "AS":
-		prefix := currentWord
-		if isFullSQLKeyword(prefix) {
-			prefix = ""
-		}
-		return completionContext{
-			kind:   CompletionColumn,
-			prefix: prefix,
-		}
-
+		ctx.kind = predicateContext(tail)
+		ctx.tables = refs
+	case "ORDER BY", "GROUP BY", "SET", "RETURNING", "DISTINCT", "AS":
+		ctx.kind = CompletionColumn
+		ctx.tables = refs
 	case "IN", "NOT IN", "EXISTS":
-		return completionContext{
-			kind:   CompletionKeyword,
-			prefix: currentWord,
-		}
-
-	case "NULL", "TRUE", "FALSE":
-		return completionContext{kind: CompletionEmpty}
-
+		ctx.kind = CompletionKeyword
+	case "IS", "IS NOT", "BETWEEN", "LIKE", "ILIKE":
+		ctx.kind = CompletionValue
+	case "LIMIT", "OFFSET":
+		ctx.kind = CompletionEmpty
 	default:
-		return completionContext{
-			kind:   CompletionKeyword,
-			prefix: currentWord,
+		ctx.kind = CompletionKeyword
+	}
+	return ctx
+}
+
+// qualifiedContext handles `schema.`, `table.` and `schema.table.` prefixes.
+func (a *AutocompleteState) qualifiedContext(passed []sqlToken, refs []tableRef) (CompletionKind, string, string, bool) {
+	if len(passed) < 2 || passed[len(passed)-1].text != "." {
+		return 0, "", "", false
+	}
+	ident := passed[len(passed)-2]
+	if !isWordToken(ident) {
+		return 0, "", "", false
+	}
+
+	if len(passed) >= 4 && passed[len(passed)-3].text == "." && isWordToken(passed[len(passed)-4]) {
+		return CompletionColumn, passed[len(passed)-4].text, ident.text, true
+	}
+	if a.isKnownSchema(ident.text) || a.hasTablesInSchema(ident.text) {
+		return CompletionTable, ident.text, "", true
+	}
+	if schema, table, ok := a.resolveTable(ident.text, refs); ok {
+		return CompletionColumn, schema, table, true
+	}
+	return CompletionColumn, "", ident.text, true
+}
+
+func (a *AutocompleteState) resolveTable(name string, refs []tableRef) (string, string, bool) {
+	for _, ref := range refs {
+		if ref.alias != "" && strings.EqualFold(ref.alias, name) {
+			return ref.schema, ref.table, true
 		}
 	}
+	for _, ref := range refs {
+		if strings.EqualFold(ref.table, name) {
+			return ref.schema, ref.table, true
+		}
+	}
+	return a.lookupTable(name)
+}
+
+func (a *AutocompleteState) lookupTable(name string) (string, string, bool) {
+	for _, item := range a.all {
+		if item.Kind == CompletionTable && strings.EqualFold(item.Name, name) {
+			return item.Schema, item.Name, true
+		}
+	}
+	return "", "", false
 }
 
 func (a *AutocompleteState) isKnownSchema(name string) bool {
@@ -548,117 +594,207 @@ func (a *AutocompleteState) hasTablesInSchema(schema string) bool {
 	return false
 }
 
-func (a *AutocompleteState) findTableInFROM(line string) (schema, table string) {
-	upper := strings.ToUpper(line)
-
-	var fromKeywords = []string{
-		"LEFT OUTER JOIN", "RIGHT OUTER JOIN", "FULL OUTER JOIN",
-		"INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN",
-		"CROSS JOIN", "JOIN", "FROM",
-	}
-
-	bestPos := -1
-	for _, kw := range fromKeywords {
-		idx := strings.LastIndex(upper, " "+kw+" ")
-		if idx >= 0 && idx > bestPos {
-			bestPos = idx + len(kw) + 1
+// findTablesInStatement collects the tables referenced by FROM/JOIN/UPDATE/
+// INTO/DELETE/TABLE clauses, resolving schemas and aliases.
+func (a *AutocompleteState) findTablesInStatement(tokens []sqlToken) []tableRef {
+	var refs []tableRef
+	expect := false
+	for i := 0; i < len(tokens); i++ {
+		token := tokens[i]
+		upper := strings.ToUpper(token.text)
+		switch upper {
+		case "FROM", "JOIN", "UPDATE", "INTO", "DELETE", "TABLE", ",":
+			expect = true
+			continue
+		case "SELECT", "WHERE", "GROUP", "ORDER", "HAVING", "SET", "VALUES", "ON",
+			"LIMIT", "OFFSET", "RETURNING", "UNION", "AS":
+			expect = false
+			continue
 		}
-	}
-
-	if bestPos < 0 {
-		return "", ""
-	}
-
-	rest := strings.TrimSpace(line[bestPos:])
-	rest = strings.TrimRight(rest, " \t\n\r")
-	parts := strings.Fields(rest)
-	if len(parts) == 0 {
-		return "", ""
-	}
-
-	tableName := parts[0]
-	tableName = strings.TrimRight(tableName, ",);")
-
-	if strings.Contains(tableName, ".") {
-		dots := strings.SplitN(tableName, ".", 2)
-		return dots[0], dots[1]
-	}
-
-	for _, item := range a.all {
-		if item.Kind == CompletionTable && strings.EqualFold(item.Name, tableName) {
-			return item.Schema, item.Name
+		if !expect || !isWordToken(token) {
+			continue
 		}
-	}
 
-	return "", tableName
+		ref := tableRef{table: token.text}
+		if i+2 < len(tokens) && tokens[i+1].text == "." && isWordToken(tokens[i+2]) {
+			ref.schema = token.text
+			ref.table = tokens[i+2].text
+			i += 2
+		}
+		if ref.schema == "" {
+			if schema, table, ok := a.lookupTable(ref.table); ok {
+				ref.schema = schema
+				ref.table = table
+			}
+		}
+
+		j := i + 1
+		if j < len(tokens) && strings.EqualFold(tokens[j].text, "AS") {
+			j++
+		}
+		if j < len(tokens) && isWordToken(tokens[j]) && !isSQLKeyword(tokens[j].text) {
+			ref.alias = tokens[j].text
+			i = j
+		}
+
+		refs = append(refs, ref)
+		expect = false
+	}
+	return refs
 }
 
-func isOperatorContext(upperTrimmed string) bool {
-	tokens := strings.Fields(upperTrimmed)
-	if len(tokens) < 2 {
-		return false
+func lastClause(passed []sqlToken) (string, []sqlToken) {
+	for i := len(passed) - 1; i >= 0; i-- {
+		for _, phrase := range clausePhrases {
+			if len(phrase) > len(passed)-i {
+				continue
+			}
+			match := true
+			for k, word := range phrase {
+				if !strings.EqualFold(passed[i+k].text, word) {
+					match = false
+					break
+				}
+			}
+			if match {
+				return strings.Join(phrase, " "), passed[i+len(phrase):]
+			}
+		}
 	}
+	return "", passed
+}
 
-	operators := map[string]bool{
-		"=": true, "!=": true, "<>": true, "<": true, "<=": true,
-		">": true, ">=": true, "LIKE": true, "ILIKE": true,
-		"IN": true, "NOT": true, "IS": true, "BETWEEN": true,
-	}
+// clausePhrases is ordered longest-first so multi-word clauses win at the same
+// start index. Single words that only exist inside a compound (BY, OUTER…) are
+// intentionally omitted.
+var clausePhrases = [][]string{
+	{"LEFT", "OUTER", "JOIN"},
+	{"RIGHT", "OUTER", "JOIN"},
+	{"FULL", "OUTER", "JOIN"},
+	{"CREATE", "TABLE"},
+	{"DROP", "TABLE"},
+	{"ALTER", "TABLE"},
+	{"TRUNCATE", "TABLE"},
+	{"ORDER", "BY"},
+	{"GROUP", "BY"},
+	{"INNER", "JOIN"},
+	{"LEFT", "JOIN"},
+	{"RIGHT", "JOIN"},
+	{"FULL", "JOIN"},
+	{"CROSS", "JOIN"},
+	{"NOT", "IN"},
+	{"IS", "NOT"},
+	{"UNION", "ALL"},
+	{"LEFT", "OUTER"},
+	{"RIGHT", "OUTER"},
+	{"FULL", "OUTER"},
+	{"SELECT"},
+	{"FROM"},
+	{"WHERE"},
+	{"AND"},
+	{"OR"},
+	{"ON"},
+	{"HAVING"},
+	{"JOIN"},
+	{"INTO"},
+	{"UPDATE"},
+	{"DELETE"},
+	{"SET"},
+	{"VALUES"},
+	{"RETURNING"},
+	{"DISTINCT"},
+	{"AS"},
+	{"TABLE"},
+	{"IN"},
+	{"EXISTS"},
+	{"IS"},
+	{"LIKE"},
+	{"ILIKE"},
+	{"BETWEEN"},
+	{"LIMIT"},
+	{"OFFSET"},
+}
 
-	last := tokens[len(tokens)-1]
-	if operators[last] {
+func expectingTable(tail []sqlToken) bool {
+	if len(tail) == 0 {
 		return true
 	}
+	return tail[len(tail)-1].text == ","
+}
 
-	if len(tokens) >= 2 {
-		twoWord := tokens[len(tokens)-2] + " " + last
-		if twoWord == "IS NOT" || twoWord == "NOT IN" || twoWord == "NOT LIKE" || twoWord == "NOT ILIKE" {
-			return true
+// predicateContext walks the tokens after WHERE/AND/ON to decide whether the
+// next token is a column, an operator or a value.
+func predicateContext(tail []sqlToken) CompletionKind {
+	if len(tail) == 0 {
+		return CompletionColumn
+	}
+	if isOperatorToken(tail[len(tail)-1]) {
+		return CompletionValue
+	}
+	for _, token := range tail {
+		if isOperatorToken(token) {
+			return CompletionKeyword
 		}
 	}
+	return CompletionOperator
+}
 
+func isOperatorToken(token sqlToken) bool {
+	switch strings.ToUpper(token.text) {
+	case "=", "!=", "<>", "<", "<=", ">", ">=", "LIKE", "ILIKE", "IN", "IS", "BETWEEN", "NOT":
+		return true
+	}
 	return false
 }
 
-func isColumnContext(upperTrimmed string, allItems []CompletionItem) bool {
-	tokens := strings.Fields(upperTrimmed)
-	if len(tokens) < 2 {
-		return false
-	}
-
-	last := tokens[len(tokens)-1]
-
-	if isOperatorContext(upperTrimmed) {
-		return false
-	}
-
-	if sqlKeywordSet[last] {
-		return false
-	}
-
-	for _, item := range allItems {
-		if item.Kind == CompletionColumn && strings.EqualFold(item.Name, last) {
-			return true
-		}
-	}
-
-	return false
+func isSQLKeyword(word string) bool {
+	return sqlKeywords[strings.ToUpper(word)]
 }
 
-func hasOperatorBefore(upperTrimmed string) bool {
-	tokens := strings.Fields(upperTrimmed)
-	operators := map[string]bool{
-		"=": true, "!=": true, "<>": true, "<": true, "<=": true,
-		">": true, ">=": true, "LIKE": true, "ILIKE": true,
-		"IN": true, "IS": true, "BETWEEN": true,
+// isWordToken reports whether a token looks like an identifier, keyword,
+// function or literal word that can sit under the cursor.
+func isWordToken(token sqlToken) bool {
+	if token.typ == tokenOperator || token.typ == tokenString {
+		return false
 	}
-	for i := len(tokens) - 2; i >= 0; i-- {
-		if operators[tokens[i]] {
-			return true
+	switch token.text {
+	case "", "(", ")", ",", ";", ".":
+		return false
+	}
+	return true
+}
+
+func significantTokens(all []sqlToken) []sqlToken {
+	tokens := make([]sqlToken, 0, len(all))
+	for _, token := range all {
+		if token.typ == tokenComment || strings.TrimSpace(token.text) == "" {
+			continue
 		}
-		if i > 0 {
-			twoWord := tokens[i-1] + " " + tokens[i]
-			if twoWord == "IS NOT" || twoWord == "NOT IN" || twoWord == "NOT LIKE" || twoWord == "NOT ILIKE" {
+		tokens = append(tokens, token)
+	}
+	return tokens
+}
+
+func insideLiteralOrComment(tokens []sqlToken, col int) bool {
+	for _, token := range tokens {
+		if token.start >= col {
+			break
+		}
+		switch token.typ {
+		case tokenString:
+			if col < token.end {
+				return true
+			}
+			if col == token.end && !strings.HasSuffix(token.text, "'") {
+				return true
+			}
+		case tokenComment:
+			// A line comment always runs to the end of the line; a block
+			// comment suppresses while the cursor sits before its close.
+			if strings.HasPrefix(token.text, "--") {
+				return true
+			}
+			if col < token.end || !strings.HasSuffix(token.text, "*/") {
 				return true
 			}
 		}
@@ -666,86 +802,13 @@ func hasOperatorBefore(upperTrimmed string) bool {
 	return false
 }
 
-func extractLastSQLKeyword(s string) string {
-	s = strings.TrimRight(s, " \t\n\r")
-	parts := strings.Fields(s)
-	if len(parts) == 0 {
-		return ""
-	}
-
-	last := parts[len(parts)-1]
-	if len(parts) >= 2 {
-		twoWord := parts[len(parts)-2] + " " + last
-		switch twoWord {
-		case "ORDER BY", "GROUP BY", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN",
-			"FULL JOIN", "LEFT OUTER", "RIGHT OUTER", "FULL OUTER",
-			"CROSS JOIN", "NOT IN", "CREATE TABLE", "DROP TABLE",
-			"ALTER TABLE", "TRUNCATE TABLE":
-			return twoWord
+func lastIndexText(tokens []sqlToken, text string) int {
+	for i := len(tokens) - 1; i >= 0; i-- {
+		if tokens[i].text == text {
+			return i
 		}
 	}
-	if len(parts) >= 3 {
-		threeWord := parts[len(parts)-3] + " " + parts[len(parts)-2] + " " + last
-		switch threeWord {
-		case "LEFT OUTER JOIN", "RIGHT OUTER JOIN", "FULL OUTER JOIN":
-			return threeWord
-		}
-	}
-
-	if sqlKeywordSet[last] || isSQLKeywordPrefix(last) {
-		return last
-	}
-
-	for i := len(parts) - 2; i >= 0; i-- {
-		if sqlKeywordSet[parts[i]] {
-			return parts[i]
-		}
-	}
-
-	return last
-}
-
-var sqlKeywordSet = map[string]bool{
-	"SELECT": true, "FROM": true, "WHERE": true, "AND": true, "OR": true,
-	"INSERT": true, "INTO": true, "VALUES": true, "UPDATE": true, "SET": true,
-	"DELETE": true, "CREATE": true, "TABLE": true, "ALTER": true, "DROP": true,
-	"INDEX": true, "VIEW": true, "JOIN": true, "LEFT": true, "RIGHT": true,
-	"INNER": true, "OUTER": true, "ON": true, "AS": true, "ORDER": true,
-	"BY": true, "GROUP": true, "HAVING": true, "LIMIT": true, "OFFSET": true,
-	"DISTINCT": true, "UNION": true, "ALL": true, "EXCEPT": true, "INTERSECT": true,
-	"IN": true, "NOT": true, "NULL": true, "IS": true, "LIKE": true,
-	"BETWEEN": true, "EXISTS": true, "ANY": true, "SOME": true,
-	"CASE": true, "WHEN": true, "THEN": true, "ELSE": true, "END": true,
-	"ASC": true, "DESC": true, "TRUE": true, "FALSE": true,
-	"RETURNING": true, "WITH": true, "RECURSIVE": true,
-	"GRANT": true, "REVOKE": true, "COMMIT": true, "ROLLBACK": true,
-	"BEGIN": true, "TRANSACTION": true, "SAVEPOINT": true,
-	"PRIMARY": true, "KEY": true, "FOREIGN": true, "REFERENCES": true,
-	"UNIQUE": true, "CHECK": true, "DEFAULT": true, "CONSTRAINT": true,
-	"IF": true, "REPLACE": true, "TRUNCATE": true,
-	"ANALYZE": true, "VACUUM": true, "EXPLAIN": true,
-	"FULL": true, "CROSS": true, "NATURAL": true,
-	"PROCEDURE": true, "FUNCTION": true, "TRIGGER": true,
-}
-
-func isSQLKeywordPrefix(word string) bool {
-	if word == "" {
-		return false
-	}
-	upper := strings.ToUpper(word)
-	if sqlKeywordSet[upper] {
-		return true
-	}
-	for kw := range sqlKeywordSet {
-		if strings.HasPrefix(kw, upper) {
-			return true
-		}
-	}
-	return false
-}
-
-func isFullSQLKeyword(word string) bool {
-	return sqlKeywordSet[strings.ToUpper(word)]
+	return -1
 }
 
 func autocompleteDebugLog(format string, args ...interface{}) {
@@ -755,44 +818,6 @@ func autocompleteDebugLog(format string, args ...interface{}) {
 	}
 	defer f.Close()
 	fmt.Fprintf(f, "Autocomplete: "+format+"\n", args...)
-}
-
-func extractLastWord(s string) string {
-	s = strings.TrimRight(s, " \t\n\r")
-	if len(s) == 0 {
-		return ""
-	}
-	i := len(s) - 1
-	for i >= 0 && s[i] != ' ' && s[i] != '\t' && s[i] != '\n' && s[i] != '\r' {
-		i--
-	}
-	return s[i+1:]
-}
-
-func extractIdentifierBefore(s string, pos int) string {
-	if pos == 0 {
-		return ""
-	}
-	end := pos
-	for end > 0 {
-		ch := s[end-1]
-		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' {
-			end--
-		} else if ch == '.' && end-1 > 0 {
-			prevCh := s[end-2]
-			if (prevCh >= 'a' && prevCh <= 'z') || (prevCh >= 'A' && prevCh <= 'Z') || (prevCh >= '0' && prevCh <= '9') || prevCh == '_' {
-				end--
-			} else {
-				break
-			}
-		} else {
-			break
-		}
-	}
-	if end == pos {
-		return ""
-	}
-	return s[end:pos]
 }
 
 func (a *AutocompleteState) Render(styles *theme.Styles, width int) string {

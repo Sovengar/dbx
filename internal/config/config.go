@@ -31,6 +31,7 @@ type Config struct {
 	AI           AIConfig           `mapstructure:"ai"`
 	Session      SessionConfig      `mapstructure:"session"`
 	UI           UIConfig           `mapstructure:"ui"`
+	Editor       EditorConfig       `mapstructure:"editor"`
 }
 
 type ThemeConfig struct {
@@ -73,6 +74,11 @@ type UIConfig struct {
 	PageSize         int    `mapstructure:"page_size"`
 	YankMaxRows      int    `mapstructure:"yank_max_rows"`
 	QueryHistoryPath string `mapstructure:"query_history_path"`
+}
+
+type EditorConfig struct {
+	Autocomplete        bool `mapstructure:"autocomplete"`
+	AutocompleteTrigger int  `mapstructure:"autocomplete_trigger"`
 }
 
 func Load() (*Config, error) {
@@ -122,4 +128,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("ui.page_size", 100)
 	v.SetDefault("ui.yank_max_rows", 10)
 	v.SetDefault("ui.query_history_path", filepath.Join(StateDir(), "query_history.json"))
+
+	v.SetDefault("editor.autocomplete", true)
+	v.SetDefault("editor.autocomplete_trigger", 1)
 }
