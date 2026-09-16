@@ -82,4 +82,3 @@ func TestQueryExecuted_NoAutoCommitNoToast(t *testing.T) {
 		t.Fatalf("unexpected 'Transaction committed' toast: %q", lastToastText(t, m))
 	}
 }
-

@@ -242,4 +242,3 @@ func TestExecuteQuery_BatchDMLSharesOneTransaction(t *testing.T) {
 		t.Fatal("transaction still pending after rollback")
 	}
 }
-

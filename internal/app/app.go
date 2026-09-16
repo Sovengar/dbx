@@ -1565,9 +1565,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if key == m.keybinds["global.quit"] {
-				if m.conn != nil {
-					m.conn.Close(context.Background())
-				}
+				m.rollbackOnExit()
 				return m, tea.Quit
 			}
 
@@ -1697,9 +1695,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 	switch action {
 	case "global.quit":
-		if m.conn != nil {
-			m.conn.Close(context.Background())
-		}
+		m.rollbackOnExit()
 		return m, tea.Quit
 	case "global.cycle_focus":
 		m.router.CycleFocus()
@@ -1818,6 +1814,19 @@ func (m Model) handleRollback() (tea.Model, tea.Cmd) {
 	m.toast.ShowSuccess("Transaction rolled back")
 	m.syncTxStatus()
 	return m, nil
+}
+
+// rollbackOnExit discards a pending transaction before the connection is
+// closed, so quitting never leaves changes half-applied.
+func (m Model) rollbackOnExit() {
+	if m.txRunner != nil && m.txRunner.pending() {
+		if _, err := m.txRunner.rollback(context.Background()); err != nil {
+			appDebugLog("Exit: rollback failed: %v", err)
+		}
+	}
+	if m.conn != nil {
+		m.conn.Close(context.Background())
+	}
 }
 
 // syncTxStatus mirrors the pending transaction state into the statusbar.
