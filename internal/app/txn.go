@@ -62,7 +62,14 @@ func newStatementRunner(conn *pgx.Conn) *statementRunner {
 func (r *statementRunner) pending() bool { return r.tx != nil }
 
 // execute runs every statement of sql in order and returns the last result.
+//
+// A new execution closes the transaction opened by the previous one: the
+// user's rollback window is the statement (or batch) currently being run.
 func (r *statementRunner) execute(ctx context.Context, sql string) (*postgres.QueryResult, error) {
+	if err := r.commitPending(ctx); err != nil {
+		return nil, err
+	}
+
 	var last *postgres.QueryResult
 	for _, stmt := range splitSQL(sql) {
 		stmt = strings.TrimSpace(stmt)
