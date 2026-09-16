@@ -246,11 +246,19 @@ func (e *Explorer) IsFiltering() bool {
 	return e.filtering
 }
 
+// HandleClick selects the tree node under a click at pane-relative coordinates
+// (0,0 = top-left of the explorer's bordered box).
 func (e *Explorer) HandleClick(y int) bool {
 	if e.tree == nil || len(e.tree.filtered) == 0 {
 		return false
 	}
-	filteredIndex := e.tree.offset + y
+
+	listY := y - 1 // skip the top border
+	if e.filtering || e.tree.filter != "" {
+		listY-- // skip the filter line
+	}
+
+	filteredIndex := e.tree.offset + listY
 	if filteredIndex < 0 || filteredIndex >= len(e.tree.filtered) {
 		return false
 	}

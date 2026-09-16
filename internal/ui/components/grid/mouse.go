@@ -10,57 +10,86 @@ func NewMouseHandler(grid *Grid) *MouseHandler {
 	return &MouseHandler{grid: grid}
 }
 
-func (mh *MouseHandler) HandleClick(x, y int) bool {
-	if !mh.grid.focused {
-		return false
+// HandleClick handles a click at coordinates relative to the grid's bordered
+// box (0,0 = its top-left cell). It returns any command produced (a sort
+// request when the header was clicked) and whether a data cell was hit.
+func (mh *MouseHandler) HandleClick(x, y int) (tea.Cmd, bool) {
+	if mh.grid.data == nil {
+		return nil, false
 	}
 
-	headerHeight := 2
-	if y < headerHeight {
-		return false
+	headerY := mh.headerRowY()
+	if y == headerY {
+		if vj := mh.visibleColumnAtX(x); vj >= 0 {
+			return mh.toggleSort(vj), false
+		}
+		return nil, false
+	}
+	if y < headerY {
+		return nil, false
 	}
 
-	dataY := y - headerHeight
-	ch := mh.grid.contentHeight()
-	totalRows := mh.grid.visibleRows()
-	if dataY >= ch && dataY >= totalRows {
-		return false
+	dataY := y - headerY - 1
+	rows := mh.grid.visibleRows()
+	if dataY < 0 || dataY >= rows {
+		return nil, false
 	}
 
-	mh.grid.scrollRow = 0
 	mh.grid.cursorRow = dataY
-	if mh.grid.cursorRow >= totalRows {
-		mh.grid.cursorRow = totalRows - 1
+	if vj := mh.visibleColumnAtX(x); vj >= 0 {
+		mh.grid.cursorCol = mh.grid.scrollCol + vj
 	}
-	return true
+	mh.grid.syncScroll()
+	return nil, true
 }
 
-func (mh *MouseHandler) HandleHeaderClick(x int) tea.Cmd {
-	if !mh.grid.focused {
-		return nil
+// headerRowY is the box-relative line of the column header: the top border plus
+// any prefix/filter lines rendered above it.
+func (mh *MouseHandler) headerRowY() int {
+	return 1 + mh.grid.recordsHeaderOffset()
+}
+
+// visibleColumnAtX maps a box-relative x to the index (within the visible
+// columns) of the column under it, or -1 if it falls on the border or past the
+// last visible column.
+func (mh *MouseHandler) visibleColumnAtX(x int) int {
+	contentX := x - 1 // skip the left border
+	if contentX < 0 {
+		return -1
+	}
+	available := mh.grid.width - 2
+	if available <= 0 {
+		return -1
 	}
 
-	colX := 0
-	for i, w := range mh.grid.widths {
-		if x >= colX && x < colX+w {
-			mh.grid.header.ToggleSort(i)
-
-			sortCol := mh.grid.header.SortColumn()
-			sortDir := mh.grid.header.SortDirection()
-
-			return func() tea.Msg {
-				return GridSortApplyMsg{
-					Schema:   mh.grid.schema,
-					Table:    mh.grid.tableName,
-					OrderBy:  sortCol,
-					OrderDir: sortDir,
-					Where:    mh.grid.whereClause,
-				}
-			}
+	acc := 0
+	for vj, i := 0, mh.grid.scrollCol; i < len(mh.grid.columns) && i < len(mh.grid.widths); vj, i = vj+1, i+1 {
+		w := mh.grid.widths[i]
+		if acc+w > available {
+			break
 		}
-		colX += w
+		if contentX < acc+w {
+			return vj
+		}
+		acc += w
 	}
-	return nil
+	return -1
+}
+
+func (mh *MouseHandler) toggleSort(visibleCol int) tea.Cmd {
+	mh.grid.header.ToggleSort(visibleCol)
+	sortCol := mh.grid.header.SortColumn()
+	sortDir := mh.grid.header.SortDirection()
+
+	return func() tea.Msg {
+		return GridSortApplyMsg{
+			Schema:   mh.grid.schema,
+			Table:    mh.grid.tableName,
+			OrderBy:  sortCol,
+			OrderDir: sortDir,
+			Where:    mh.grid.whereClause,
+		}
+	}
 }
 
 func (mh *MouseHandler) HandleScrollUp() bool {

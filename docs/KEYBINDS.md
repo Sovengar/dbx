@@ -233,6 +233,40 @@ SQL editor:
 | Right Click | Context menu |
 | Scroll | Scroll editor |
 
+## Query Browser
+
+Persistent query history and favorites, isolated per project. Opened with `Q`.
+
+| Action | Default Keys | Description |
+|--------|-------------|-------------|
+| `global.query_browser` | `Q` | Open query browser (history + favorites) |
+
+#### Inside the Browser
+
+| Key | Action |
+|-----|--------|
+| `j`/`k` | Navigate down/up |
+| `g`/`G` | First/last entry |
+| `Enter` | Load selected query into editor |
+| `f` | Toggle favorite on selected entry |
+| `d` | Delete selected entry |
+| `/` | Start filter mode (fuzzy search) |
+| `Tab` | Switch between History and Favorites tabs |
+| `Esc` | Close browser |
+
+#### Filter Mode
+
+| Key | Action |
+|-----|--------|
+| Any char | Append to filter text |
+| `Backspace` | Delete last character |
+| `Enter` | Confirm filter, keep results |
+| `Esc` | Cancel filter, clear and close filter |
+
+Every executed query is recorded automatically. Duplicates are deduplicated (moved to top). Capped at 500 entries per project.
+
+Storage: `~/.local/state/dbx/projects/{project_name}/query_history.json`. A one-time migration runs automatically from the legacy global `query_history.json`.
+
 ## Statusbar
 
 Context-sensitive action bar at bottom:

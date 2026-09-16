@@ -85,6 +85,26 @@ Full-screen table detail view with tabbed panels. Open with `Tab` from explorer 
 | ERE Diagram (`6`)        | Entity-Relationship diagram (placeholder)            |
 | Back (`Tab`/`Esc`)       | Return to explorer                                   |
 
+### Query Browser (`Q`)
+
+Persistent query history and favorites, isolated per project.
+
+| Action | Behavior |
+|--------|----------|
+| Open (`Q`) | Opens the query browser overlay |
+| Navigate (`j`/`k`) | Move up/down through the list |
+| Jump (`g`/`G`) | First/last entry |
+| Load (`Enter`) | Load selected query into the editor |
+| Favorite (`f`) | Toggle favorite on the selected entry |
+| Delete (`d`) | Delete the selected entry |
+| Filter (`/`) | Fuzzy search across all entries |
+| Switch tab (`Tab`) | Toggle between History and Favorites |
+| Close (`Esc`) | Close the browser |
+
+Every executed query is automatically saved. Duplicates are deduplicated (moved to top). Capped at 500 entries per project.
+
+Storage: `~/.local/state/dbx/projects/{project_name}/query_history.json`. Queries are fully isolated between projects — switching project shows only that project's history.
+
 ### SQL Editor
 
 | Action                      | Behavior                                                         |

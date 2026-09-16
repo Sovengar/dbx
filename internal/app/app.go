@@ -45,6 +45,14 @@ const (
 	StateError
 )
 
+// Mouse zones registered on each rendered pane. Only the panes that are
+// currently visible get marked, so hit-testing naturally follows the active
+// layout/focus instead of assuming a fixed split.
+const (
+	zonePaneExplorer = "pane-explorer"
+	zonePaneGrid     = "pane-grid"
+)
+
 type Model struct {
 	state           AppState
 	config          *config.Config
@@ -1449,51 +1457,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseClickMsg:
-		if m.state == StateMain {
-			mm := msg.Mouse()
-			paneWidth := m.width / 3
-			now := time.Now()
-
-			isDoubleClick := !m.lastClickTime.IsZero() &&
-				now.Sub(m.lastClickTime) < 300*time.Millisecond &&
-				abs(mm.X-m.lastClickX) <= 2 &&
-				abs(mm.Y-m.lastClickY) <= 2
-
-			m.lastClickTime = now
-			m.lastClickX = mm.X
-			m.lastClickY = mm.Y
-
-			if mm.X < paneWidth && m.explorer != nil {
-				localY := mm.Y - 3
-				if m.explorer.IsFiltering() {
-					localY--
-				}
-				if isDoubleClick {
-					m.explorer.HandleClick(localY)
-					return m, m.explorer.ToggleExpand()
-				}
-				m.explorer.HandleClick(localY)
-			} else if mm.X >= paneWidth && m.grid != nil {
-				m.router.FocusPane(FocusGrid)
-				localX := mm.X - paneWidth
-				localY := mm.Y - 3
-				if isDoubleClick {
-					m.grid.HandleClick(localX, localY)
-					if cmd, _ := m.grid.Update(tea.KeyPressMsg{Code: 13}); cmd != nil {
-						return m, cmd
-					}
-					return m, nil
-				}
-				m.grid.HandleClick(localX, localY)
-				cmd := m.syncGridSidebarPreviewForCursor()
-				if cmd != nil {
-					return m, cmd
-				}
-				if cmd := m.grid.HandleHeaderClick(localX); cmd != nil {
-					return m, cmd
-				}
-			}
+		if m.state != StateMain {
+			return m, nil
 		}
+		// Ignore clicks while a modal-like overlay is on top; these used to
+		// swallow keys only, so a click behind them could act on a hidden pane.
+		if m.editorOpen || m.helpModal.IsVisible() || m.palette.IsVisible() ||
+			(m.queryBrowserOpen && m.queryBrowser != nil) || m.grid.IsExporting() {
+			return m, nil
+		}
+
+		mm := msg.Mouse()
+		now := time.Now()
+		isDoubleClick := !m.lastClickTime.IsZero() &&
+			now.Sub(m.lastClickTime) < 300*time.Millisecond &&
+			abs(mm.X-m.lastClickX) <= 2 &&
+			abs(mm.Y-m.lastClickY) <= 2
+
+		m.lastClickTime = now
+		m.lastClickX = mm.X
+		m.lastClickY = mm.Y
+
+		// Route by the pane that is actually rendered. Only the visible pane
+		// gets a zone, so this respects the current focus/layout without
+		// assuming a fixed explorer/grid split.
+		if ui.InBounds(zonePaneGrid, msg) && m.grid != nil {
+			localX, localY := ui.Pos(zonePaneGrid, msg)
+			cmd, hitCell := m.grid.HandleClick(localX, localY)
+			if isDoubleClick && hitCell {
+				enterCmd, _ := m.grid.Update(tea.KeyPressMsg{Code: 13})
+				return m, tea.Batch(cmd, enterCmd)
+			}
+			var sidebarCmd tea.Cmd
+			if hitCell {
+				sidebarCmd = m.syncGridSidebarPreviewForCursor()
+			}
+			return m, tea.Batch(cmd, sidebarCmd)
+		}
+
+		if ui.InBounds(zonePaneExplorer, msg) && m.explorer != nil {
+			_, localY := ui.Pos(zonePaneExplorer, msg)
+			m.explorer.HandleClick(localY)
+			if isDoubleClick {
+				return m, m.explorer.ToggleExpand()
+			}
+			return m, nil
+		}
+
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -2226,18 +2236,21 @@ func (m Model) renderMainView() string {
 	} else if m.router.Focus() == FocusExplorerPreview && m.explorerPreview != nil {
 		panes = append(panes, m.renderExplorerPreview(m.width, contentHeight))
 	} else if m.editorOpen || m.router.Focus() == FocusExplorer {
-		panes = append(panes, m.renderExplorer(m.width, contentHeight))
+		panes = append(panes, ui.Mark(zonePaneExplorer, m.renderExplorer(m.width, contentHeight)))
 	} else {
 		if showPreview {
 			gridW := m.width * 3 / 4
-			panes = append(panes, m.renderGrid(gridW, contentHeight))
+			panes = append(panes, ui.Mark(zonePaneGrid, m.renderGrid(gridW, contentHeight)))
 			panes = append(panes, m.renderGridSidebarPreview(m.width/4, contentHeight))
 		} else {
-			panes = append(panes, m.renderGrid(m.width, contentHeight))
+			panes = append(panes, ui.Mark(zonePaneGrid, m.renderGrid(m.width, contentHeight)))
 		}
 	}
 
-	content := topLine + lipgloss.JoinHorizontal(lipgloss.Top, panes...)
+	// Register pane bounds from the freshly rendered output and strip the zone
+	// markers before layering overlays on top. Previews/sidebar are intentionally
+	// left unmarked so clicks on them are ignored.
+	content := ui.Zones.Scan(topLine + lipgloss.JoinHorizontal(lipgloss.Top, panes...))
 
 	if m.editorOpen {
 		modalW := m.width * 6 / 10

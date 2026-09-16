@@ -483,12 +483,8 @@ func (g *Grid) GetResult() *postgres.QueryResult {
 	return g.data
 }
 
-func (g *Grid) HandleClick(x, y int) bool {
+func (g *Grid) HandleClick(x, y int) (tea.Cmd, bool) {
 	return g.mouse.HandleClick(x, y)
-}
-
-func (g *Grid) HandleHeaderClick(x int) tea.Cmd {
-	return g.mouse.HandleHeaderClick(x)
 }
 
 func (g *Grid) HandleScrollUp() bool {
@@ -1934,6 +1930,28 @@ func (g *Grid) contentHeight() int {
 		h = 1
 	}
 	return h
+}
+
+// recordsHeaderOffset returns how many content lines are rendered above the
+// column header inside the grid box (the pending-changes prefix and any filter
+// UI). It mirrors the branching in renderRecordsView so click hit-testing can
+// find the header and data rows.
+func (g *Grid) recordsHeaderOffset() int {
+	n := 0
+	if g.commitPending || g.refreshPending || g.discardPending || g.HasDrafts() {
+		n++
+	}
+	if g.whereFilter != nil && g.whereFilter.Visible() {
+		n++
+		if popup := g.whereFilter.RenderPopup(); popup != "" {
+			n += strings.Count(popup, "\n") + 1
+		}
+	} else if g.whereClause != "" {
+		n++
+	} else if g.filtering {
+		n++
+	}
+	return n
 }
 
 func (g *Grid) clampCursor() {
