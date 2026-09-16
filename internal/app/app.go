@@ -2326,12 +2326,12 @@ func (m Model) renderEditor(w, h int) string {
 	m.editor.SetHeight(h - 4 - popupLines)
 	m.editor.Focus()
 
-	title := m.styles.Header.Render("SQL Editor")
 	content := m.editor.View()
 
-	return m.styles.BorderActive.
-		Width(w - 2).
-		Render(title + "\n" + content)
+	border := lipgloss.RoundedBorder()
+	borderFg := m.styles.BorderActive.GetBorderTopForeground()
+
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " SQL Editor ", content, w, h)
 }
 
 func overlay(base, box string, width, height int) string {

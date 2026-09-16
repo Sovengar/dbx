@@ -74,7 +74,7 @@ func (s *StatusBar) View() string {
 		borderFg = s.styles.Border.GetBorderTopForeground()
 	}
 
-	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Status ", content, s.width, 0)
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Keybinds ", content, s.width, 0)
 }
 
 func (s *StatusBar) renderActions() string {

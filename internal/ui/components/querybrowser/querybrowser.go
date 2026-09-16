@@ -318,11 +318,10 @@ func (b *QueryBrowser) View() string {
 
 	content := strings.Join(lines, "\n")
 
-	title := b.styles.Header.Render("Query Browser")
-	border := lipgloss.ThickBorder()
+	border := lipgloss.RoundedBorder()
 	borderFg := b.styles.BorderActive.GetBorderTopForeground()
 
-	modal := bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, title, content, modalW, modalH)
+	modal := bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Query Browser ", content, modalW, modalH)
 
 	qbDebugLog("View: modal generated, returning raw (no lipgloss.Place)")
 
@@ -354,11 +353,21 @@ func (b *QueryBrowser) renderEntry(idx int, e store.QueryEntry, maxW int) string
 		ts = fmt.Sprintf("%dd ago", int(age.Hours()/24))
 	}
 
-	// SQL preview (first line, truncated)
+	// SQL preview (first line, use available space)
 	sql := strings.ReplaceAll(e.SQL, "\n", " ")
 	sql = strings.TrimSpace(sql)
-	if len(sql) > 50 {
-		sql = sql[:50] + "…"
+
+	// Fixed parts: timestamp (10) + space (1) + favorite icon (2) = 13 chars
+	fixedW := 13
+	sqlMaxW := maxW - fixedW
+	if sqlMaxW < 10 {
+		sqlMaxW = 10
+	}
+
+	// Truncate SQL to fit available space
+	runes := []rune(sql)
+	if len(runes) > sqlMaxW {
+		sql = string(runes[:sqlMaxW-1]) + "…"
 	}
 
 	// Build line
