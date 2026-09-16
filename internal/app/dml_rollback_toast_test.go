@@ -8,9 +8,9 @@ import (
 	"github.com/buble/dbx/internal/ui/components/grid"
 )
 
-// newHandlerTestModel adds the components the queryExecutedMsg handler
+// newModelWithGrid adds the components the queryExecutedMsg handler
 // touches, so messages produced by executeQuery can be dispatched end to end.
-func newHandlerTestModel(t *testing.T) Model {
+func newModelWithGrid(t *testing.T) Model {
 	t.Helper()
 	m := newRollbackTestModel()
 	m.grid = grid.New(m.styles, 100, m.keybinds)
@@ -39,7 +39,7 @@ func lastToastContains(m Model, want string) bool {
 func TestExecuteQuery_AutoCommitIsReported(t *testing.T) {
 	f := newFakeRunner()
 	m := newRollbackTestModel()
-	m.txRunner = f.runner
+	m.runner = f.runner
 
 	first := runExecuteQuery(t, m, "UPDATE users SET name='a' WHERE id=1")
 	if first.committedTx {
@@ -54,8 +54,8 @@ func TestExecuteQuery_AutoCommitIsReported(t *testing.T) {
 
 func TestQueryExecuted_AutoCommitShowsToast(t *testing.T) {
 	f := newFakeRunner()
-	m := newHandlerTestModel(t)
-	m.txRunner = f.runner
+	m := newModelWithGrid(t)
+	m.runner = f.runner
 
 	runExecuteQuery(t, m, "UPDATE users SET name='a' WHERE id=1")
 	msg := runExecuteQuery(t, m, "UPDATE users SET name='b' WHERE id=2")
@@ -70,8 +70,8 @@ func TestQueryExecuted_AutoCommitShowsToast(t *testing.T) {
 
 func TestQueryExecuted_NoAutoCommitNoToast(t *testing.T) {
 	f := newFakeRunner()
-	m := newHandlerTestModel(t)
-	m.txRunner = f.runner
+	m := newModelWithGrid(t)
+	m.runner = f.runner
 
 	msg := runExecuteQuery(t, m, "SELECT * FROM users")
 

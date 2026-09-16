@@ -136,7 +136,7 @@ func TestExecuteQuery_DMLOpensTransaction(t *testing.T) {
 		t.Run(sql, func(t *testing.T) {
 			f := newFakeRunner()
 			m := newRollbackTestModel()
-			m.txRunner = f.runner
+			m.runner = f.runner
 
 			msg := runExecuteQuery(t, m, sql)
 			if msg.err != nil {
@@ -165,7 +165,7 @@ func TestExecuteQuery_DMLOpensTransaction(t *testing.T) {
 func TestExecuteQuery_SelectDoesNotOpenTransaction(t *testing.T) {
 	f := newFakeRunner()
 	m := newRollbackTestModel()
-	m.txRunner = f.runner
+	m.runner = f.runner
 
 	msg := runExecuteQuery(t, m, "SELECT * FROM users LIMIT 10")
 	if msg.err != nil {
@@ -186,7 +186,7 @@ func TestExecuteQuery_SelectDoesNotOpenTransaction(t *testing.T) {
 func TestExecuteQuery_DDLDoesNotOpenTransaction(t *testing.T) {
 	f := newFakeRunner()
 	m := newRollbackTestModel()
-	m.txRunner = f.runner
+	m.runner = f.runner
 
 	msg := runExecuteQuery(t, m, "CREATE TABLE test_no_tx (id INT)")
 	if msg.err != nil {
@@ -207,7 +207,7 @@ func TestExecuteQuery_DDLDoesNotOpenTransaction(t *testing.T) {
 func TestExecuteQuery_BatchDMLSharesOneTransaction(t *testing.T) {
 	f := newFakeRunner()
 	m := newRollbackTestModel()
-	m.txRunner = f.runner
+	m.runner = f.runner
 
 	msg := runExecuteQuery(t, m, "UPDATE users SET name='a' WHERE id=1; UPDATE users SET name='b' WHERE id=2")
 	if msg.err != nil {

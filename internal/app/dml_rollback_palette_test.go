@@ -8,7 +8,7 @@ import (
 func TestPalette_RollbackCommandRollsBackPendingTransaction(t *testing.T) {
 	f := newFakeRunner()
 	m := newRollbackTestModel()
-	m.txRunner = f.runner
+	m.runner = f.runner
 
 	runExecuteQuery(t, m, "UPDATE users SET name='test' WHERE id=1")
 

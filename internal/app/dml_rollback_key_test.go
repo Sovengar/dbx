@@ -20,7 +20,7 @@ func pressRollback(t *testing.T, m Model) Model {
 func TestRollbackKey_RollsBackPendingTransaction(t *testing.T) {
 	f := newFakeRunner()
 	m := newRollbackTestModel()
-	m.txRunner = f.runner
+	m.runner = f.runner
 
 	runExecuteQuery(t, m, "UPDATE users SET name='test' WHERE id=1")
 
@@ -41,7 +41,7 @@ func TestRollbackKey_RollsBackPendingTransaction(t *testing.T) {
 func TestRollbackKey_NoPendingTransactionShowsInfoToast(t *testing.T) {
 	f := newFakeRunner()
 	m := newRollbackTestModel()
-	m.txRunner = f.runner
+	m.runner = f.runner
 
 	m = pressRollback(t, m)
 
@@ -57,7 +57,7 @@ func TestRollbackKey_NoPendingTransactionShowsInfoToast(t *testing.T) {
 func TestRollbackKey_RollsBackWholeBatch(t *testing.T) {
 	f := newFakeRunner()
 	m := newRollbackTestModel()
-	m.txRunner = f.runner
+	m.runner = f.runner
 
 	runExecuteQuery(t, m, "UPDATE users SET name='a' WHERE id=1; UPDATE users SET name='b' WHERE id=2")
 

@@ -88,7 +88,7 @@ type Model struct {
 	queryStore                 *store.QueryStore
 	queryBrowser               *querybrowser.QueryBrowser
 	queryBrowserOpen           bool
-	txRunner                   *statementRunner
+	runner                   *statementRunner
 }
 
 var spinnerChars = [9]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"}
@@ -855,11 +855,11 @@ func isASCIILetter(b byte) bool {
 
 func (m Model) executeQuery(sql string) tea.Cmd {
 	return func() tea.Msg {
-		if m.txRunner == nil {
+		if m.runner == nil {
 			return queryExecutedMsg{err: fmt.Errorf("not connected to a database"), sql: sql}
 		}
 
-		result, committed, err := m.txRunner.execute(context.Background(), sql)
+		result, committed, err := m.runner.execute(context.Background(), sql)
 		return queryExecutedMsg{result: result, sql: sql, err: err, committedTx: committed}
 	}
 }
@@ -965,7 +965,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.conn = msg.conn
-		m.txRunner = newStatementRunner(msg.conn)
+		m.runner = newStatementRunner(msg.conn)
 		m.syncTxStatus()
 		m.state = StateLoading
 		m.toast.ShowInfo("Connected to database")
@@ -1798,12 +1798,12 @@ func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleRollback() (tea.Model, tea.Cmd) {
-	if m.txRunner == nil || !m.txRunner.pending() {
+	if m.runner == nil || !m.runner.pending() {
 		m.toast.ShowInfo("No pending transaction")
 		return m, nil
 	}
 
-	if _, err := m.txRunner.rollback(context.Background()); err != nil {
+	if _, err := m.runner.rollback(context.Background()); err != nil {
 		appDebugLog("Rollback: error=%v", err)
 		m.toast.ShowError(fmt.Sprintf("Rollback failed: %v", err))
 		m.syncTxStatus()
@@ -1819,8 +1819,8 @@ func (m Model) handleRollback() (tea.Model, tea.Cmd) {
 // rollbackOnExit discards a pending transaction before the connection is
 // closed, so quitting never leaves changes half-applied.
 func (m Model) rollbackOnExit() {
-	if m.txRunner != nil && m.txRunner.pending() {
-		if _, err := m.txRunner.rollback(context.Background()); err != nil {
+	if m.runner != nil && m.runner.pending() {
+		if _, err := m.runner.rollback(context.Background()); err != nil {
 			appDebugLog("Exit: rollback failed: %v", err)
 		}
 	}
@@ -1831,10 +1831,10 @@ func (m Model) rollbackOnExit() {
 
 // syncTxStatus mirrors the pending transaction state into the statusbar.
 func (m *Model) syncTxStatus() {
-	if m.statusbar == nil || m.txRunner == nil {
+	if m.statusbar == nil || m.runner == nil {
 		return
 	}
-	m.statusbar.SetTxPending(m.txRunner.pending())
+	m.statusbar.SetTxPending(m.runner.pending())
 }
 
 func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {

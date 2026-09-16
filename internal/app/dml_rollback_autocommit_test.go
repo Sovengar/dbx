@@ -10,7 +10,7 @@ import (
 func TestExecuteQuery_NewDMLCommitsPreviousTransaction(t *testing.T) {
 	f := newFakeRunner()
 	m := newRollbackTestModel()
-	m.txRunner = f.runner
+	m.runner = f.runner
 
 	runExecuteQuery(t, m, "UPDATE users SET name='test' WHERE id=1")
 	msg := runExecuteQuery(t, m, "UPDATE users SET name='test2' WHERE id=2")
@@ -42,7 +42,7 @@ func TestExecuteQuery_NewDMLCommitsPreviousTransaction(t *testing.T) {
 func TestExecuteQuery_DDLAutoCommitsPreviousTransaction(t *testing.T) {
 	f := newFakeRunner()
 	m := newRollbackTestModel()
-	m.txRunner = f.runner
+	m.runner = f.runner
 
 	runExecuteQuery(t, m, "UPDATE users SET name='test' WHERE id=1")
 	msg := runExecuteQuery(t, m, "CREATE TABLE test_rollback (id SERIAL PRIMARY KEY)")

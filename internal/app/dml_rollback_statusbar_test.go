@@ -8,9 +8,9 @@ import (
 // Scenario: UPDATE opens a transaction that stays open (statusbar indicator).
 func TestPendingTransaction_ShowsInStatusbar(t *testing.T) {
 	f := newFakeRunner()
-	m := newHandlerTestModel(t)
+	m := newModelWithGrid(t)
 	m.statusbar.SetWidth(200)
-	m.txRunner = f.runner
+	m.runner = f.runner
 
 	msg := runExecuteQuery(t, m, "UPDATE users SET name='test' WHERE id=1")
 	updated, _ := m.Update(msg)
@@ -28,9 +28,9 @@ func TestPendingTransaction_ShowsInStatusbar(t *testing.T) {
 // Scenario: U rolls back the pending transaction (statusbar indicator cleared).
 func TestRollbackKey_ClearsStatusbarIndicator(t *testing.T) {
 	f := newFakeRunner()
-	m := newHandlerTestModel(t)
+	m := newModelWithGrid(t)
 	m.statusbar.SetWidth(200)
-	m.txRunner = f.runner
+	m.runner = f.runner
 
 	msg := runExecuteQuery(t, m, "UPDATE users SET name='test' WHERE id=1")
 	updated, _ := m.Update(msg)
@@ -49,9 +49,9 @@ func TestRollbackKey_ClearsStatusbarIndicator(t *testing.T) {
 // Scenario: SELECT does not open a transaction (statusbar stays clean).
 func TestNoPendingTransaction_StatusbarHasNoIndicator(t *testing.T) {
 	f := newFakeRunner()
-	m := newHandlerTestModel(t)
+	m := newModelWithGrid(t)
 	m.statusbar.SetWidth(200)
-	m.txRunner = f.runner
+	m.runner = f.runner
 
 	msg := runExecuteQuery(t, m, "SELECT * FROM users LIMIT 10")
 	updated, _ := m.Update(msg)
