@@ -3,71 +3,14 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
-	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // These tests exercise the transaction lifecycle against a real PostgreSQL
-// server. They are skipped unless DBX_TEST_DSN points at a disposable
-// database, e.g.:
+// server (see dml_rollback_helpers_test.go for the harness). They are skipped
+// unless DBX_TEST_DSN points at a disposable database, e.g.:
 //
 //	DBX_TEST_DSN="postgres://user:pass@localhost:5432/postgres?sslmode=disable" go test ./internal/app/...
-
-func testDSN(t *testing.T) string {
-	t.Helper()
-	dsn := os.Getenv("DBX_TEST_DSN")
-	if dsn == "" {
-		t.Skip("set DBX_TEST_DSN to run the PostgreSQL integration tests")
-	}
-	return dsn
-}
-
-func connectTestDB(t *testing.T, dsn string) *pgx.Conn {
-	t.Helper()
-	conn, err := pgx.Connect(context.Background(), dsn)
-	if err != nil {
-		t.Fatalf("connect to %q: %v", dsn, err)
-	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	return conn
-}
-
-// seedTxTestTable creates a throwaway table with the given rows so the test
-// can observe which changes became visible to other sessions.
-func seedTxTestTable(t *testing.T, conn *pgx.Conn, rows map[int]string) string {
-	t.Helper()
-	ctx := context.Background()
-	table := fmt.Sprintf("dbx_tx_test_%d", time.Now().UnixNano())
-
-	if _, err := conn.Exec(ctx, fmt.Sprintf("CREATE TABLE %s (id int primary key, name text)", table)); err != nil {
-		t.Fatalf("create %s: %v", table, err)
-	}
-	t.Cleanup(func() {
-		_, _ = conn.Exec(context.Background(), "DROP TABLE IF EXISTS "+table)
-	})
-
-	for id, name := range rows {
-		if _, err := conn.Exec(ctx, fmt.Sprintf("INSERT INTO %s (id, name) VALUES ($1, $2)", table), id, name); err != nil {
-			t.Fatalf("seed %s: %v", table, err)
-		}
-	}
-	return table
-}
-
-// readName reads a row as a different session so visibility reflects what is
-// actually committed in the database.
-func readName(t *testing.T, conn *pgx.Conn, table string, id int) string {
-	t.Helper()
-	var name string
-	if err := conn.QueryRow(context.Background(),
-		fmt.Sprintf("SELECT name FROM %s WHERE id = $1", table), id).Scan(&name); err != nil {
-		t.Fatalf("read %s (id=%d): %v", table, id, err)
-	}
-	return name
-}
 
 func TestIntegration_DMLIsNotCommittedUntilRolledBack(t *testing.T) {
 	dsn := testDSN(t)

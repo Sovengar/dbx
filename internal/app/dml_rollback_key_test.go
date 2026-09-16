@@ -2,19 +2,7 @@ package app
 
 import (
 	"testing"
-
-	tea "charm.land/bubbletea/v2"
 )
-
-func pressRollback(t *testing.T, m Model) Model {
-	t.Helper()
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'U'})
-	model, ok := updated.(Model)
-	if !ok {
-		t.Fatalf("Update(U) returned %T, want Model", updated)
-	}
-	return model
-}
 
 // Scenario: U rolls back the pending transaction.
 func TestRollbackKey_RollsBackPendingTransaction(t *testing.T) {
