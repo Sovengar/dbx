@@ -94,13 +94,22 @@ func (h *Header) ClearSort() {
 	h.sortDir = SortNone
 }
 
-func (h *Header) Render() string {
-	if len(h.columns) == 0 {
+// Render renders `count` columns starting at the absolute column index
+// `startCol`. Key icons and the sort indicator are keyed by absolute column
+// index, so a horizontally scrolled grid still shows them on the right column.
+func (h *Header) Render(startCol, count int) string {
+	if len(h.columns) == 0 || count <= 0 {
 		return ""
 	}
 
 	var cells []string
-	for i, col := range h.columns {
+	for j := 0; j < count; j++ {
+		i := startCol + j
+		if i < 0 || i >= len(h.columns) {
+			break
+		}
+		col := h.columns[i]
+
 		width := 20
 		if i < len(h.widths) {
 			width = h.widths[i]

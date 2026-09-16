@@ -306,6 +306,7 @@ func (g *Grid) Data() *postgres.QueryResult {
 
 func (g *Grid) calculateWidths() {
 	if g.width <= 0 || len(g.columns) == 0 {
+		g.header.SetWidths(nil)
 		return
 	}
 
@@ -354,45 +355,64 @@ func (g *Grid) calculateWidths() {
 		}
 	}
 
+	g.header.SetWidths(g.widths)
+
 	g.syncScroll()
 }
 
 func (g *Grid) syncScroll() {
-	available := g.width - 2 // border takes 1 col per side
-	if available <= 0 || len(g.widths) == 0 {
+	if len(g.widths) == 0 {
+		g.scrollCol = 0
 		return
 	}
 
-	// Phase 1: Expand left — bring columns into view from the left side
-	for g.scrollCol > 0 {
-		prevWidth := g.widths[g.scrollCol-1]
-		if available >= prevWidth {
-			g.scrollCol--
-			available += prevWidth
-		} else {
-			break
-		}
+	available := g.width - 2 // border takes 1 col per side
+	if available <= 0 {
+		g.scrollCol = 0
+		return
 	}
 
-	// Phase 2: Ensure cursorCol is visible — scroll right if cursor is beyond visible area
-	// Calculate cumulative width from scrollCol to cursorCol
-	if g.cursorCol >= g.scrollCol {
-		cumWidth := 0
-		for i := g.scrollCol; i <= g.cursorCol && i < len(g.widths); i++ {
-			cumWidth += g.widths[i]
-		}
-		// If cursor column doesn't fit, scroll right until it does
-		for cumWidth > available && g.scrollCol < g.cursorCol {
-			cumWidth -= g.widths[g.scrollCol]
-			g.scrollCol++
-		}
+	// Clamp both indices into range before doing any arithmetic.
+	if g.cursorCol < 0 {
+		g.cursorCol = 0
+	}
+	if g.cursorCol >= len(g.widths) {
+		g.cursorCol = len(g.widths) - 1
+	}
+	if g.scrollCol < 0 {
+		g.scrollCol = 0
+	}
+	if g.scrollCol >= len(g.widths) {
+		g.scrollCol = len(g.widths) - 1
 	}
 
-	// Phase 3: If cursor is left of scroll window, scroll left
+	// If the cursor is left of the window, bring the window to the cursor.
 	if g.cursorCol < g.scrollCol {
 		g.scrollCol = g.cursorCol
 	}
 
+	// used is the width of the span scrollCol..cursorCol. It is tracked
+	// separately from `available` (the fixed viewport capacity) so the cursor
+	// visibility test is never done against an inflated budget.
+	used := 0
+	for i := g.scrollCol; i <= g.cursorCol && i < len(g.widths); i++ {
+		used += g.widths[i]
+	}
+
+	// Shrink from the left until the cursor fits in the viewport. This is what
+	// guarantees the cursor is always part of the visible window.
+	for used > available && g.scrollCol < g.cursorCol {
+		used -= g.widths[g.scrollCol]
+		g.scrollCol++
+	}
+
+	// Expand left while there is slack and the cursor still fits, so widening
+	// the viewport (or scrolling back) refills columns from the left without
+	// ever hiding the cursor.
+	for g.scrollCol > 0 && used+g.widths[g.scrollCol-1] <= available {
+		g.scrollCol--
+		used += g.widths[g.scrollCol]
+	}
 }
 
 func (g *Grid) visibleColumns() ([]string, []int) {
@@ -819,6 +839,7 @@ func (g *Grid) jumpToColumn(colIndex int) {
 	}
 	g.scrollCol = scrollStart
 	g.cursorCol = colIndex
+	g.syncScroll()
 }
 
 func (g *Grid) IsFiltering() bool {
@@ -2031,9 +2052,7 @@ func (g *Grid) renderRecordsView() string {
 
 	visCols, visWidths := g.visibleColumns()
 
-	g.header.SetColumns(visCols)
-	g.header.SetWidths(visWidths)
-	header := g.header.Render()
+	header := g.header.Render(g.scrollCol, len(visCols))
 
 	var rows []string
 	offset := g.pager.Offset()

@@ -77,7 +77,7 @@ func (mh *MouseHandler) visibleColumnAtX(x int) int {
 }
 
 func (mh *MouseHandler) toggleSort(visibleCol int) tea.Cmd {
-	mh.grid.header.ToggleSort(visibleCol)
+	mh.grid.header.ToggleSort(mh.grid.scrollCol + visibleCol)
 	sortCol := mh.grid.header.SortColumn()
 	sortDir := mh.grid.header.SortDirection()
 
