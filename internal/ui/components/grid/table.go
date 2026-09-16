@@ -2154,25 +2154,41 @@ func (g *Grid) renderRecordsView() string {
 		prefix = g.styles.Help.Render(fmt.Sprintf("  %d pending change(s) — Ctrl+S to save, D to discard", count)) + "\n"
 	}
 
-	var result string
+	var body string
 	if g.whereFilter != nil && g.whereFilter.Visible() {
 		filterBar := g.whereFilter.RenderInput()
 		popup := g.whereFilter.RenderPopup()
-		result = prefix + filterBar + "\n"
+		body = prefix + filterBar + "\n"
 		if popup != "" {
-			result += popup + "\n"
+			body += popup + "\n"
 		}
-		result += header + "\n" + strings.Join(rows, "\n") + "\n" + modeIndicator
+		body += header + "\n" + strings.Join(rows, "\n")
 	} else if g.whereClause != "" {
 		activeFilter := g.styles.FilterIndicator.
 			Width(g.width - 2).
 			Render("  WHERE " + g.whereClause)
-		result = prefix + activeFilter + "\n" + header + "\n" + strings.Join(rows, "\n") + "\n" + modeIndicator
+		body = prefix + activeFilter + "\n" + header + "\n" + strings.Join(rows, "\n")
 	} else if g.filtering {
 		filterLine := g.styles.Text.Render("Column: " + g.filter + "_")
-		result = prefix + filterLine + "\n" + header + "\n" + strings.Join(rows, "\n") + "\n" + modeIndicator
+		body = prefix + filterLine + "\n" + header + "\n" + strings.Join(rows, "\n")
 	} else {
-		result = prefix + header + "\n" + strings.Join(rows, "\n") + "\n" + modeIndicator
+		body = prefix + header + "\n" + strings.Join(rows, "\n")
 	}
-	return result
+
+	// Keep the mode indicator glued to the bottom border. The bordered box pads
+	// its content to height-2 lines, so any padding it added would land *below*
+	// the indicator. Instead we pad here, above the indicator, so it is always
+	// the last content line (directly above the bottom border).
+	body = strings.TrimRight(body, "\n")
+	bodyLines := strings.Count(body, "\n") + 1
+	target := g.height - 2
+	if target < 1 {
+		target = 1
+	}
+	gap := target - bodyLines - 1
+	if gap < 0 {
+		gap = 0
+	}
+
+	return body + strings.Repeat("\n", gap+1) + modeIndicator
 }
