@@ -107,7 +107,8 @@ func NewModel(cfg *config.Config) Model {
 	}
 	g := grid.New(t.Styles(), pageSize, kbs)
 	g.SetYankMaxRows(yankMaxRows)
-	qs := store.NewQueryStore(filepath.Dir(cfg.UI.QueryHistoryPath))
+	// QueryStore is initialized later in initQueryStore after project selection
+	qs := &store.QueryStore{}
 	qb := querybrowser.New(t.Styles(), qs)
 	return Model{
 		config:          cfg,
@@ -131,6 +132,21 @@ func NewModel(cfg *config.Config) Model {
 		queryStore:      qs,
 		queryBrowser:    qb,
 	}
+}
+
+// initQueryStore initializes the QueryStore for the given project.
+// It uses a default stateDir if not provided (for tests).
+func (m *Model) initQueryStore(projectName string, stateDir string) {
+	if stateDir == "" {
+		stateDir = config.StateDir()
+	}
+	projectDir := filepath.Join(stateDir, "projects", projectName)
+
+	// Migrate global history if it exists and project file doesn't
+	_ = store.MigrateGlobalHistory(stateDir, projectDir)
+
+	m.queryStore = store.NewQueryStore(projectDir)
+	m.queryBrowser = querybrowser.New(m.styles, m.queryStore)
 }
 
 func (m Model) Init() tea.Cmd {
@@ -1000,6 +1016,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.grid.SetHeight(m.height - 4)
 		m.schemaDetail = msg.schemaDetail
 		m.dbName = msg.dbName
+		// Initialize per-project query store after project selection
+		if m.project != nil {
+			m.initQueryStore(m.project.Name, "")
+		}
 		m.state = StateMain
 		m.toast.ShowSuccess("Schema loaded")
 		m.spinnerActive = true

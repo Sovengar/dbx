@@ -151,3 +151,44 @@ func (s *QueryStore) Delete(idx int) {
 func (s *QueryStore) Len() int {
 	return len(s.entries)
 }
+
+// MigrateGlobalHistory copies the global query_history.json to the project directory
+// and renames the global file to .bak. Only migrates if the project file doesn't exist yet.
+func MigrateGlobalHistory(stateDir, projectDir string) error {
+	globalPath := filepath.Join(stateDir, "query_history.json")
+	projectPath := filepath.Join(projectDir, "query_history.json")
+
+	// If project file already exists, skip migration
+	if _, err := os.Stat(projectPath); err == nil {
+		return nil
+	}
+
+	// If global file doesn't exist, nothing to migrate
+	if _, err := os.Stat(globalPath); os.IsNotExist(err) {
+		return nil
+	}
+
+	// Read global file
+	data, err := os.ReadFile(globalPath)
+	if err != nil {
+		return err
+	}
+
+	// Create project directory
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		return err
+	}
+
+	// Write to project file
+	if err := os.WriteFile(projectPath, data, 0o644); err != nil {
+		return err
+	}
+
+	// Rename global file to .bak
+	bakPath := globalPath + ".bak"
+	if err := os.Rename(globalPath, bakPath); err != nil {
+		return err
+	}
+
+	return nil
+}
