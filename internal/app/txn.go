@@ -67,12 +67,9 @@ func (r *statementRunner) pending() bool { return r.tx != nil }
 // A new execution closes the transaction opened by the previous one: the
 // user's rollback window is the statement (or batch) currently being run.
 func (r *statementRunner) execute(ctx context.Context, sql string) (*postgres.QueryResult, bool, error) {
-	committed := false
-	if r.tx != nil {
-		if err := r.commitPending(ctx); err != nil {
-			return nil, false, err
-		}
-		committed = true
+	committed, err := r.commitPending(ctx)
+	if err != nil {
+		return nil, false, err
 	}
 
 	var last *postgres.QueryResult
@@ -116,25 +113,27 @@ func (r *statementRunner) querierFor(ctx context.Context, stmt string) (postgres
 		return r.tx, false, nil
 	}
 	if r.tx != nil {
-		if err := r.commitPending(ctx); err != nil {
+		committed, err := r.commitPending(ctx)
+		if err != nil {
 			return nil, false, err
 		}
-		return r.conn, true, nil
+		return r.conn, committed, nil
 	}
 	return r.conn, false, nil
 }
 
-// commitPending commits and clears the pending transaction, if any.
-func (r *statementRunner) commitPending(ctx context.Context) error {
+// commitPending commits and clears the pending transaction, if any, and
+// reports whether there was one.
+func (r *statementRunner) commitPending(ctx context.Context) (bool, error) {
 	if r.tx == nil {
-		return nil
+		return false, nil
 	}
 	tx := r.tx
 	r.tx = nil
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+		return true, fmt.Errorf("failed to commit transaction: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // rollback discards the pending transaction and reports whether there was one.
