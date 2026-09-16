@@ -140,6 +140,20 @@ func TestDetectContext(t *testing.T) {
 			wantContain: "name",
 		},
 		{
+			name:        "select list keyword continuation",
+			line:        "SELECT * FR",
+			wantKind:    CompletionSelectList,
+			wantVisible: true,
+			wantContain: "FROM",
+		},
+		{
+			name:        "order by keyword continuation",
+			line:        "SELECT * FROM users ORDER BY id LI",
+			wantKind:    CompletionColumn,
+			wantVisible: true,
+			wantContain: "LIMIT",
+		},
+		{
 			name:        "alias dot offers columns",
 			line:        "SELECT * FROM users u WHERE u.",
 			wantKind:    CompletionColumn,
@@ -187,6 +201,21 @@ func TestDetectContext(t *testing.T) {
 				t.Errorf("did not expect %q in suggestions %v", tt.wantAbsent, names)
 			}
 		})
+	}
+}
+
+func TestFromKeepsTablesAheadOfKeywordFallback(t *testing.T) {
+	a := newTestAutocomplete()
+	a.UpdateContext(a.detectContext("SELECT * FROM u", len("SELECT * FROM u")))
+
+	if len(a.filtered) == 0 {
+		t.Fatal("expected suggestions")
+	}
+	if a.filtered[0].Name != "users" {
+		t.Fatalf("first suggestion = %q, want users (filtered=%v)", a.filtered[0].Name, suggestionNames(a))
+	}
+	if !hasName(suggestionNames(a), "UNION") {
+		t.Errorf("expected keyword fallback to include UNION, got %v", suggestionNames(a))
 	}
 }
 

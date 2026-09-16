@@ -279,6 +279,21 @@ func (a *AutocompleteState) rebuildContextItems() {
 			}
 		}
 	}
+
+	// Keyword completion stays reachable from any clause: once the user is
+	// mid-word on a keyword prefix, keyword/function items are appended after
+	// the clause-specific ones. They rank below by prefix but are still
+	// offered, so "SELECT * FR" can complete FROM without hijacking "FROM u".
+	if a.currentCtx.kind != CompletionKeyword && a.currentCtx.kind != CompletionEmpty &&
+		a.currentCtx.prefix != "" && isSQLKeywordPrefix(a.currentCtx.tokenText) {
+		for _, item := range a.all {
+			if item.Kind == CompletionKeyword || item.Kind == CompletionFunction {
+				a.contextItems = append(a.contextItems, item)
+			}
+		}
+	}
+
+	a.contextItems = dedupeItems(a.contextItems)
 	autocompleteDebugLog("rebuildContextItems: kind=%d → %d contextItems (from %d total)", a.currentCtx.kind, len(a.contextItems), len(a.all))
 }
 
@@ -749,6 +764,21 @@ func isOperatorToken(token sqlToken) bool {
 
 func isSQLKeyword(word string) bool {
 	return sqlKeywords[strings.ToUpper(word)]
+}
+
+// isSQLKeywordPrefix reports whether word could still become a SQL keyword,
+// which lets any clause fall back to keyword completion.
+func isSQLKeywordPrefix(word string) bool {
+	if word == "" {
+		return false
+	}
+	upper := strings.ToUpper(word)
+	for keyword := range sqlKeywords {
+		if strings.HasPrefix(keyword, upper) {
+			return true
+		}
+	}
+	return false
 }
 
 // isWordToken reports whether a token looks like an identifier, keyword,
