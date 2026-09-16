@@ -78,7 +78,7 @@ func TestIntegration_DMLIsNotCommittedUntilRolledBack(t *testing.T) {
 	runner := newStatementRunner(conn)
 	ctx := context.Background()
 
-	if _, err := runner.execute(ctx, fmt.Sprintf("UPDATE %s SET name='after' WHERE id=1", table)); err != nil {
+	if _, _, err := runner.execute(ctx, fmt.Sprintf("UPDATE %s SET name='after' WHERE id=1", table)); err != nil {
 		t.Fatalf("UPDATE: %v", err)
 	}
 	if !runner.pending() {
@@ -111,12 +111,12 @@ func TestIntegration_DDLAutoCommitsAndRunsInAutocommit(t *testing.T) {
 	runner := newStatementRunner(conn)
 	ctx := context.Background()
 
-	if _, err := runner.execute(ctx, fmt.Sprintf("UPDATE %s SET name='after' WHERE id=1", table)); err != nil {
+	if _, _, err := runner.execute(ctx, fmt.Sprintf("UPDATE %s SET name='after' WHERE id=1", table)); err != nil {
 		t.Fatalf("UPDATE: %v", err)
 	}
 
 	extra := table + "_extra"
-	if _, err := runner.execute(ctx, fmt.Sprintf("CREATE TABLE %s (id int)", extra)); err != nil {
+	if _, _, err := runner.execute(ctx, fmt.Sprintf("CREATE TABLE %s (id int)", extra)); err != nil {
 		t.Fatalf("CREATE TABLE: %v", err)
 	}
 	t.Cleanup(func() { _, _ = conn.Exec(context.Background(), "DROP TABLE IF EXISTS "+extra) })
@@ -149,7 +149,7 @@ func TestIntegration_BatchDMLRollsBackAsOneTransaction(t *testing.T) {
 	batch := fmt.Sprintf(
 		"UPDATE %s SET name='a' WHERE id=1; UPDATE %s SET name='b' WHERE id=2",
 		table, table)
-	if _, err := runner.execute(ctx, batch); err != nil {
+	if _, _, err := runner.execute(ctx, batch); err != nil {
 		t.Fatalf("batch: %v", err)
 	}
 	if !runner.pending() {

@@ -616,6 +616,9 @@ type queryExecutedMsg struct {
 	result *postgres.QueryResult
 	sql    string
 	err    error
+	// committedTx reports that a pending DML transaction was committed
+	// before running this execution.
+	committedTx bool
 }
 
 func (m Model) loadTableData(schema, table string) tea.Cmd {
@@ -856,11 +859,8 @@ func (m Model) executeQuery(sql string) tea.Cmd {
 			return queryExecutedMsg{err: fmt.Errorf("not connected to a database"), sql: sql}
 		}
 
-		result, err := m.txRunner.execute(context.Background(), sql)
-		if err != nil {
-			return queryExecutedMsg{err: err, sql: sql}
-		}
-		return queryExecutedMsg{result: result, sql: sql}
+		result, committed, err := m.txRunner.execute(context.Background(), sql)
+		return queryExecutedMsg{result: result, sql: sql, err: err, committedTx: committed}
 	}
 }
 
@@ -1286,6 +1286,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case queryExecutedMsg:
 		m.queryExecuting = false
+		if msg.committedTx {
+			m.toast.ShowSuccess("Transaction committed")
+		}
 		if msg.err != nil {
 			m.toast.ShowError(fmt.Sprintf("Query failed: %v", msg.err))
 			return m, nil

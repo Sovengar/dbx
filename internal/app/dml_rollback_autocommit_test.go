@@ -74,10 +74,10 @@ func TestIntegration_NewDMLAutoCommitsPreviousTransaction(t *testing.T) {
 	runner := newStatementRunner(conn)
 	ctx := context.Background()
 
-	if _, err := runner.execute(ctx, fmt.Sprintf("UPDATE %s SET name='first' WHERE id=1", table)); err != nil {
+	if _, _, err := runner.execute(ctx, fmt.Sprintf("UPDATE %s SET name='first' WHERE id=1", table)); err != nil {
 		t.Fatalf("first UPDATE: %v", err)
 	}
-	if _, err := runner.execute(ctx, fmt.Sprintf("UPDATE %s SET name='second' WHERE id=2", table)); err != nil {
+	if _, _, err := runner.execute(ctx, fmt.Sprintf("UPDATE %s SET name='second' WHERE id=2", table)); err != nil {
 		t.Fatalf("second UPDATE: %v", err)
 	}
 

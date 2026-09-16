@@ -62,12 +62,17 @@ func newStatementRunner(conn *pgx.Conn) *statementRunner {
 func (r *statementRunner) pending() bool { return r.tx != nil }
 
 // execute runs every statement of sql in order and returns the last result.
+// It reports whether a pending DML transaction was committed along the way.
 //
 // A new execution closes the transaction opened by the previous one: the
 // user's rollback window is the statement (or batch) currently being run.
-func (r *statementRunner) execute(ctx context.Context, sql string) (*postgres.QueryResult, error) {
-	if err := r.commitPending(ctx); err != nil {
-		return nil, err
+func (r *statementRunner) execute(ctx context.Context, sql string) (*postgres.QueryResult, bool, error) {
+	committed := false
+	if r.tx != nil {
+		if err := r.commitPending(ctx); err != nil {
+			return nil, false, err
+		}
+		committed = true
 	}
 
 	var last *postgres.QueryResult
@@ -76,41 +81,47 @@ func (r *statementRunner) execute(ctx context.Context, sql string) (*postgres.Qu
 		if stmt == "" {
 			continue
 		}
-		querier, err := r.querierFor(ctx, stmt)
+		querier, committedNow, err := r.querierFor(ctx, stmt)
 		if err != nil {
-			return nil, err
+			return nil, committed, err
 		}
+		committed = committed || committedNow
+
 		result, err := r.exec(ctx, querier, stmt)
 		if err != nil {
-			return nil, err
+			return nil, committed, err
 		}
 		last = result
 	}
 	if last == nil {
 		last = &postgres.QueryResult{}
 	}
-	return last, nil
+	return last, committed, nil
 }
 
-// querierFor returns the querier a statement must run on. DML reuses the
+// querierFor returns the querier a statement must run on, and reports
+// whether a pending transaction was committed to get there. DML reuses the
 // pending transaction — opening one when none exists — so a batch of DML
 // statements shares a single transaction. Anything else commits the
 // pending transaction and runs in autocommit.
-func (r *statementRunner) querierFor(ctx context.Context, stmt string) (postgres.Querier, error) {
+func (r *statementRunner) querierFor(ctx context.Context, stmt string) (postgres.Querier, bool, error) {
 	if isDML(stmt) {
 		if r.tx == nil {
 			tx, err := r.begin(ctx)
 			if err != nil {
-				return nil, fmt.Errorf("failed to begin transaction: %w", err)
+				return nil, false, fmt.Errorf("failed to begin transaction: %w", err)
 			}
 			r.tx = tx
 		}
-		return r.tx, nil
+		return r.tx, false, nil
 	}
-	if err := r.commitPending(ctx); err != nil {
-		return nil, err
+	if r.tx != nil {
+		if err := r.commitPending(ctx); err != nil {
+			return nil, false, err
+		}
+		return r.conn, true, nil
 	}
-	return r.conn, nil
+	return r.conn, false, nil
 }
 
 // commitPending commits and clears the pending transaction, if any.
