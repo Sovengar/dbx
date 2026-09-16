@@ -147,6 +147,11 @@ func (m *Model) initQueryStore(projectName string, stateDir string) {
 
 	m.queryStore = store.NewQueryStore(projectDir)
 	m.queryBrowser = querybrowser.New(m.styles, m.queryStore)
+	// Apply current window dimensions to the new QueryBrowser
+	if m.width > 0 && m.height > 0 {
+		m.queryBrowser.SetWidth(m.width)
+		m.queryBrowser.SetHeight(m.height)
+	}
 }
 
 func (m Model) Init() tea.Cmd {
