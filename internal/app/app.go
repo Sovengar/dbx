@@ -1717,6 +1717,8 @@ func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 		m.statusbar.SetEditorOpen(m.editorOpen)
 	case "global.help":
 		m.helpModal.Show()
+	case "global.rollback":
+		return m.handleRollback()
 	case "global.query_browser":
 		if !m.queryBrowserOpen && !m.editorOpen {
 			m.queryBrowserOpen = true
