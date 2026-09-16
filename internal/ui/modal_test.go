@@ -18,6 +18,22 @@ func testHelpModalKeybinds() map[string]string {
 	}
 }
 
+func TestHelpModal_GlobalSection_IncludesRollback(t *testing.T) {
+	styles := theme.Resolve("dark").Styles()
+	kbs := testHelpModalKeybinds()
+	kbs["global.rollback"] = "U"
+
+	modal := NewHelpModal(styles, kbs)
+	modal.SetWidth(80)
+	modal.SetHeight(200)
+	modal.Show()
+
+	view := modal.View()
+	if !strings.Contains(view, "Rollback Last Transaction") {
+		t.Fatal("Help modal does not contain 'Rollback Last Transaction' in Global section")
+	}
+}
+
 func TestHelpModal_EditorSection_IncludesCopySQL(t *testing.T) {
 	styles := theme.Resolve("dark").Styles()
 	modal := NewHelpModal(styles, testHelpModalKeybinds())
