@@ -8,6 +8,7 @@ import (
 	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/buble/dbx/internal/ui"
 	"github.com/buble/dbx/internal/ui/components/editor"
+	"github.com/buble/dbx/internal/ui/components/palette"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -74,6 +75,8 @@ func newRollbackTestModel() Model {
 		router:    NewRouter(kbs),
 		keybinds:  kbs,
 		editor:    editor.NewSQLEditor(styles),
+		palette:   palette.New(styles, kbs),
+		helpModal: ui.NewHelpModal(styles, kbs),
 		toast:     ui.NewToastManager(styles),
 		statusbar: ui.NewStatusBar(styles, kbs),
 	}

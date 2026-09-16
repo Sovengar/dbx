@@ -1551,6 +1551,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			if key == m.keybinds["global.rollback"] {
+				return m.handleRollback()
+			}
+
 			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil && m.gridPreview.IsJQMode() {
 				if cmd, handled := m.gridPreview.Update(msg); handled {
 					return m, cmd
@@ -1790,6 +1794,23 @@ func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 	default:
 		m.toast.ShowInfo(fmt.Sprintf("Command: %s", action))
 	}
+	return m, nil
+}
+
+func (m Model) handleRollback() (tea.Model, tea.Cmd) {
+	if m.txRunner == nil || !m.txRunner.pending() {
+		m.toast.ShowInfo("No pending transaction")
+		return m, nil
+	}
+
+	if _, err := m.txRunner.rollback(context.Background()); err != nil {
+		appDebugLog("Rollback: error=%v", err)
+		m.toast.ShowError(fmt.Sprintf("Rollback failed: %v", err))
+		return m, nil
+	}
+
+	appDebugLog("Rollback: transaction rolled back")
+	m.toast.ShowSuccess("Transaction rolled back")
 	return m, nil
 }
 
