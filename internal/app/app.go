@@ -49,8 +49,9 @@ const (
 // currently visible get marked, so hit-testing naturally follows the active
 // layout/focus instead of assuming a fixed split.
 const (
-	zonePaneExplorer = "pane-explorer"
-	zonePaneGrid     = "pane-grid"
+	zonePaneExplorer    = "pane-explorer"
+	zonePaneGrid        = "pane-grid"
+	zonePaneGridSidebar = "pane-grid-sidebar"
 )
 
 type Model struct {
@@ -965,7 +966,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusbar.SetWidth(msg.Width)
 		m.statusbar.SetHeight(msg.Height)
 		if m.explorer != nil {
-			m.explorer.SetWidth(msg.Width / 3)
+			m.explorer.SetWidth(msg.Width)
 			m.explorer.SetHeight(msg.Height - 2)
 		}
 		if m.queryBrowser != nil {
@@ -1022,10 +1023,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.explorer = explorer.New(m.styles, nil, m.keybinds)
-		m.explorer.SetWidth(m.width / 3)
+		m.explorer.SetWidth(m.width)
 		m.explorer.SetHeight(m.height - 2)
 		m.explorer.SetNodes([]*explorer.Node{msg.root})
-		m.grid.SetWidth(m.width * 2 / 3)
+		m.grid.SetWidth(m.width)
 		m.grid.SetHeight(m.height - 4)
 		m.schemaDetail = msg.schemaDetail
 		m.dbName = msg.dbName
@@ -1424,34 +1425,55 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handlePaletteCommand(msg.Action)
 
 	case tea.MouseWheelMsg:
-		if m.state == StateMain {
-			if m.router.Focus() == FocusExplorer && m.explorer != nil {
-				mm := msg.Mouse()
-				if mm.Button == tea.MouseWheelUp {
-					m.explorer.Update(tea.KeyPressMsg{Code: 'k'})
-				} else if mm.Button == tea.MouseWheelDown {
-					m.explorer.Update(tea.KeyPressMsg{Code: 'j'})
-				}
+		if m.state != StateMain {
+			return m, nil
+		}
+		// The help modal scrolls itself; do not scroll panes behind it.
+		if m.helpModal.IsVisible() {
+			if cmd, handled := m.helpModal.Update(msg); handled {
+				return m, cmd
 			}
-			if m.router.Focus() == FocusGrid && m.grid != nil {
-				mm := msg.Mouse()
-				if mm.Button == tea.MouseWheelUp {
-					m.grid.Update(tea.KeyPressMsg{Code: 'k'})
-				} else if mm.Button == tea.MouseWheelDown {
-					m.grid.Update(tea.KeyPressMsg{Code: 'j'})
-				}
-				cmd := m.syncGridSidebarPreviewForCursor()
-				if cmd != nil {
-					return m, cmd
-				}
+			return m, nil
+		}
+		if m.editorOpen || m.palette.IsVisible() ||
+			(m.queryBrowserOpen && m.queryBrowser != nil) || m.grid.IsExporting() {
+			return m, nil
+		}
+
+		mm := msg.Mouse()
+		direction := 0 // -1 = up, +1 = down
+		if mm.Button == tea.MouseWheelUp {
+			direction = -1
+		} else if mm.Button == tea.MouseWheelDown {
+			direction = 1
+		}
+		if direction == 0 {
+			return m, nil
+		}
+
+		// Scroll the pane under the cursor instead of the focused one. The
+		// sidebar has its own zone so hovering the grid no longer scrolls it.
+		switch {
+		case ui.InBounds(zonePaneGridSidebar, msg) && m.gridSidebarPreview != nil:
+			if direction < 0 {
+				m.gridSidebarPreview.ScrollUp()
+			} else {
+				m.gridSidebarPreview.ScrollDown()
 			}
-			if m.gridSidebarPreview != nil {
-				mm := msg.Mouse()
-				if mm.Button == tea.MouseWheelUp {
-					m.gridSidebarPreview.ScrollUp()
-				} else if mm.Button == tea.MouseWheelDown {
-					m.gridSidebarPreview.ScrollDown()
-				}
+		case ui.InBounds(zonePaneGrid, msg) && m.grid != nil:
+			if direction < 0 {
+				m.grid.Update(tea.KeyPressMsg{Code: 'k'})
+			} else {
+				m.grid.Update(tea.KeyPressMsg{Code: 'j'})
+			}
+			if cmd := m.syncGridSidebarPreviewForCursor(); cmd != nil {
+				return m, cmd
+			}
+		case ui.InBounds(zonePaneExplorer, msg) && m.explorer != nil:
+			if direction < 0 {
+				m.explorer.Update(tea.KeyPressMsg{Code: 'k'})
+			} else {
+				m.explorer.Update(tea.KeyPressMsg{Code: 'j'})
 			}
 		}
 		return m, nil
@@ -2241,7 +2263,7 @@ func (m Model) renderMainView() string {
 		if showPreview {
 			gridW := m.width * 3 / 4
 			panes = append(panes, ui.Mark(zonePaneGrid, m.renderGrid(gridW, contentHeight)))
-			panes = append(panes, m.renderGridSidebarPreview(m.width/4, contentHeight))
+			panes = append(panes, ui.Mark(zonePaneGridSidebar, m.renderGridSidebarPreview(m.width/4, contentHeight)))
 		} else {
 			panes = append(panes, ui.Mark(zonePaneGrid, m.renderGrid(m.width, contentHeight)))
 		}
