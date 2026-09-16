@@ -88,6 +88,7 @@ type Model struct {
 	queryStore                 *store.QueryStore
 	queryBrowser               *querybrowser.QueryBrowser
 	queryBrowserOpen           bool
+	txRunner                   *statementRunner
 }
 
 var spinnerChars = [9]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"}
@@ -851,31 +852,15 @@ func isASCIILetter(b byte) bool {
 
 func (m Model) executeQuery(sql string) tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
-		loader := postgres.NewSchemaLoader(m.conn)
-
-		statements := splitSQL(sql)
-		if len(statements) == 0 {
-			return queryExecutedMsg{err: fmt.Errorf("no statements to execute")}
+		if m.txRunner == nil {
+			return queryExecutedMsg{err: fmt.Errorf("not connected to a database"), sql: sql}
 		}
 
-		var lastResult *postgres.QueryResult
-		for _, stmt := range statements {
-			stmt = strings.TrimSpace(stmt)
-			if stmt == "" {
-				continue
-			}
-			result, err := loader.ExecuteRaw(ctx, stmt)
-			if err != nil {
-				return queryExecutedMsg{err: err, sql: stmt}
-			}
-			lastResult = result
+		result, err := m.txRunner.execute(context.Background(), sql)
+		if err != nil {
+			return queryExecutedMsg{err: err, sql: sql}
 		}
-
-		if lastResult == nil {
-			lastResult = &postgres.QueryResult{}
-		}
-		return queryExecutedMsg{result: lastResult, sql: sql}
+		return queryExecutedMsg{result: result, sql: sql}
 	}
 }
 
@@ -980,6 +965,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.conn = msg.conn
+		m.txRunner = newStatementRunner(msg.conn)
 		m.state = StateLoading
 		m.toast.ShowInfo("Connected to database")
 		return m, m.loadSchema(msg.conn, *msg.project)

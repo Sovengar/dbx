@@ -85,8 +85,14 @@ func (s *SchemaLoader) CountRows(ctx context.Context, schema, table string) (int
 	return count, err
 }
 
-func ExecuteQuery(ctx context.Context, conn *pgx.Conn, sql string) (*QueryResult, error) {
-	rows, err := conn.Query(ctx, sql)
+// Querier is the subset of pgx used to run a statement. Both *pgx.Conn
+// (autocommit) and pgx.Tx (pending transaction) satisfy it.
+type Querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+func ExecuteQuery(ctx context.Context, q Querier, sql string) (*QueryResult, error) {
+	rows, err := q.Query(ctx, sql)
 	if err != nil {
 		return nil, err
 	}
