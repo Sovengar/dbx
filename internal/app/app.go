@@ -966,6 +966,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.conn = msg.conn
 		m.txRunner = newStatementRunner(msg.conn)
+		m.syncTxStatus()
 		m.state = StateLoading
 		m.toast.ShowInfo("Connected to database")
 		return m, m.loadSchema(msg.conn, *msg.project)
@@ -1289,6 +1290,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.committedTx {
 			m.toast.ShowSuccess("Transaction committed")
 		}
+		m.syncTxStatus()
 		if msg.err != nil {
 			m.toast.ShowError(fmt.Sprintf("Query failed: %v", msg.err))
 			return m, nil
@@ -1806,12 +1808,22 @@ func (m Model) handleRollback() (tea.Model, tea.Cmd) {
 	if _, err := m.txRunner.rollback(context.Background()); err != nil {
 		appDebugLog("Rollback: error=%v", err)
 		m.toast.ShowError(fmt.Sprintf("Rollback failed: %v", err))
+		m.syncTxStatus()
 		return m, nil
 	}
 
 	appDebugLog("Rollback: transaction rolled back")
 	m.toast.ShowSuccess("Transaction rolled back")
+	m.syncTxStatus()
 	return m, nil
+}
+
+// syncTxStatus mirrors the pending transaction state into the statusbar.
+func (m *Model) syncTxStatus() {
+	if m.statusbar == nil || m.txRunner == nil {
+		return
+	}
+	m.statusbar.SetTxPending(m.txRunner.pending())
 }
 
 func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
