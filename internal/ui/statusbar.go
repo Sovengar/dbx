@@ -21,6 +21,7 @@ type StatusBar struct {
 	editorOpen        bool
 	autocompleteReady bool
 	queryBrowserOpen  bool
+	txPending         bool
 }
 
 func NewStatusBar(styles *theme.Styles, keybinds map[string]string) *StatusBar {
@@ -36,6 +37,7 @@ func (s *StatusBar) SetFocus(f string)              { s.focus = f }
 func (s *StatusBar) SetEditorOpen(open bool)        { s.editorOpen = open }
 func (s *StatusBar) SetAutocompleteReady(r bool)    { s.autocompleteReady = r }
 func (s *StatusBar) SetQueryBrowserOpen(open bool)  { s.queryBrowserOpen = open }
+func (s *StatusBar) SetTxPending(pending bool)      { s.txPending = pending }
 func (s *StatusBar) Focus()                         { s.focused = true }
 func (s *StatusBar) Blur()                          { s.focused = false }
 
@@ -79,6 +81,12 @@ func (s *StatusBar) View() string {
 
 func (s *StatusBar) renderActions() string {
 	var segments []string
+
+	// Only actionable while the transaction is still open.
+	if s.txPending {
+		segments = append(segments, s.keyFor("global.rollback")+" rollback")
+		segments = append(segments, "tx pending")
+	}
 
 	segments = append(segments, s.keyFor("global.cycle_focus")+" Toggle explorer")
 	segments = append(segments, s.keyFor("global.help")+" help")

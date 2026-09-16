@@ -53,6 +53,10 @@ All changes (edits, inserts, deletes) are staged locally before being committed 
 
 No database changes occur until you execute the SQL from the editor with `Ctrl+Enter`.
 
+Once executed, DML (`INSERT`/`UPDATE`/`DELETE`) stays inside an open transaction
+until you press `U` to roll it back or run the next statement (which commits it).
+See [DML Transactions](docs/KEYBINDS.md#dml-transactions).
+
 ### Explorer
 
 | Action                   | Behavior                                             |
@@ -125,6 +129,7 @@ The editor detects what you're typing and shows relevant suggestions:
 | JQ Filter (`/`)     | Filter JSON in preview with jq expressions, autocomplete, history    |
 | Command palette (`:`) | Fuzzy search for any command (refresh, export, execute, focus, etc.) |
 | Help (`?`)            | Overlay showing all keybinds, scrollable                             |
+| DML rollback (`U`)    | DML runs in an open transaction; `U` rolls it back (the next statement commits it first) |
 | Mouse                 | Click, double-click, scroll wheel, header click to sort              |
 | Toast notifications   | Success/error/info feedback for all operations                       |
 | Themes                | System, dark, light, nord, gruvbox, catppuccin                       |
@@ -179,6 +184,7 @@ dbx ask "show me all active users"
 | `Q` | Query Browser              |
 | `a` | Ask AI (NL→SQL)            |
 | `x` | Export                     |
+| `U` | Rollback pending transaction |
 
 ### Explorer
 

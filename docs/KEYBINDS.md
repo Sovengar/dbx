@@ -26,6 +26,7 @@ Actions follow the **first-letter rule** — the primary key is the first letter
 | `s` | **s**ort |
 | `v` | **v**iew DDL |
 | `y` | **y**ank (copy) |
+| `U` | **U**ndo — roll back the pending DML transaction |
 
 ## Default Keys
 
@@ -43,6 +44,26 @@ Each action has a primary key and may have alternatives. All are overridable.
 | `global.ask` | `a` | Open NL→SQL prompt |
 | `global.export` | `x` | Export current data |
 | `global.query_browser` | `Q` | Open query browser (history + favorites) |
+| `global.rollback` | `U` | Roll back the pending DML transaction |
+
+## DML Transactions
+
+DML statements typed in the editor (`INSERT`, `UPDATE`, `DELETE`) run inside a
+transaction that **stays open** after execution, so you can still undo them:
+
+| Event | What happens |
+|-------|--------------|
+| DML executed | `BEGIN` — the statusbar shows `tx pending` and `U rollback` |
+| `U` pressed | `ROLLBACK` — all statements of the current execution are undone |
+| New statement executed | `COMMIT` of the pending transaction, then the new statement runs |
+| `DDL`/`SELECT` executed | The pending transaction is committed first; the statement itself runs in autocommit |
+| Quit (`q`) | The pending transaction is rolled back before the connection closes |
+
+A single execution is one rollback unit: `UPDATE …; UPDATE …` shares one
+transaction, so `U` undoes both. Mixing DDL into a batch commits whatever was
+pending before it.
+
+`SELECT` and DDL (`CREATE`/`ALTER`/`DROP`/`TRUNCATE`) never open a transaction.
 
 ### Explorer Pane
 
@@ -262,6 +283,9 @@ Unset a binding by mapping to empty string:
 The statusbar shows relevant keybinds based on current context:
 
 ```
+[Transaction pending]  (prepended to the action bar)
+U rollback · tx pending
+
 [Explorer-focused]
 / filter · n new · d drop · v DDL · Enter Open table data · Space Collapse schema · Tab Preview
 

@@ -88,6 +88,7 @@ type Model struct {
 	queryStore                 *store.QueryStore
 	queryBrowser               *querybrowser.QueryBrowser
 	queryBrowserOpen           bool
+	runner                   *statementRunner
 }
 
 var spinnerChars = [9]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"}
@@ -615,6 +616,9 @@ type queryExecutedMsg struct {
 	result *postgres.QueryResult
 	sql    string
 	err    error
+	// committedTx reports that a pending DML transaction was committed
+	// before running this execution.
+	committedTx bool
 }
 
 func (m Model) loadTableData(schema, table string) tea.Cmd {
@@ -851,31 +855,12 @@ func isASCIILetter(b byte) bool {
 
 func (m Model) executeQuery(sql string) tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
-		loader := postgres.NewSchemaLoader(m.conn)
-
-		statements := splitSQL(sql)
-		if len(statements) == 0 {
-			return queryExecutedMsg{err: fmt.Errorf("no statements to execute")}
+		if m.runner == nil {
+			return queryExecutedMsg{err: fmt.Errorf("not connected to a database"), sql: sql}
 		}
 
-		var lastResult *postgres.QueryResult
-		for _, stmt := range statements {
-			stmt = strings.TrimSpace(stmt)
-			if stmt == "" {
-				continue
-			}
-			result, err := loader.ExecuteRaw(ctx, stmt)
-			if err != nil {
-				return queryExecutedMsg{err: err, sql: stmt}
-			}
-			lastResult = result
-		}
-
-		if lastResult == nil {
-			lastResult = &postgres.QueryResult{}
-		}
-		return queryExecutedMsg{result: lastResult, sql: sql}
+		result, committed, err := m.runner.execute(context.Background(), sql)
+		return queryExecutedMsg{result: result, sql: sql, err: err, committedTx: committed}
 	}
 }
 
@@ -980,6 +965,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.conn = msg.conn
+		m.runner = newStatementRunner(msg.conn)
+		m.syncTxStatus()
 		m.state = StateLoading
 		m.toast.ShowInfo("Connected to database")
 		return m, m.loadSchema(msg.conn, *msg.project)
@@ -1300,6 +1287,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case queryExecutedMsg:
 		m.queryExecuting = false
+		if msg.committedTx {
+			m.toast.ShowSuccess("Transaction committed")
+		}
+		m.syncTxStatus()
 		if msg.err != nil {
 			m.toast.ShowError(fmt.Sprintf("Query failed: %v", msg.err))
 			return m, nil
@@ -1562,6 +1553,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			if key == m.keybinds["global.rollback"] {
+				return m.handleRollback()
+			}
+
 			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil && m.gridPreview.IsJQMode() {
 				if cmd, handled := m.gridPreview.Update(msg); handled {
 					return m, cmd
@@ -1570,9 +1565,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if key == m.keybinds["global.quit"] {
-				if m.conn != nil {
-					m.conn.Close(context.Background())
-				}
+				m.rollbackOnExit()
 				return m, tea.Quit
 			}
 
@@ -1702,9 +1695,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 	switch action {
 	case "global.quit":
-		if m.conn != nil {
-			m.conn.Close(context.Background())
-		}
+		m.rollbackOnExit()
 		return m, tea.Quit
 	case "global.cycle_focus":
 		m.router.CycleFocus()
@@ -1722,6 +1713,8 @@ func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 		m.statusbar.SetEditorOpen(m.editorOpen)
 	case "global.help":
 		m.helpModal.Show()
+	case "global.rollback":
+		return m.handleRollback()
 	case "global.query_browser":
 		if !m.queryBrowserOpen && !m.editorOpen {
 			m.queryBrowserOpen = true
@@ -1802,6 +1795,46 @@ func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 		m.toast.ShowInfo(fmt.Sprintf("Command: %s", action))
 	}
 	return m, nil
+}
+
+func (m Model) handleRollback() (tea.Model, tea.Cmd) {
+	if m.runner == nil || !m.runner.pending() {
+		m.toast.ShowInfo("No pending transaction")
+		return m, nil
+	}
+
+	if _, err := m.runner.rollback(context.Background()); err != nil {
+		appDebugLog("Rollback: error=%v", err)
+		m.toast.ShowError(fmt.Sprintf("Rollback failed: %v", err))
+		m.syncTxStatus()
+		return m, nil
+	}
+
+	appDebugLog("Rollback: transaction rolled back")
+	m.toast.ShowSuccess("Transaction rolled back")
+	m.syncTxStatus()
+	return m, nil
+}
+
+// rollbackOnExit discards a pending transaction before the connection is
+// closed, so quitting never leaves changes half-applied.
+func (m Model) rollbackOnExit() {
+	if m.runner != nil && m.runner.pending() {
+		if _, err := m.runner.rollback(context.Background()); err != nil {
+			appDebugLog("Exit: rollback failed: %v", err)
+		}
+	}
+	if m.conn != nil {
+		m.conn.Close(context.Background())
+	}
+}
+
+// syncTxStatus mirrors the pending transaction state into the statusbar.
+func (m *Model) syncTxStatus() {
+	if m.statusbar == nil || m.runner == nil {
+		return
+	}
+	m.statusbar.SetTxPending(m.runner.pending())
 }
 
 func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
