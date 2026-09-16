@@ -49,11 +49,15 @@ Each action has a primary key and may have alternatives. All are overridable.
 ## DML Transactions
 
 DML statements typed in the editor (`INSERT`, `UPDATE`, `DELETE`) run inside a
-transaction that **stays open** after execution, so you can still undo them:
+transaction that **stays open** after execution, so you can still undo them.
+SQL dumped from a grid draft with `Ctrl+S` is the exception: running it commits
+its transaction as soon as the execution finishes (the editor title shows
+`commit on run`), because draft edits are meant to become durable.
 
 | Event | What happens |
 |-------|--------------|
 | DML executed | `BEGIN` — the statusbar shows `tx pending` and `U rollback` |
+| Grid draft (`Ctrl+S`) executed | `BEGIN` + the transaction is **committed** when execution finishes (`commit on run`) |
 | `U` pressed | `ROLLBACK` — all statements of the current execution are undone |
 | New statement executed | `COMMIT` of the pending transaction, then the new statement runs |
 | `DDL`/`SELECT` executed | The pending transaction is committed first; the statement itself runs in autocommit |
@@ -136,7 +140,7 @@ Schema tree navigation:
 | `grid.navigate_fk` | `o` | Open referenced table |
 | `grid.go_back` | `H` | Return to previous table |
 | `grid.refresh` | `r` | Refresh data (re-execute query) |
-| `grid.commit_pending` | `Ctrl+S` | Dump draft SQL to editor for review/edit/copy |
+| `grid.commit_pending` | `Ctrl+S` | Dump draft SQL to editor for review/edit/copy (running it commits the transaction) |
 | `grid.discard_all` | `D` | Discard all draft changes |
 | `grid.undo` | `u` | Undo draft on selected row (revert edit/insert/delete) |
 

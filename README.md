@@ -19,7 +19,7 @@ dbx is a terminal UI for databases designed for both humans and AI agents.
 | Edit cell (`enter`)      | Inline editing with type-aware parsing (int, float, bool), stores draft locally (blue cell)       |
 | Insert row (`i`)         | Staged insert: creates a pending row in the grid (shown in green)                                 |
 | Delete row (`d`)         | Stages row for deletion (red)                                                                      |
-| Dump SQL to editor (`Ctrl+S`) | Generates SQL for all drafts and opens it in the editor for review/edit/copy |
+| Dump SQL to editor (`Ctrl+S`) | Generates SQL for all drafts and opens it in the editor for review/edit/copy; running it commits the transaction |
 | Discard all (`D`)        | Discards all pending changes, restores original values (press twice to confirm)                   |
 | Multi-select (`space`)   | Toggles row selection for bulk operations                                                         |
 | FK navigate (`o`)        | Follow foreign key: loads referenced table with FK filter AND existing WHERE, syncs explorer     |
@@ -47,14 +47,16 @@ All changes (edits, inserts, deletes) are staged locally before being committed 
 | 🔵 Blue   | Modified cell (edit draft)  |
 | 🔴 Red    | Row marked for deletion     |
 
-- **`Ctrl+S`** — Generates SQL for all drafts (INSERTs + UPDATEs + DELETEs) and opens it in the editor. You can modify, review, and execute from there.
+- **`Ctrl+S`** — Generates SQL for all drafts (INSERTs + UPDATEs + DELETEs) and opens it in the editor. You can modify, review, and execute from there; executing it commits the transaction (the editor title shows `commit on run`).
 - **`D`** — Discard all pending changes. Press twice to confirm. Restores original values.
 - **`Esc`** — Exits edit mode but does **NOT** discard drafts. Drafts persist with their colors.
 
 No database changes occur until you execute the SQL from the editor with `Ctrl+Enter`.
 
-Once executed, DML (`INSERT`/`UPDATE`/`DELETE`) stays inside an open transaction
-until you press `U` to roll it back or run the next statement (which commits it).
+Executing the SQL dumped from the grid commits its transaction when the
+execution finishes, so the draft edits become durable. DML typed manually in the
+editor stays inside an open transaction until you press `U` to roll it back or
+run the next statement (which commits it).
 See [DML Transactions](docs/KEYBINDS.md#dml-transactions).
 
 ### Explorer

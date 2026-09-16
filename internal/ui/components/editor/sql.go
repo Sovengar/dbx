@@ -25,6 +25,7 @@ type SQLEditor struct {
 	autocomplete *AutocompleteState
 	schema       *context.SchemaExport
 	schemaLoaded bool
+	commitOnRun  bool
 }
 
 func NewSQLEditor(styles *theme.Styles) *SQLEditor {
@@ -61,11 +62,21 @@ func (e *SQLEditor) Content() string {
 	return strings.Join(e.lines, "\n")
 }
 
+// SetCommitOnRun marks whether running the current content must also commit
+// the pending DML transaction. The grid sets it when it dumps draft SQL into
+// the editor, so the changes the user reviewed become durable when executed.
+func (e *SQLEditor) SetCommitOnRun(v bool) { e.commitOnRun = v }
+
+// CommitOnRun reports whether running the current content must commit the
+// pending transaction once it finishes.
+func (e *SQLEditor) CommitOnRun() bool { return e.commitOnRun }
+
 func (e *SQLEditor) Clear() {
 	e.lines = []string{""}
 	e.cursorRow = 0
 	e.cursorCol = 0
 	e.modified = false
+	e.commitOnRun = false
 }
 
 func (e *SQLEditor) SetContent(s string) {
@@ -76,6 +87,8 @@ func (e *SQLEditor) SetContent(s string) {
 	e.cursorRow = 0
 	e.cursorCol = 0
 	e.modified = false
+	// New content carries no commit intent unless the caller sets it after.
+	e.commitOnRun = false
 }
 
 func (e *SQLEditor) SetCursorPos(row, col int) {

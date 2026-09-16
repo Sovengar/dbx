@@ -854,12 +854,25 @@ func isASCIILetter(b byte) bool {
 }
 
 func (m Model) executeQuery(sql string) tea.Cmd {
+	// Capture the intent at dispatch time: the grid sets commit-on-run when it
+	// dumps draft SQL into the editor, so executing it also commits the
+	// transaction the statement opens.
+	commitOnRun := m.editor != nil && m.editor.CommitOnRun()
+
 	return func() tea.Msg {
 		if m.runner == nil {
 			return queryExecutedMsg{err: fmt.Errorf("not connected to a database"), sql: sql}
 		}
 
-		result, committed, err := m.runner.execute(context.Background(), sql)
+		ctx := context.Background()
+		result, committed, err := m.runner.execute(ctx, sql)
+		if err == nil && commitOnRun {
+			committedNow, commitErr := m.runner.commitPending(ctx)
+			if commitErr != nil {
+				err = commitErr
+			}
+			committed = committed || committedNow
+		}
 		return queryExecutedMsg{result: result, sql: sql, err: err, committedTx: committed}
 	}
 }
@@ -1287,6 +1300,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case queryExecutedMsg:
 		m.queryExecuting = false
+		if m.editor != nil {
+			m.editor.SetCommitOnRun(false)
+		}
 		if msg.committedTx {
 			m.toast.ShowSuccess("Transaction committed")
 		}
@@ -1496,6 +1512,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if key == "esc" {
 					m.editorOpen = false
 					m.editor.Blur()
+					m.editor.SetCommitOnRun(false)
 					m.statusbar.SetEditorOpen(false)
 					return m, nil
 				}
@@ -1578,6 +1595,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.editorOpen = true
 						m.editor.Focus()
 						m.editor.SetContent(sql)
+						m.editor.SetCommitOnRun(true)
 						m.statusbar.SetEditorOpen(true)
 						return m, nil
 					}
@@ -2361,10 +2379,15 @@ func (m Model) renderEditor(w, h int) string {
 
 	content := m.editor.View()
 
+	title := " SQL Editor "
+	if m.editor.CommitOnRun() {
+		title = " SQL Editor · commit on run "
+	}
+
 	border := lipgloss.RoundedBorder()
 	borderFg := m.styles.BorderActive.GetBorderTopForeground()
 
-	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " SQL Editor ", content, w, h)
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, title, content, w, h)
 }
 
 func overlay(base, box string, width, height int) string {

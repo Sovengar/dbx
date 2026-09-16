@@ -83,3 +83,41 @@ func TestSQLEditor_CtrlY_PreservesContent(t *testing.T) {
 		t.Fatalf("Editor content changed after copy: got %q, want %q", ed.Content(), originalSQL)
 	}
 }
+
+func TestSQLEditor_CommitOnRun_SetAndRead(t *testing.T) {
+	ed := NewSQLEditor(testStyles())
+
+	if ed.CommitOnRun() {
+		t.Fatal("new editor should not commit on run")
+	}
+
+	ed.SetCommitOnRun(true)
+	if !ed.CommitOnRun() {
+		t.Fatal("SetCommitOnRun(true) was not reflected by CommitOnRun()")
+	}
+}
+
+// Loading new content must drop a previous commit intent: only the caller that
+// sets it after SetContent (the grid draft path) wants the transaction committed.
+func TestSQLEditor_SetContentResetsCommitOnRun(t *testing.T) {
+	ed := NewSQLEditor(testStyles())
+	ed.SetCommitOnRun(true)
+
+	ed.SetContent("SELECT 1")
+
+	if ed.CommitOnRun() {
+		t.Fatal("SetContent() kept a stale commit-on-run intent")
+	}
+}
+
+func TestSQLEditor_ClearResetsCommitOnRun(t *testing.T) {
+	ed := NewSQLEditor(testStyles())
+	ed.SetContent("UPDATE users SET name='x'")
+	ed.SetCommitOnRun(true)
+
+	ed.Clear()
+
+	if ed.CommitOnRun() {
+		t.Fatal("Clear() kept a stale commit-on-run intent")
+	}
+}

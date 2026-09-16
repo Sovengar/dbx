@@ -1551,6 +1551,45 @@ func (g *Grid) commitEdit() tea.Cmd {
 	return nil
 }
 
+// rowUpdateGroup collects every edited column of a single row so the changes
+// can be applied in one atomic UPDATE.
+type rowUpdateGroup struct {
+	rowIdx  int
+	updates []PendingUpdate
+}
+
+// groupUpdatesByRow groups pending updates by row, preserving first-seen order.
+// Edits to different columns of the same row must be emitted as a single
+// UPDATE: emitting one statement per column reuses the same original WHERE for
+// every statement, so the first one invalidates the WHERE of the rest whenever
+// an edited column is part of the predicate (e.g. the primary key).
+func (g *Grid) groupUpdatesByRow() []rowUpdateGroup {
+	groups := make([]rowUpdateGroup, 0)
+	index := make(map[int]int, len(g.pendingUpdates))
+	for _, u := range g.pendingUpdates {
+		if u.RowIdx < 0 || u.RowIdx >= len(g.data.Rows) {
+			continue
+		}
+		if i, ok := index[u.RowIdx]; ok {
+			groups[i].updates = append(groups[i].updates, u)
+			continue
+		}
+		index[u.RowIdx] = len(groups)
+		groups = append(groups, rowUpdateGroup{rowIdx: u.RowIdx, updates: []PendingUpdate{u}})
+	}
+	return groups
+}
+
+// whereRowFor returns the original row snapshot used to locate the row.
+func (g *Grid) whereRowFor(group rowUpdateGroup) []interface{} {
+	for _, u := range group.updates {
+		if u.OldRow != nil {
+			return u.OldRow
+		}
+	}
+	return g.data.Rows[group.rowIdx]
+}
+
 // DraftSQL generates SQL from pending drafts without clearing them.
 // Uses real values instead of parameterized placeholders.
 func (g *Grid) DraftSQL() string {
@@ -1574,21 +1613,18 @@ func (g *Grid) DraftSQL() string {
 		queries = append(queries, q)
 	}
 
-	for _, update := range g.pendingUpdates {
-		if update.RowIdx < 0 || update.RowIdx >= len(g.data.Rows) {
-			continue
-		}
-		colName := g.columns[update.ColIdx]
-		whereRow := update.OldRow
-		if whereRow == nil {
-			whereRow = g.data.Rows[update.RowIdx]
+	for _, group := range g.groupUpdatesByRow() {
+		whereRow := g.whereRowFor(group)
+		var sets []string
+		for _, u := range group.updates {
+			sets = append(sets, fmt.Sprintf("%q = %s", g.columns[u.ColIdx], formatSQLValue(u.NewValue)))
 		}
 		var whereParts []string
 		for i, val := range whereRow {
 			whereParts = append(whereParts, fmt.Sprintf("%q = %s", g.columns[i], formatSQLValue(val)))
 		}
-		q := fmt.Sprintf("UPDATE %q.%q SET %q = %s WHERE %s",
-			g.schema, g.tableName, colName, formatSQLValue(update.NewValue), strings.Join(whereParts, " AND "))
+		q := fmt.Sprintf("UPDATE %q.%q SET %s WHERE %s",
+			g.schema, g.tableName, strings.Join(sets, ", "), strings.Join(whereParts, " AND "))
 		queries = append(queries, q)
 	}
 
@@ -1650,26 +1686,24 @@ func (g *Grid) CommitAllDrafts() tea.Cmd {
 		allArgs = append(allArgs, args)
 	}
 
-	for _, update := range g.pendingUpdates {
-		if update.RowIdx < 0 || update.RowIdx >= len(g.data.Rows) {
-			continue
-		}
-		whereRow := update.OldRow
-		if whereRow == nil {
-			whereRow = g.data.Rows[update.RowIdx]
-		}
-		colName := g.columns[update.ColIdx]
-		var whereParts []string
+	for _, group := range g.groupUpdatesByRow() {
+		whereRow := g.whereRowFor(group)
+		var sets []string
 		var args []interface{}
 		argIdx := 1
+		for _, u := range group.updates {
+			sets = append(sets, fmt.Sprintf("%q = $%d", g.columns[u.ColIdx], argIdx))
+			args = append(args, u.NewValue)
+			argIdx++
+		}
+		var whereParts []string
 		for i, val := range whereRow {
 			whereParts = append(whereParts, fmt.Sprintf("%q = $%d", g.columns[i], argIdx))
 			args = append(args, val)
 			argIdx++
 		}
-		args = append(args, update.NewValue)
-		q := fmt.Sprintf("UPDATE %q.%q SET %q = $%d WHERE %s",
-			g.schema, g.tableName, colName, argIdx, strings.Join(whereParts, " AND "))
+		q := fmt.Sprintf("UPDATE %q.%q SET %s WHERE %s",
+			g.schema, g.tableName, strings.Join(sets, ", "), strings.Join(whereParts, " AND "))
 		queries = append(queries, q)
 		allArgs = append(allArgs, args)
 	}
