@@ -15,6 +15,11 @@ type ConnectionSelectedMsg struct {
 	Project config.FoundProject
 }
 
+type ProjectToggledMsg struct {
+	Project config.FoundProject
+	Active  bool
+}
+
 type Picker struct {
 	projects []config.FoundProject
 	cursor   int
@@ -70,11 +75,23 @@ func (p *Picker) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case "k", "up":
 		p.moveUp()
 		return nil, true
+	case "space":
+		if len(p.projects) > 0 {
+			proj := p.projects[p.cursor]
+			newActive := !proj.Active
+			p.projects[p.cursor].Active = newActive
+			return func() tea.Msg {
+				return ProjectToggledMsg{Project: proj, Active: newActive}
+			}, true
+		}
 	case "enter":
 		if len(p.projects) > 0 {
-			return func() tea.Msg {
-				return ConnectionSelectedMsg{Project: p.projects[p.cursor]}
-			}, true
+			proj := p.projects[p.cursor]
+			if proj.Active {
+				return func() tea.Msg {
+					return ConnectionSelectedMsg{Project: proj}
+				}, true
+			}
 		}
 	case "q", "ctrl+c":
 		return tea.Quit, true
@@ -127,8 +144,21 @@ func (p *Picker) View() string {
 				Render("▸")
 		}
 
+		// Determine styles based on active state
+		nameFg := p.styles.Text.GetForeground()
+		driverFg := p.styles.Primary.GetForeground()
+		statusTag := ""
+		if !proj.Active {
+			nameFg = p.styles.TextMuted.GetForeground()
+			driverFg = p.styles.TextMuted.GetForeground()
+			statusTag = lipgloss.NewStyle().
+				Foreground(p.styles.TextMuted.GetForeground()).
+				Render(" [off]")
+		}
+
 		name := lipgloss.NewStyle().
 			Bold(true).
+			Foreground(nameFg).
 			Render(proj.Name)
 
 		port := p.getPort(proj.Connection.DSN)
@@ -138,7 +168,7 @@ func (p *Picker) View() string {
 		}
 
 		driver := lipgloss.NewStyle().
-			Foreground(p.styles.Primary.GetForeground()).
+			Foreground(driverFg).
 			Bold(true).
 			Render(driverPort)
 
@@ -146,7 +176,7 @@ func (p *Picker) View() string {
 			Foreground(p.styles.TextMuted.GetForeground()).
 			Render(proj.Path)
 
-		line := fmt.Sprintf("  %s %s  %s  %s", arrow, name, driver, path)
+		line := fmt.Sprintf("  %s %s%s  %s  %s", arrow, name, statusTag, driver, path)
 
 		s.WriteString(line)
 		s.WriteString("\n")
@@ -156,7 +186,7 @@ func (p *Picker) View() string {
 	s.WriteString("\n")
 	footer := lipgloss.NewStyle().
 		Foreground(p.styles.TextMuted.GetForeground()).
-		Render("j/k ↑↓   enter select   q quit")
+		Render("j/k ↑↓   space toggle   enter select   q quit")
 	s.WriteString(p.centerText(footer))
 
 	return s.String()

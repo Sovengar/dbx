@@ -89,6 +89,7 @@ func (s *StatusBar) renderActions() string {
 	}
 
 	segments = append(segments, s.keyFor("global.cycle_focus")+" Toggle explorer")
+	segments = append(segments, s.keyFor("global.switch_connection")+" switch conn")
 	segments = append(segments, s.keyFor("global.help")+" help")
 	segments = append(segments, s.keyFor("global.quit")+" quit")
 	segments = append(segments, s.keyFor("global.focus_editor")+" editor")

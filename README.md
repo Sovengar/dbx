@@ -158,6 +158,7 @@ autocomplete_trigger = 1   # min characters before the popup opens on its own
 | Top bar               | Shows active pane, `schema.table`, row count, WHERE filter, breadcrumbs |
 | Bottom bar            | Global keybinds (always visible) + contextual keybinds per pane      |
 | Focus cycling (`e`)  | Toggle Explorer ↔ Grid                                               |
+| Switch connection (`c`) | Open picker to switch between projects (toggle active/inactive)  |
 | Query Browser (`Q`) | Browse history & favorites, load into editor                         |
 | Grid Preview (`Tab`) | Focus row preview (from grid), Tab/Esc to return                     |
 | Explorer Preview (`Tab`) | Focus table details (from explorer), full-screen                  |
@@ -216,6 +217,7 @@ dbx ask "show me all active users"
 | `:` | Command palette            |
 | `e` | Toggle explorer            |
 | `E` | Toggle editor              |
+| `c` | Switch connection          |
 | `Q` | Query Browser              |
 | `a` | Ask AI (NL→SQL)            |
 | `x` | Export                     |

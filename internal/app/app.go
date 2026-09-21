@@ -98,6 +98,8 @@ type Model struct {
 	queryBrowser               *querybrowser.QueryBrowser
 	queryBrowserOpen           bool
 	runner                   *statementRunner
+	connectCancelled         bool
+	forcePicker              bool
 }
 
 var spinnerChars = [9]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"}
@@ -208,7 +210,8 @@ func (m Model) connectToDB(project config.FoundProject) tea.Cmd {
 			return dbConnectedMsg{err: fmt.Errorf("no DSN provided")}
 		}
 
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 		conn, err := pgx.Connect(ctx, dsn)
 		if err != nil {
 			return dbConnectedMsg{err: fmt.Errorf("failed to connect: %w", err)}
@@ -993,16 +996,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = fmt.Errorf("no .dbx.toml files found in ~/dev")
 			return m, nil
 		}
-		if len(msg.projects) == 1 {
-			m.state = StateLoading
-			m.project = &msg.projects[0]
-			m.toast.ShowInfo(fmt.Sprintf("Connecting to %s...", msg.projects[0].Name))
-			return m, m.connectToDB(msg.projects[0])
+		// Count active projects
+		activeCount := 0
+		hasInactive := false
+		for _, p := range msg.projects {
+			if p.Active {
+				activeCount++
+			} else {
+				hasInactive = true
+			}
 		}
+		// Auto-connect: only if 1 active AND no inactive projects to manage
+		// Skip auto-connect if user explicitly asked for the picker (e.g. from error)
+		if activeCount == 1 && !hasInactive && !m.forcePicker {
+			for _, p := range msg.projects {
+				if p.Active {
+					m.state = StateLoading
+					m.project = &p
+					m.toast.ShowInfo(fmt.Sprintf("Connecting to %s...", p.Name))
+					return m, m.connectToDB(p)
+				}
+			}
+		}
+		// Show picker: multiple active, or inactive projects exist, or user forced it
+		m.forcePicker = false
 		m.picker.SetProjects(msg.projects)
 		return m, nil
 
 	case dbConnectedMsg:
+		if m.connectCancelled {
+			m.connectCancelled = false
+			return m, nil
+		}
 		if msg.err != nil {
 			m.state = StateError
 			m.err = msg.err
@@ -1017,6 +1042,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.loadSchema(msg.conn, *msg.project)
 
 	case schemaLoadedMsg:
+		if m.connectCancelled {
+			m.connectCancelled = false
+			return m, nil
+		}
 		if msg.err != nil {
 			m.state = StateError
 			m.err = msg.err
@@ -1420,8 +1449,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case picker.ConnectionSelectedMsg:
 		m.state = StateLoading
 		m.project = &msg.Project
+		m.connectCancelled = false
 		m.toast.ShowInfo(fmt.Sprintf("Connecting to %s...", msg.Project.Name))
 		return m, m.connectToDB(msg.Project)
+
+	case picker.ProjectToggledMsg:
+		// Persist the active/inactive state
+		state, err := config.LoadProjectState()
+		if err == nil {
+			if msg.Active {
+				state.SetActive(msg.Project.Path)
+			} else {
+				state.SetInactive(msg.Project.Path)
+			}
+			_ = state.Save()
+		}
+		if msg.Active {
+			m.toast.ShowInfo(fmt.Sprintf("Enabled %s", msg.Project.Name))
+		} else {
+			m.toast.ShowInfo(fmt.Sprintf("Disabled %s", msg.Project.Name))
+		}
+		return m, nil
 
 	case palette.CommandSelectedMsg:
 		return m.handlePaletteCommand(msg.Action)
@@ -1559,6 +1607,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			key := msg.String()
 			if key == "q" || key == "ctrl+c" {
 				return m, tea.Quit
+			}
+			return m, nil
+		}
+
+		if m.state == StateError {
+			key := msg.String()
+			if key == "q" || key == "ctrl+c" {
+				return m, tea.Quit
+			}
+			if key == "r" || key == "enter" {
+				if m.project != nil {
+					m.state = StateLoading
+					m.connectCancelled = false
+					m.toast.ShowInfo(fmt.Sprintf("Retrying connection to %s...", m.project.Name))
+					return m, m.connectToDB(*m.project)
+				}
+			}
+			if key == "esc" {
+				m.connectCancelled = true
+				m.forcePicker = true
+				m.state = StatePicker
+				return m, m.scanProjects()
+			}
+			return m, nil
+		}
+
+		if m.state == StateLoading {
+			key := msg.String()
+			if key == "esc" || key == "q" || key == "ctrl+c" {
+				m.connectCancelled = true
+				m.forcePicker = true
+				m.state = StatePicker
+				return m, m.scanProjects()
 			}
 			return m, nil
 		}
@@ -1792,6 +1873,10 @@ func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
 		m.helpModal.Show()
 	case "global.rollback":
 		return m.handleRollback()
+	case "global.switch_connection":
+		// Re-scan projects and show picker
+		m.state = StatePicker
+		return m, m.scanProjects()
 	case "global.query_browser":
 		if !m.queryBrowserOpen && !m.editorOpen {
 			m.queryBrowserOpen = true
@@ -2178,9 +2263,11 @@ func (m Model) View() tea.View {
 	case StatePicker:
 		content = m.picker.View()
 	case StateLoading:
-		content = m.styles.Text.Render("Connecting to database...")
+		content = m.styles.Text.Render("Connecting to database...") + "\n\n" +
+			m.styles.Text.Render("  esc cancel")
 	case StateError:
-		content = m.styles.Error.Render(fmt.Sprintf("Error: %v", m.err))
+		content = m.styles.Error.Render(fmt.Sprintf("Error: %v", m.err)) + "\n\n" +
+			m.styles.Text.Render("  r retry  ·  esc connections  ·  q quit")
 	case StateMain:
 		content = m.renderMainView()
 	}

@@ -29,6 +29,8 @@ func DefaultCommands() []command {
 		{Name: "Undo Row Drafts", Alias: "undo", Action: "grid.undo", Section: SectionDatabase},
 		{Name: "Rollback Last Transaction", Alias: "rollback", Action: "global.rollback", Section: SectionDatabase},
 
+		{Name: "Switch Connection", Alias: "switch", Action: "global.switch_connection", Section: SectionDatabase},
+
 		{Name: "Execute Query", Alias: "execute", Action: "editor.execute", Section: SectionQuery},
 		{Name: "Clear Editor", Alias: "clear", Action: "editor.clear", Section: SectionQuery},
 		{Name: "Copy SQL", Alias: "copy", Action: "editor.copy", Section: SectionQuery},

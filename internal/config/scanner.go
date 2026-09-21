@@ -16,10 +16,18 @@ func NewScanner(rootDir string) *Scanner {
 }
 
 func (s *Scanner) Scan() []FoundProject {
+	state, _ := LoadProjectState()
+
 	results := s.scanWithFD()
 	if len(results) == 0 {
 		results = s.scanWithWalkDir()
 	}
+
+	// Mark active/inactive based on persisted state
+	for i := range results {
+		results[i].Active = state.IsActive(results[i].Path)
+	}
+
 	return results
 }
 

@@ -21,6 +21,7 @@ type FoundProject struct {
 	Name       string
 	Path       string
 	Connection ProjectConnection
+	Active     bool
 }
 
 func LoadProjectConfig(path string) (*ProjectConfig, error) {

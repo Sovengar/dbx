@@ -117,6 +117,7 @@ func (m *HelpModal) View() string {
 	lines = append(lines, m.renderKeybind("global.export", "Export"))
 	lines = append(lines, m.renderKeybind("global.query_browser", "Query Browser"))
 	lines = append(lines, m.renderKeybind("global.rollback", "Rollback Last Transaction"))
+	lines = append(lines, m.renderKeybind("global.switch_connection", "Switch Connection"))
 	lines = append(lines, "")
 
 	lines = append(lines, m.styles.Header.Render("Explorer"))

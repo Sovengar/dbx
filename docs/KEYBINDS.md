@@ -11,6 +11,7 @@ Actions follow the **first-letter rule** — the primary key is the first letter
 | Key | Action |
 |-----|--------|
 | `a` | **a**sk (NL→SQL) |
+| `c` | **c**hange connection |
 | `d` | **d**elete |
 | `e` | **e**xplorer toggle |
 | `x` | e**x**port |
@@ -45,6 +46,24 @@ Each action has a primary key and may have alternatives. All are overridable.
 | `global.export` | `x` | Export current data |
 | `global.query_browser` | `Q` | Open query browser (history + favorites) |
 | `global.rollback` | `U` | Roll back the pending DML transaction |
+| `global.switch_connection` | `c` | Open picker to switch projects |
+
+### Connection Picker
+
+Shown on startup (when multiple projects exist or inactive projects are present)
+and when pressing `c` to switch connections.
+
+| Key | Action |
+|-----|--------|
+| `j`/`k` or `↑`/`↓` | Navigate up/down |
+| `Space` | Toggle active/inactive on selected project |
+| `Enter` | Connect to selected project (must be active) |
+| `q`/`Ctrl+C` | Quit |
+
+Inactive projects appear grayed out with `[off]` tag. Press `Space` to toggle.
+Auto-connect triggers only when exactly 1 project is active and no inactive
+projects exist. If any project is inactive, the picker is always shown so you
+can manage active/inactive state.
 
 ## DML Transactions
 
@@ -323,6 +342,9 @@ The statusbar shows relevant keybinds based on current context:
 ```
 [Transaction pending]  (prepended to the action bar)
 U rollback · tx pending
+
+[Picker]
+j/k navigate · space toggle · enter select · q quit
 
 [Explorer-focused]
 / filter · n new · d drop · v DDL · Enter Open table data · Space Collapse schema · Tab Preview

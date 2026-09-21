@@ -68,6 +68,7 @@ func DefaultKeybindings() map[string]string {
 		"global.export":         "x",
 		"global.query_browser":  "Q",
 		"global.rollback":       "U",
+		"global.switch_connection": "c",
 
 		"explorer.down":          "j",
 		"explorer.up":            "k",
@@ -159,6 +160,7 @@ func defaultBindings() map[string][]string {
 		"global.export":         {"x"},
 		"global.query_browser":  {"Q"},
 		"global.rollback":       {"U"},
+		"global.switch_connection": {"c"},
 
 		"explorer.down":          {"j", "down"},
 		"explorer.up":            {"k", "up"},
