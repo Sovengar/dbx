@@ -706,3 +706,48 @@ func TestAsk_OpensWithGridPreviewFocus(t *testing.T) {
 		t.Fatal("ASK did not open while the grid preview had focus")
 	}
 }
+
+// Scenario: The server rejects a mutation that passes client validation
+//
+// This drives the full ASK wiring with a statement the validator accepts
+// (setval is not in the forbidden set), proving the READ ONLY transaction is
+// the authoritative guard. Gated behind DBX_TEST_DSN.
+func TestAsk_ReadOnlyTxRejectsSelectBasedMutation(t *testing.T) {
+	dsn := testDSN(t)
+	conn := connectTestDB(t, dsn)
+	ctx := context.Background()
+	if _, err := conn.Exec(ctx, "CREATE SEQUENCE IF NOT EXISTS dbx_ask_mut_seq"); err != nil {
+		t.Fatalf("create sequence: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.Exec(context.Background(), "DROP SEQUENCE IF EXISTS dbx_ask_mut_seq")
+	})
+
+	stmt := "SELECT setval('dbx_ask_mut_seq', 42)"
+	if !isSelectOnly(stmt) {
+		t.Fatalf("test premise broken: %q should pass client validation", stmt)
+	}
+
+	provider := &fakeProvider{name: "fake", sql: stmt}
+	m := newAskTestModel(t, provider)
+	m.runner = newStatementRunner(conn)
+	m = openAsk(t, m)
+	m = submitAsk(t, m, "advance the sequence")
+	m = confirmAndExecute(t, m)
+
+	turn := lastTurn(t, m)
+	if turn.Status != ask.TurnError || turn.Err == "" {
+		t.Fatalf("turn = %+v, want the READ ONLY transaction to reject the mutation", turn)
+	}
+	if !m.ask.IsVisible() {
+		t.Fatal("pane should stay open after the server rejection")
+	}
+
+	var last int64
+	if err := conn.QueryRow(ctx, "SELECT last_value FROM dbx_ask_mut_seq").Scan(&last); err != nil {
+		t.Fatalf("read sequence: %v", err)
+	}
+	if last != 1 {
+		t.Fatalf("sequence last_value = %d, want 1 (unchanged)", last)
+	}
+}
