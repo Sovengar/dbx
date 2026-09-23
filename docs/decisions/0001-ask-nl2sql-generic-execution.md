@@ -88,11 +88,18 @@ control before anything touches the database.
   is acceptable: the authoritative guard is the transaction, and over-rejection
   is fail-safe.
 - Correctness of the READ ONLY guarantee is only proven against a real
-  PostgreSQL. The proving test (`TestAsk_ReadOnlyTxRejectsDML` and
-  `TestAsk_ReadOnlyTxRejectsSelectBasedMutation`) is gated by `DBX_TEST_DSN`,
-  which is a **mandatory verification step**, not optional.
+  PostgreSQL. The proving tests (`TestAsk_ReadOnlyTxRejectsDML` and
+  `TestAsk_ReadOnlyTxRejectsSelectBasedMutation`) run **automatically**: they
+  start a real PostgreSQL via testcontainers-go (`postgres:16-alpine`) when
+  `DBX_TEST_DSN` is unset, and use `DBX_TEST_DSN` as an override when set. This
+  is a **mandatory verification step**, not optional.
+- **Accepted tradeoff:** testcontainers-go adds ~50 indirect Go modules for a
+  test-only need, and the tests require Docker at run time; without Docker they
+  skip with a clear message. A hand-rolled Docker invocation or a committed
+  Postgres service was rejected as more brittle.
 - A single connection is shared: ASK cannot run while a DML transaction is
-  pending (mitigated by the refusal above).
+  pending (mitigated by the refusal above), and other DB commands are refused
+  while an ASK read-only transaction is in flight.
 
 ## Alternatives considered
 

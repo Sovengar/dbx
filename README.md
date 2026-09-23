@@ -327,3 +327,9 @@ DBX_TEST_DSN='postgres://user:pass@localhost:5432/db' go test ./internal/app -ru
 ```
 
 Either way this is a **mandatory verification step**, not optional.
+
+**Accepted tradeoff:** testcontainers-go pulls ~50 indirect Go modules for a
+test-only need, and the tests require Docker at run time. When Docker is
+unavailable they skip with a clear message instead of failing, so the suite
+still runs on machines without it. The alternative (a hand-rolled Docker
+invocation or a committed Postgres service) was rejected as more brittle.
