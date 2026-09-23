@@ -3,7 +3,7 @@
 ```mermaid
 flowchart LR
     I["idea-refiner<br/>issue.md"] --> D["Decisions locked<br/>generic SELECT + context hint<br/>SELECT-only: validate + READ ONLY tx"]
-    D --> B["behavior.feature<br/>17 scenarios"]
+    D --> B["behavior.feature<br/>19 scenarios"]
     B --> P["plan.md<br/>adr_required: true"]
     P --> C["context.md<br/>file map + integration points"]
     C --> G["diagrams"]

@@ -647,3 +647,62 @@ func TestAsk_ExecutedQueryRecordedInHistory(t *testing.T) {
 		t.Fatalf("history SQL = %q, want the executed query", entries[0].SQL)
 	}
 }
+
+// Scenario: `a` does not open ASK while the grid's WHERE filter is active
+func TestAsk_DoesNotOpenWhileWhereFiltering(t *testing.T) {
+	m := newAskTestModel(t, &fakeProvider{name: "fake"})
+	m.grid.SetData(queryResult([]interface{}{"alpha"}), "public", "users")
+	m.router.FocusPane(FocusGrid)
+	m.grid.Focus()
+	m, _ = press(t, m, tea.KeyPressMsg{Code: '/'})
+	if !m.grid.IsWhereFiltering() {
+		t.Fatal("grid did not enter WHERE-filter mode")
+	}
+
+	m, _ = press(t, m, tea.KeyPressMsg{Code: 'a', Text: "a"})
+	if m.askOpen || m.ask.IsVisible() {
+		t.Fatal("ASK opened while the WHERE filter was active")
+	}
+
+	// The key reached the filter, not the global handler.
+	m, _ = press(t, m, tea.KeyPressMsg{Code: 'z', Text: "z"})
+	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := m.grid.WhereClause(); got != "az" {
+		t.Fatalf("grid WHERE = %q, want %q", got, "az")
+	}
+}
+
+// Scenario: `a` is typed into the editor instead of opening ASK
+func TestAsk_DoesNotOpenWhileEditorOpen(t *testing.T) {
+	m := newAskTestModel(t, &fakeProvider{name: "fake"})
+	m.editorOpen = true
+	m.editor.Focus()
+
+	m, _ = press(t, m, tea.KeyPressMsg{Code: 'a', Text: "a"})
+
+	if m.askOpen || m.ask.IsVisible() {
+		t.Fatal("ASK opened while the editor was open")
+	}
+	if !strings.Contains(m.editor.Content(), "a") {
+		t.Fatalf("editor content = %q, want it to contain 'a'", m.editor.Content())
+	}
+}
+
+// Scenario: ASK is globally available with focus on the grid and on a preview
+func TestAsk_OpensWithGridFocus(t *testing.T) {
+	m := newAskTestModel(t, &fakeProvider{name: "fake"})
+	m.router.FocusPane(FocusGrid)
+	m = openAsk(t, m)
+	if !m.ask.IsVisible() {
+		t.Fatal("ASK did not open while the grid had focus")
+	}
+}
+
+func TestAsk_OpensWithGridPreviewFocus(t *testing.T) {
+	m := newAskTestModel(t, &fakeProvider{name: "fake"})
+	m.router.FocusPane(FocusGridPreview)
+	m = openAsk(t, m)
+	if !m.ask.IsVisible() {
+		t.Fatal("ASK did not open while the grid preview had focus")
+	}
+}
