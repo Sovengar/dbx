@@ -91,6 +91,8 @@ func (o *OpenAICompatible) Generate(ctx context.Context, prompt string, schema s
 	return sql, nil
 }
 
+const defaultOpenCodeBaseURL = "https://opencode.ai/zen/go/v1"
+
 func DetectOpenCodeConfig() (apiKey, model, baseURL string, found bool) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -105,7 +107,7 @@ func DetectOpenCodeConfig() (apiKey, model, baseURL string, found bool) {
 
 	if key := os.Getenv("ZEN_API_KEY"); key != "" {
 		apiKey = key
-		baseURL = "https://opencode.ai/zen/go/v1"
+		baseURL = defaultOpenCodeBaseURL
 		found = true
 	}
 
@@ -120,34 +122,20 @@ func DetectOpenCodeConfig() (apiKey, model, baseURL string, found bool) {
 			if json.Unmarshal(authData, &authCfg) == nil {
 				if p, ok := authCfg["opencode-go"]; ok && p.Key != "" {
 					apiKey = p.Key
-					baseURL = "https://opencode.ai/zen/go/v1"
+					baseURL = defaultOpenCodeBaseURL
 					found = true
 				}
 			}
 		}
 	}
 
-	// Check opencode.json for baseURL
-	configPath := filepath.Join(home, ".config", "opencode", "opencode.json")
-	if data, err := os.ReadFile(configPath); err == nil {
-		var cfg struct {
-			Provider map[string]struct {
-				Options struct {
-					BaseURL string `json:"baseURL"`
-				} `json:"options"`
-			} `json:"provider"`
-		}
-		if json.Unmarshal(data, &cfg) == nil {
-			if p, ok := cfg.Provider["openai"]; ok {
-				if p.Options.BaseURL != "" {
-					baseURL = p.Options.BaseURL
-				}
-			}
-		}
+	// Check opencode config for a configured baseURL (v2 opencode.jsonc, then v1 opencode.json)
+	if configured := detectOpenCodeBaseURL(home); configured != "" {
+		baseURL = configured
 	}
 
 	if baseURL == "" {
-		baseURL = "https://opencode.ai/zen/go/v1"
+		baseURL = defaultOpenCodeBaseURL
 	}
 
 	if model == "" {
@@ -155,6 +143,132 @@ func DetectOpenCodeConfig() (apiKey, model, baseURL string, found bool) {
 	}
 
 	return
+}
+
+// detectOpenCodeBaseURL reads the opencode config and returns a configured
+// provider baseURL, if any. v2 stores config in opencode.jsonc (JSONC); v1 used
+// opencode.json. Both live in ~/.config/opencode.
+func detectOpenCodeBaseURL(home string) string {
+	configDir := filepath.Join(home, ".config", "opencode")
+	for _, name := range []string{"opencode.jsonc", "opencode.json"} {
+		data, err := os.ReadFile(filepath.Join(configDir, name))
+		if err != nil {
+			continue
+		}
+		if baseURL := baseURLFromOpenCodeConfig(data); baseURL != "" {
+			return baseURL
+		}
+	}
+	return ""
+}
+
+// baseURLFromOpenCodeConfig extracts a provider baseURL from an opencode config
+// document, supporting the v2 schema (providers.<name>.settings.baseURL) and the
+// v1 schema (provider.<name>.options.baseURL). The document may be JSONC.
+func baseURLFromOpenCodeConfig(data []byte) string {
+	var cfg struct {
+		// v2
+		Providers map[string]struct {
+			Settings struct {
+				BaseURL string `json:"baseURL"`
+			} `json:"settings"`
+		} `json:"providers"`
+		// v1
+		Provider map[string]struct {
+			Options struct {
+				BaseURL string `json:"baseURL"`
+			} `json:"options"`
+		} `json:"provider"`
+	}
+	if err := json.Unmarshal(stripJSONC(data), &cfg); err != nil {
+		return ""
+	}
+
+	for _, name := range []string{"opencode-go", "opencode", "openai"} {
+		if p, ok := cfg.Providers[name]; ok && p.Settings.BaseURL != "" {
+			return p.Settings.BaseURL
+		}
+	}
+	for _, name := range []string{"opencode-go", "opencode", "openai"} {
+		if p, ok := cfg.Provider[name]; ok && p.Options.BaseURL != "" {
+			return p.Options.BaseURL
+		}
+	}
+	return ""
+}
+
+// stripJSONC converts a JSONC document (JSON with // and /* */ comments and
+// optional trailing commas) into plain JSON. It is string-aware so that values
+// containing "//" (e.g. URLs) are preserved.
+func stripJSONC(src []byte) []byte {
+	out := make([]byte, 0, len(src))
+	i := 0
+	for i < len(src) {
+		switch c := src[i]; {
+		case c == '"':
+			out = append(out, c)
+			i++
+			for i < len(src) {
+				out = append(out, src[i])
+				if src[i] == '\\' && i+1 < len(src) {
+					out = append(out, src[i+1])
+					i += 2
+					continue
+				}
+				if src[i] == '"' {
+					i++
+					break
+				}
+				i++
+			}
+		case c == '/' && i+1 < len(src) && src[i+1] == '/':
+			i += 2
+			for i < len(src) && src[i] != '\n' {
+				i++
+			}
+		case c == '/' && i+1 < len(src) && src[i+1] == '*':
+			i += 2
+			for i < len(src) && !(src[i] == '*' && i+1 < len(src) && src[i+1] == '/') {
+				i++
+			}
+			i += 2
+		case c == ',':
+			if j := skipJSONCNoise(src, i+1); j < len(src) && (src[j] == '}' || src[j] == ']') {
+				i++ // drop trailing comma
+				continue
+			}
+			out = append(out, c)
+			i++
+		default:
+			out = append(out, c)
+			i++
+		}
+	}
+	return out
+}
+
+// skipJSONCNoise advances past whitespace and comments starting at i.
+func skipJSONCNoise(src []byte, i int) int {
+	for i < len(src) {
+		switch {
+		case src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r':
+			i++
+		case src[i] == '/' && i+1 < len(src) && src[i+1] == '/':
+			i += 2
+			for i < len(src) && src[i] != '\n' {
+				i++
+			}
+		case src[i] == '/' && i+1 < len(src) && src[i+1] == '*':
+			i += 2
+			for i < len(src) && !(src[i] == '*' && i+1 < len(src) && src[i+1] == '/') {
+				i++
+			}
+			i += 2
+		default:
+			return i
+		}
+	}
+	return i
 }
 
 func DetectHermesConfig() (apiKey, model, baseURL string, found bool) {
