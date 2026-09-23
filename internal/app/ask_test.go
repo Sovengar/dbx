@@ -739,6 +739,10 @@ func TestAsk_ReadOnlyTxRejectsSelectBasedMutation(t *testing.T) {
 	if turn.Status != ask.TurnError || turn.Err == "" {
 		t.Fatalf("turn = %+v, want the READ ONLY transaction to reject the mutation", turn)
 	}
+	lowerErr := strings.ToLower(turn.Err)
+	if !strings.Contains(lowerErr, "read-only") && !strings.Contains(lowerErr, "read only") {
+		t.Fatalf("turn error = %q, want a read-only rejection", turn.Err)
+	}
 	if !m.ask.IsVisible() {
 		t.Fatal("pane should stay open after the server rejection")
 	}
@@ -749,5 +753,73 @@ func TestAsk_ReadOnlyTxRejectsSelectBasedMutation(t *testing.T) {
 	}
 	if last != 1 {
 		t.Fatalf("sequence last_value = %d, want 1 (unchanged)", last)
+	}
+}
+
+// Scenario: A stale execution result must not attach to a newer turn
+func TestAsk_StaleExecutionIgnored(t *testing.T) {
+	provider := &fakeProvider{name: "fake", sql: "SELECT 1"}
+	runner, _ := newAskRunner(queryResult([]interface{}{"a"}), nil)
+	m := newAskTestModel(t, provider)
+	m.runner = runner
+	m = openAsk(t, m)
+	m = submitAsk(t, m, "first")
+
+	// Confirm, but leave the async execution pending.
+	_, confirmed := press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if confirmed == nil {
+		t.Fatal("confirm produced no command")
+	}
+	m, execCmd := press(t, m, confirmed())
+	if execCmd == nil {
+		t.Fatal("confirm produced no execution command")
+	}
+
+	// Esc while executing, reopen and submit a new question.
+	_, closed := press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m, _ = press(t, m, closed())
+	m = openAsk(t, m)
+	m = typeAsk(t, m, "second")
+	_, submitted2 := press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, genCmd2 := press(t, m, submitted2())
+	if genCmd2 == nil {
+		t.Fatal("second question produced no generation command")
+	}
+
+	// The stale execution result arrives: it must be ignored.
+	m, _ = press(t, m, execCmd())
+	if m.grid.HasData() {
+		t.Fatal("stale execution populated the grid")
+	}
+	turns := m.ask.Turns()
+	if turns[len(turns)-1].Status != ask.TurnGenerating {
+		t.Fatalf("newest turn = %+v, want it still generating", turns[len(turns)-1])
+	}
+
+	// The fresh generation still applies.
+	m, _ = press(t, m, genCmd2())
+	turns = m.ask.Turns()
+	if turns[len(turns)-1].Status != ask.TurnReview {
+		t.Fatalf("newest turn = %+v, want the generated SQL under review", turns[len(turns)-1])
+	}
+}
+
+// Scenario: An in-flight read-only ASK query blocks other DB commands
+func TestAsk_ReadOnlyInFlightBlocksEditorQuery(t *testing.T) {
+	runner, _ := newAskRunner(queryResult(), nil)
+	runner.readOnlyActive = true // ASK execution still in flight
+	m := newAskTestModel(t, &fakeProvider{name: "fake"})
+	m.runner = runner
+
+	cmd := m.executeQuery("UPDATE users SET a = 1")
+	if cmd == nil {
+		t.Fatal("executeQuery returned no command")
+	}
+	msg, ok := cmd().(queryExecutedMsg)
+	if !ok {
+		t.Fatalf("executeQuery produced %T, want queryExecutedMsg", cmd())
+	}
+	if msg.err == nil {
+		t.Fatal("editor query ran while a read-only ASK query was active")
 	}
 }

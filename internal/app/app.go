@@ -682,11 +682,13 @@ type askGeneratedMsg struct {
 }
 
 // askQueryExecutedMsg carries the result of an ASK query run in a READ ONLY
-// transaction.
+// transaction. seq tags the request so a stale result cannot attach to a newer
+// turn.
 type askQueryExecutedMsg struct {
 	result *postgres.QueryResult
 	sql    string
 	err    error
+	seq    int
 }
 
 func (m Model) loadTableData(schema, table string) tea.Cmd {
@@ -1017,8 +1019,9 @@ func (m Model) generateAskSQL(question string, seq int) tea.Cmd {
 }
 
 // executeAskSQL validates the generated SQL and runs it inside a READ ONLY
-// transaction, reporting the result as an askQueryExecutedMsg.
-func (m Model) executeAskSQL(sql string) tea.Cmd {
+// transaction, reporting the result as an askQueryExecutedMsg. seq identifies
+// the request so a stale result is ignored by the caller.
+func (m Model) executeAskSQL(sql string, seq int) tea.Cmd {
 	if m.ask == nil {
 		return nil
 	}
@@ -1036,10 +1039,15 @@ func (m Model) executeAskSQL(sql string) tea.Cmd {
 		m.ask.SetError(fmt.Errorf("a DML transaction is pending: commit or roll back first"))
 		return nil
 	}
+	if m.runner.readOnlyActive {
+		appDebugLog("Ask: refused, a read-only query is already running")
+		m.ask.SetError(fmt.Errorf("a read-only query is already running"))
+		return nil
+	}
 	runner := m.runner
 	return func() tea.Msg {
 		result, err := runner.executeReadOnly(context.Background(), sql)
-		return askQueryExecutedMsg{result: result, sql: sql, err: err}
+		return askQueryExecutedMsg{result: result, sql: sql, err: err, seq: seq}
 	}
 }
 
@@ -1519,7 +1527,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.generateAskSQL(msg.Question, m.askGenSeq)
 
 	case ask.AskConfirmMsg:
-		return m, m.executeAskSQL(msg.SQL)
+		return m, m.executeAskSQL(msg.SQL, m.askGenSeq)
 
 	case ask.AskClosedMsg:
 		m.askOpen = false
@@ -1542,6 +1550,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case askQueryExecutedMsg:
 		if m.ask == nil {
+			return m, nil
+		}
+		if msg.seq != m.askGenSeq {
+			appDebugLog("Ask: ignoring stale execution seq=%d (current=%d)", msg.seq, m.askGenSeq)
 			return m, nil
 		}
 		if msg.err != nil {
