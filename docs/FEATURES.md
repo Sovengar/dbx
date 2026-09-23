@@ -276,7 +276,7 @@ the first letter of the action name.
 | `d` | **d**elete |
 | `e` | **e**xplorer toggle |
 | `x` | e**x**port |
-| `f` | **f**ilter |
+| `f` | **f**ind column (grid) · **f**ilter tables (explorer) |
 | `g` | **g**o to (first/last) |
 | `i` | **i**nsert |
 | `n` | **n**ext page |

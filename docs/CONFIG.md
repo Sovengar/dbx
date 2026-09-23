@@ -39,42 +39,51 @@ mode = "system"
 # info = "#89dceb"
 
 # ─── Keybindings ───────────────────────────────────────────────
-# Custom keybind overrides (each action maps to a single key string)
+# Custom keybind overrides, keyed by the action ID. Each action maps to a
+# single key string and the override replaces every key of that action; set an
+# action to "" to unbind it. Press ? inside dbx for the full action list.
 [keybindings.custom]
-# Global
-# "global.quit" = "q"
-# "global.help" = "?"
-# "global.palette" = ":"
-# "global.ask" = "a"
-# "global.export" = "e"
-
-# Explorer
-# "explorer.expand" = ["enter", "l"]
-# "explorer.toggle_columns" = "space"
-# "explorer.collapse" = ["backspace", "h"]
-# "explorer.new" = "n"
-# "explorer.drop" = "d"
-# "explorer.ddl" = "v"
-# "explorer.filter" = "f"
-# "explorer.refresh" = "r"
+# App / UI
+# "quit" = "q"
+# "help" = "?"
+# "palette" = ":"
+# "ask" = "a"
+# "switch_connection" = "c"
+# "toggle_explorer_focus" = "e"
+# "focus_editor" = "E"
+# "query_browser" = "Q"
+# "rollback" = "U"
 
 # Grid
-# "grid.edit" = ["enter", "i"]
-# "grid.delete" = "d"
-# "grid.insert" = "o"
-# "grid.yank" = "y"
-# "grid.sort" = "s"
-# "grid.filter" = "/"
-# "grid.next_page" = "n"
-# "grid.prev_page" = "p"
+# "navigate_down" = "j"
+# "edit_cell" = "enter"
+# "delete_rows" = "d"
+# "insert_row" = "i"
+# "yank" = "y"
+# "sort_column" = "s"
+# "filter_rows" = "/"
+# "find_column" = "f"
+# "next_page" = "n"
+# "prev_page" = "p"
+# "export" = "x"
+
+# Explorer
+# "expand_node" = "enter"
+# "toggle_columns" = "space"
+# "collapse_node" = "backspace"
+# "new_table" = "n"
+# "drop_table" = "d"
+# "view_ddl" = "v"
+# "filter_tables" = "/"
+# "refresh_schema" = "r"
 
 # Editor
-# "editor.execute" = ["ctrl+enter", "ctrl+r"]
-# "editor.clear" = "ctrl+u"
-# "editor.copy" = "ctrl+y"
-# "editor.external" = "ctrl+g"
-# "editor.history_prev" = "ctrl+p"
-# "editor.history_next" = "ctrl+n"
+# "execute_query" = "ctrl+enter"
+# "clear_editor" = "ctrl+u"
+# "copy_sql" = "ctrl+y"
+# "autocomplete" = "tab"
+# "history_prev" = "ctrl+p"
+# "history_next" = "ctrl+n"
 
 # ─── Connections ───────────────────────────────────────────────
 # Connections can be defined here or via CLI
