@@ -103,6 +103,10 @@ ignored while an overlay is open.
 
 A guard refuses new database commands while an ASK read-only query is in flight.
 
+Above the panes, a **Breadcrumbs** bar shows the foreign-key navigation path
+(`schema.table → … → current table`) plus a loading spinner; it is hidden when
+there is no navigation history and no table is selected.
+
 ### Connection picker
 
 Purpose: choose which project/connection to open.
@@ -154,14 +158,16 @@ Modes: **NORMAL** navigation and paging; **EDIT** (`enter`) inline cell editing;
 **column find** (`f`) substring jump; **WHERE filter** (`/`) with context-aware
 suggestions that re-queries the server; and an **export picker** (`x`).
 
-Edits, inserts and deletes are **in-memory drafts** until committed. Committing
-(`ctrl+s`) opens the editor with the draft SQL and runs it — those statements go
-straight to the connection in autocommit, so grid edits are **not** covered by
-the editor's rollback transaction (`U`). `D` discards drafts and `u` undoes row
-drafts. Export (`x`) writes SQL/JSON/CSV to a file next to the project, or copies
-to the clipboard for a single row; `y` always yanks to the clipboard. `o`
-navigates an FK to its referenced table, `H` goes back through navigation
-history, `r` refreshes, and `s` sorts a column.
+Edits, inserts and deletes are **in-memory drafts** until committed, and are
+colour-coded: green = pending insert, blue = edited cell, red = row marked for
+deletion. Committing (`ctrl+s`) dumps the draft SQL into the editor with
+`commit on run`; running it executes the statements and commits immediately, so
+the changes become durable and **cannot** be undone with `U`. `D` discards drafts
+and `u` undoes row drafts. Export (`x`) writes SQL/JSON/CSV to a file next to the
+project, or copies to the clipboard for a single row; `y` always yanks to the
+clipboard. `s` cycles the server-side sort (ASC → DESC → none). `o` navigates an
+FK to its referenced table, `H` goes back through navigation history restoring
+the cursor and filter, and `r` refreshes.
 
 ### Grid preview
 
@@ -192,6 +198,23 @@ highlighting, a schema-aware autocomplete popup (`tab`, `ctrl+space`), query
 history (`ctrl+p`/`ctrl+n`) and clear (`ctrl+u`). Its title reads `commit on run`
 when it was opened to commit grid drafts.
 
+Autocomplete is clause-aware — suggestions follow the tokens of the current
+statement and ignore text inside strings and comments:
+
+| Context | Shows |
+|---------|-------|
+| After `FROM`/`JOIN`/`INTO`/`UPDATE` (table position) | Schemas + tables |
+| `schema_name.` | Tables in that schema |
+| `table_name.` / `alias.` / `schema_name.table_name.` | Columns of that table |
+| `SELECT` list | `*`, `DISTINCT`, referenced columns and functions |
+| `WHERE`/`ON`/`AND`/`HAVING` | Columns, then operators, then values |
+| `ORDER BY`/`GROUP BY`/`RETURNING`/`SET` | Columns |
+| Default (typing a keyword) | SQL keywords + functions |
+
+Prefix matches rank above fuzzy matches, a token you already typed is never
+offered back, and accepting a completion replaces that token in place. Tune it
+with `editor.autocomplete` and `editor.autocomplete_trigger` (see CONFIG.md).
+
 Execution semantics: DML (`INSERT`/`UPDATE`/`DELETE`/`WITH`) opens a transaction
 that **stays open** for rollback via `U`; non-DML commits any pending transaction
 and runs in autocommit. Successful queries are added to the query store (and the
@@ -206,8 +229,10 @@ Purpose: recall past queries and manage favorites.
 Opens with `Q`. Two tabs — History and Favorites — with relative timestamps, a
 `★` favorite marker and a SQL preview; `/` filters. `enter` loads a query into
 the editor, `f` toggles favorite, `d` deletes, `tab` switches tabs. History is
-persisted per project (`query_history.json`, capped at 500, deduplicated by SQL);
-entries are added on execution, not from the browser.
+persisted per project at
+`~/.local/state/dbx/projects/{project}/query_history.json` (capped at 500,
+deduplicated by SQL, isolated between projects); entries are added on execution,
+not from the browser.
 
 ### Command palette
 

@@ -48,13 +48,7 @@ The grid displays its current mode in the bottom-left corner:
 #### Draft-based Editing
 
 All changes (edits, inserts, deletes) are staged locally before being committed
-to the database:
-
-| Color  | Meaning                     |
-| ------ | --------------------------- |
-| 🟢 Green  | Pending insert row          |
-| 🔵 Blue   | Modified cell (edit draft)  |
-| 🔴 Red    | Row marked for deletion     |
+to the database, colour-coded (green insert, blue edit, red delete).
 
 No database changes occur until you execute the generated SQL from the editor.
 Executing the SQL dumped from the grid commits its transaction when the
@@ -93,28 +87,9 @@ refresh after DDL.
 
 #### Autocomplete Context
 
-Suggestions are derived from the tokens of the current statement, so they follow
-the active clause and ignore text inside strings and comments:
-
-| Context | Shows |
-|---------|-------|
-| After `FROM`/`JOIN`/`INTO`/`UPDATE` (table position) | Schemas + tables |
-| `schema_name.` | Tables in that schema |
-| `table_name.` / `alias.` / `schema_name.table_name.` | Columns of that table |
-| `SELECT` list | `*`, `DISTINCT`, referenced columns and functions |
-| `WHERE`/`ON`/`AND`/`HAVING` | Columns, then operators, then values |
-| `ORDER BY`/`GROUP BY`/`RETURNING`/`SET` | Columns |
-| Default (typing a keyword) | SQL keywords + functions |
-
-Prefix matches are ranked above fuzzy matches, a token you already typed is
-never offered back, and accepting a completion replaces that token in place
-(accepting a keyword twice never duplicates it).
-
-```toml
-[editor]
-autocomplete = true
-autocomplete_trigger = 1   # min characters before the popup opens on its own
-```
+Autocomplete is clause-aware: suggestions follow the active SQL clause and ignore
+text inside strings and comments. The full context → suggestions table lives in
+[Features → Editor](docs/FEATURES.md).
 
 ### AI (NL → SQL)
 
@@ -126,7 +101,8 @@ and any OpenAI-compatible endpoint.
 
 ### Navigation & UI
 
-- **Top bar** — active pane, `schema.table`, row count, WHERE filter, breadcrumbs.
+- **Breadcrumbs** — the FK navigation path (`schema.table → …`) with a loading
+  spinner; hidden when there is no history and no table selected.
 - **Bottom bar** — keybinds of the current view, derived from the registry.
 - **Connection picker** — switch between projects, toggling active/inactive.
 - **Grid Preview** — focus row preview from the grid.
