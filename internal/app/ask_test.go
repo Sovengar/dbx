@@ -631,3 +631,22 @@ func TestAsk_StaleGenerationIgnored(t *testing.T) {
 		t.Fatalf("second turn = %+v, want the generated SQL under review", turns[1])
 	}
 }
+
+// Scenario: ASK queries are recorded in the query history
+func TestAsk_ExecutedQueryRecordedInHistory(t *testing.T) {
+	provider := &fakeProvider{name: "fake", sql: "SELECT n FROM public.users"}
+	runner, _ := newAskRunner(queryResult([]interface{}{"a"}), nil)
+	m := newAskTestModel(t, provider)
+	m.runner = runner
+	m = openAsk(t, m)
+	m = submitAsk(t, m, "list users")
+	m = confirmAndExecute(t, m)
+
+	entries := m.queryStore.All()
+	if len(entries) != 1 {
+		t.Fatalf("query history = %d entries, want 1", len(entries))
+	}
+	if entries[0].SQL != "SELECT n FROM public.users" {
+		t.Fatalf("history SQL = %q, want the executed query", entries[0].SQL)
+	}
+}

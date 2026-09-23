@@ -1551,6 +1551,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ask.SetResultSummary(fmt.Sprintf("%d rows", msg.result.Count))
 		m.askOpen = false
 		m.ask.Hide()
+		// Record ASK queries in history like editor queries, so they can be
+		// recalled from the query browser and the editor.
+		if m.editor != nil {
+			m.editor.PushHistory(msg.sql)
+		}
+		if m.queryStore != nil {
+			m.queryStore.Add(msg.sql)
+		}
 		m.grid.SetData(msg.result, "", "query")
 		m.router.FocusPane(FocusGrid)
 		m.toast.ShowSuccess(fmt.Sprintf("Query returned %d rows", msg.result.Count))
