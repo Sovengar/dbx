@@ -179,6 +179,8 @@ func defaultActions() []Action {
 			Contexts: []string{ContextEditor}, Owner: "editor"},
 		{ID: "history_next", Keys: []string{"ctrl+n"}, Section: SectionQuery, Description: "History Next",
 			Contexts: []string{ContextEditor}, Owner: "editor"},
+		{ID: "close_editor", Keys: []string{"esc"}, Section: SectionUI, Description: "Close Editor",
+			Contexts: []string{ContextEditor}, Owner: "app"},
 	}
 
 	return actions

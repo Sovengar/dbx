@@ -77,6 +77,17 @@ func (e *SQLEditor) AutocompleteVisible() bool { return e.autocomplete.Visible()
 func (e *SQLEditor) AutocompleteReady() bool   { return e.schemaLoaded }
 func (e *SQLEditor) AutocompleteItemCount() int { return len(e.autocomplete.filtered) }
 
+// CancelAutocomplete dismisses an open autocomplete popup and reports whether
+// one was actually open. Callers (e.g. the close_editor action) use the return
+// value to fall through to closing the editor only when nothing was cancelled.
+func (e *SQLEditor) CancelAutocomplete() bool {
+	if e.autocomplete.Visible() {
+		e.autocomplete.Cancel()
+		return true
+	}
+	return false
+}
+
 func (e *SQLEditor) Content() string {
 	return strings.Join(e.lines, "\n")
 }
@@ -259,13 +270,6 @@ func (e *SQLEditor) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		e.insertText(" ")
 		e.updateAutocompleteAfterEdit()
 		return nil, true
-
-	case "esc":
-		if e.autocomplete.Visible() {
-			e.autocomplete.Cancel()
-			return nil, true
-		}
-		return nil, false // handled by parent
 
 	default:
 		if len(msg.Text) > 0 {

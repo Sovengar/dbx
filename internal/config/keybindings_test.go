@@ -26,6 +26,16 @@ func TestKeybindRegistry_QuitNotInEditor(t *testing.T) {
 	}
 }
 
+func TestKeybindRegistry_ResolveCloseEditor(t *testing.T) {
+	r := NewKeybindRegistry(KeybindingsConfig{})
+	if id, ok := r.Resolve("esc", ContextEditor); !ok || id != "close_editor" {
+		t.Fatalf("Resolve('esc','editor') = %q,%v want close_editor,true", id, ok)
+	}
+	if _, ok := r.Resolve("esc", ContextGrid); ok {
+		t.Fatal("close_editor must not resolve in the grid context")
+	}
+}
+
 func TestKeybindRegistry_PrimaryKey(t *testing.T) {
 	r := NewKeybindRegistry(KeybindingsConfig{})
 	if got := r.PrimaryKey("copy_sql"); got != "ctrl+y" {

@@ -1830,14 +1830,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			appDebugLog("KeyPress: key=%q editorOpen=%v focus=%q", key, m.editorOpen, m.router.Focus())
 
 			if m.editorOpen {
-				if key == "esc" {
-					m.editorOpen = false
-					m.editor.Blur()
-					m.editor.SetCommitOnRun(false)
-					m.keybindsPane.SetEditorOpen(false)
-					return m, nil
-				}
-
 				if action, ok := m.keybinds.Resolve(key, config.ContextEditor); ok && m.hasAppAction(action) {
 					return m.dispatchAction(action)
 				}
@@ -2125,6 +2117,18 @@ func (m Model) appActions() map[config.ActionID]func(Model) (tea.Model, tea.Cmd)
 				m.keybindsPane.SetEditorOpen(true)
 			}
 			return m, m.handleCopySQL()
+		},
+		"close_editor": func(m Model) (tea.Model, tea.Cmd) {
+			// Esc first dismisses an open autocomplete popup; the editor only
+			// closes when there is nothing left to cancel.
+			if m.editor.CancelAutocomplete() {
+				return m, nil
+			}
+			m.editorOpen = false
+			m.editor.Blur()
+			m.editor.SetCommitOnRun(false)
+			m.keybindsPane.SetEditorOpen(false)
+			return m, nil
 		},
 		"commit_drafts": func(m Model) (tea.Model, tea.Cmd) {
 			if m.router.Focus() != FocusGrid || m.grid == nil {
