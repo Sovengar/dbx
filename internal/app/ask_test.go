@@ -588,3 +588,46 @@ func TestBuildAskContextHint(t *testing.T) {
 		})
 	}
 }
+
+// Scenario: A stale generation result must not attach to a newer turn
+func TestAsk_StaleGenerationIgnored(t *testing.T) {
+	provider := &fakeProvider{name: "fake", sql: "SELECT 1"}
+	m := newAskTestModel(t, provider)
+	m = openAsk(t, m)
+
+	// Submit the first question but leave its async result pending.
+	m = typeAsk(t, m, "first")
+	_, submitted1 := press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, genCmd1 := press(t, m, submitted1())
+	if genCmd1 == nil {
+		t.Fatal("first question produced no generation command")
+	}
+
+	// Close, reopen and submit a second question.
+	_, closed := press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m, _ = press(t, m, closed())
+	m = openAsk(t, m)
+	m = typeAsk(t, m, "second")
+	_, submitted2 := press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, genCmd2 := press(t, m, submitted2())
+	if genCmd2 == nil {
+		t.Fatal("second question produced no generation command")
+	}
+
+	// The stale first result arrives and must be ignored.
+	m, _ = press(t, m, genCmd1())
+	turns := m.ask.Turns()
+	if len(turns) != 2 {
+		t.Fatalf("transcript = %+v, want two turns", turns)
+	}
+	if turns[1].Status != ask.TurnGenerating || turns[1].SQL != "" {
+		t.Fatalf("second turn = %+v, want it still generating", turns[1])
+	}
+
+	// The fresh second result applies.
+	m, _ = press(t, m, genCmd2())
+	turns = m.ask.Turns()
+	if turns[1].SQL != "SELECT 1" || turns[1].Status != ask.TurnReview {
+		t.Fatalf("second turn = %+v, want the generated SQL under review", turns[1])
+	}
+}

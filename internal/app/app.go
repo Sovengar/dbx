@@ -104,6 +104,7 @@ type Model struct {
 	aiProviderErr              error
 	askSchemaText              string
 	askContextHint             string
+	askGenSeq                  int
 	runner                     *statementRunner
 	connectCancelled           bool
 	forcePicker                bool
@@ -672,10 +673,12 @@ type queryExecutedMsg struct {
 	committedTx bool
 }
 
-// askGeneratedMsg carries the result of an async NL→SQL generation.
+// askGeneratedMsg carries the result of an async NL→SQL generation. seq tags
+// the request so a stale result cannot attach to a newer turn.
 type askGeneratedMsg struct {
 	sql string
 	err error
+	seq int
 }
 
 // askQueryExecutedMsg carries the result of an ASK query run in a READ ONLY
@@ -990,8 +993,9 @@ func buildAskContextHint(schema, table, where string) string {
 }
 
 // generateAskSQL runs the NL→SQL provider asynchronously so the UI stays
-// responsive while the model generates.
-func (m Model) generateAskSQL(question string) tea.Cmd {
+// responsive while the model generates. seq identifies the request so a stale
+// result (the pane was closed and reopened) is ignored by the caller.
+func (m Model) generateAskSQL(question string, seq int) tea.Cmd {
 	provider := m.aiProvider
 	schema := m.askSchemaText
 	if schema == "" {
@@ -1000,15 +1004,15 @@ func (m Model) generateAskSQL(question string) tea.Cmd {
 	contextHint := m.askContextHint
 	return func() tea.Msg {
 		if provider == nil {
-			return askGeneratedMsg{err: fmt.Errorf("no AI provider configured")}
+			return askGeneratedMsg{err: fmt.Errorf("no AI provider configured"), seq: seq}
 		}
 		prompt := question
 		if contextHint != "" {
 			prompt = question + "\n\nContext (hint, not a restriction):\n" + contextHint
 		}
-		appDebugLog("Ask: generating prompt=%q schemaLen=%d", prompt, len(schema))
+		appDebugLog("Ask: generating seq=%d prompt=%q schemaLen=%d", seq, prompt, len(schema))
 		sql, err := provider.Generate(context.Background(), prompt, schema)
-		return askGeneratedMsg{sql: sql, err: err}
+		return askGeneratedMsg{sql: sql, err: err, seq: seq}
 	}
 }
 
@@ -1511,7 +1515,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ask.AskSubmittedMsg:
-		return m, m.generateAskSQL(msg.Question)
+		m.askGenSeq++
+		return m, m.generateAskSQL(msg.Question, m.askGenSeq)
 
 	case ask.AskConfirmMsg:
 		return m, m.executeAskSQL(msg.SQL)
@@ -1522,6 +1527,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case askGeneratedMsg:
 		if m.ask == nil {
+			return m, nil
+		}
+		if msg.seq != m.askGenSeq {
+			appDebugLog("Ask: ignoring stale generation seq=%d (current=%d)", msg.seq, m.askGenSeq)
 			return m, nil
 		}
 		if msg.err != nil {
