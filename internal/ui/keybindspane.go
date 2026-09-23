@@ -12,6 +12,10 @@ import (
 	"github.com/buble/dbx/internal/ui/bordered"
 )
 
+// maxKeybindsPerLine caps how many keybind segments the pane packs into a
+// single line. Extra entries flow onto a new line below.
+const maxKeybindsPerLine = 7
+
 // KeybindsPane renders the keybinds of the currently focused view, derived
 // entirely from the keybind registry (no hardcoded key strings).
 type KeybindsPane struct {
@@ -122,20 +126,25 @@ func (s *KeybindsPane) renderLines() []string {
 		return []string{strings.Join(segments, " · ")}
 	}
 
-	// Wrap segments into lines that fit the pane width.
+	// Wrap segments into lines. A line breaks either when it reaches
+	// maxKeybindsPerLine entries or when the next segment would overflow the
+	// pane width, whichever comes first.
 	var lines []string
 	current := ""
+	count := 0
 	for _, seg := range segments {
-		candidate := seg
-		if current != "" {
-			candidate = current + " · " + seg
-		}
-		if current != "" && lipgloss.Width(candidate) > s.width-2 {
+		if current != "" && (count >= maxKeybindsPerLine || lipgloss.Width(current+" · "+seg) > s.width-2) {
 			lines = append(lines, current)
 			current = seg
+			count = 1
 			continue
 		}
-		current = candidate
+		if current == "" {
+			current = seg
+		} else {
+			current += " · " + seg
+		}
+		count++
 	}
 	if current != "" {
 		lines = append(lines, current)

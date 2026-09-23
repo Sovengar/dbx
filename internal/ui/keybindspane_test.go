@@ -113,6 +113,34 @@ func TestKeybindsPane_TxPendingShowsRollback(t *testing.T) {
 	}
 }
 
+// Scenario: The editor announces its Esc binding (close editor).
+func TestKeybindsPane_EditorShowsCloseKey(t *testing.T) {
+	p := paneWith(config.ContextEditor)
+	p.SetEditorOpen(true)
+	if !linesContain(p.renderLines(), "esc Close Editor") {
+		t.Fatalf("editor pane does not show 'esc Close Editor': %v", p.renderLines())
+	}
+}
+
+// Scenario: The pane packs at most 7 keybinds per line and wraps the rest.
+func TestKeybindsPane_MaxSevenKeybindsPerLine(t *testing.T) {
+	p := paneWith(config.ContextGrid)
+	p.SetWidth(1000) // wide enough that only the count cap forces a wrap
+
+	lines := p.renderLines()
+	if len(lines) < 2 {
+		t.Fatalf("expected the grid keybinds to span multiple lines, got %d: %v", len(lines), lines)
+	}
+	for i, line := range lines {
+		if n := strings.Count(line, " · ") + 1; n > maxKeybindsPerLine {
+			t.Fatalf("line %d has %d keybinds (> %d): %q", i, n, maxKeybindsPerLine, line)
+		}
+	}
+	if n := strings.Count(lines[0], " · ") + 1; n != maxKeybindsPerLine {
+		t.Fatalf("first line should be full (%d keybinds), got %d: %q", maxKeybindsPerLine, n, lines[0])
+	}
+}
+
 func TestKeybindsPane_NoTxHidesRollback(t *testing.T) {
 	p := paneWith(config.ContextExplorer)
 	p.SetTxPending(false)
