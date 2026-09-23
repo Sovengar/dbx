@@ -62,11 +62,46 @@ func TestSQLEditor_TextKeysDoNotResolve(t *testing.T) {
 		}
 	}
 
-	if _, handled := ed.Update(tea.KeyPressMsg{Code: 'a', Text: "a"}); !handled {
-		t.Fatal("letter was not handled as local text entry")
+	ed.SetContent("ab")
+	ed.SetCursorPos(0, len("ab"))
+
+	// space
+	if _, handled := ed.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}); !handled {
+		t.Fatal("space was not handled as local text entry")
 	}
-	if got := ed.Content(); got != "a" {
-		t.Fatalf("content = %q, want %q after typing", got, "a")
+	if got := ed.Content(); got != "ab " {
+		t.Fatalf("content = %q, want %q after space", got, "ab ")
+	}
+
+	// backspace
+	if _, handled := ed.Update(tea.KeyPressMsg{Code: tea.KeyBackspace}); !handled {
+		t.Fatal("backspace was not handled as local text entry")
+	}
+	if got := ed.Content(); got != "ab" {
+		t.Fatalf("content = %q, want %q after backspace", got, "ab")
+	}
+
+	// enter
+	if _, handled := ed.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); !handled {
+		t.Fatal("enter was not handled as local text entry")
+	}
+	if got := ed.Content(); got != "ab\n" {
+		t.Fatalf("content = %q, want %q after enter", got, "ab\n")
+	}
+
+	// digit and letter
+	ed.SetContent("")
+	ed.SetCursorPos(0, 0)
+	for _, msg := range []tea.KeyPressMsg{
+		{Code: '1', Text: "1"},
+		{Code: 'a', Text: "a"},
+	} {
+		if _, handled := ed.Update(msg); !handled {
+			t.Fatalf("key %q was not handled as local text entry", msg.String())
+		}
+	}
+	if got := ed.Content(); got != "1a" {
+		t.Fatalf("content = %q, want %q after typing", got, "1a")
 	}
 }
 
