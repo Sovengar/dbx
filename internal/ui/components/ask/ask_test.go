@@ -135,7 +135,7 @@ func TestAsk_TranscriptPersistsAcrossReopen(t *testing.T) {
 	typeText(a, "how many users")
 	a.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	a.SetGeneratedSQL("SELECT count(*) FROM users")
-	a.SetResultSummary("1 rows")
+	a.MarkExecuted()
 	a.Hide()
 
 	a.Show()

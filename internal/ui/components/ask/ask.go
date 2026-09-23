@@ -75,8 +75,6 @@ type Ask struct {
 	contextSchema string
 	contextTable  string
 	contextWhere  string
-
-	resultSummary string
 }
 
 // New creates an empty ASK overlay.
@@ -160,15 +158,14 @@ func (a *Ask) SetError(err error) {
 	askDebugLog("SetError: err=%q turns=%d", err.Error(), len(a.turns))
 }
 
-// SetResultSummary records the outcome of a successful execution.
-func (a *Ask) SetResultSummary(summary string) {
+// MarkExecuted records that the current turn's SQL ran successfully.
+func (a *Ask) MarkExecuted() {
 	if len(a.turns) > 0 {
 		last := &a.turns[len(a.turns)-1]
 		last.Status = TurnExecuted
 		last.Err = ""
 	}
-	a.resultSummary = summary
-	askDebugLog("SetResultSummary: summary=%q turns=%d", summary, len(a.turns))
+	askDebugLog("MarkExecuted: turns=%d", len(a.turns))
 }
 
 // Update handles a message while the pane is visible. The bool reports whether

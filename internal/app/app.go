@@ -1548,7 +1548,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ask.SetError(msg.err)
 			return m, nil
 		}
-		m.ask.SetResultSummary(fmt.Sprintf("%d rows", msg.result.Count))
+		m.ask.MarkExecuted()
 		m.askOpen = false
 		m.ask.Hide()
 		// Record ASK queries in history like editor queries, so they can be
