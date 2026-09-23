@@ -236,11 +236,7 @@ func (e *SQLEditor) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 
 	case "enter":
-		if e.autocomplete.Visible() {
-			item := e.autocomplete.SelectedItem()
-			if item != nil {
-				e.acceptCompletion(item)
-			}
+		if e.acceptSelectedCompletion() {
 			return nil, true
 		}
 		e.insertNewline()
@@ -291,16 +287,25 @@ func (e *SQLEditor) handleAction(action config.ActionID) (tea.Cmd, bool) {
 		return nil, true
 	case "autocomplete":
 		// One action, dual behavior: accept a visible completion, else indent.
-		if e.autocomplete.Visible() {
-			if item := e.autocomplete.SelectedItem(); item != nil {
-				e.acceptCompletion(item)
-			}
+		if e.acceptSelectedCompletion() {
 			return nil, true
 		}
 		e.insertText("    ")
 		return nil, true
 	}
 	return nil, false
+}
+
+// acceptSelectedCompletion accepts the highlighted suggestion when the popup is
+// open and reports whether it consumed the key.
+func (e *SQLEditor) acceptSelectedCompletion() bool {
+	if !e.autocomplete.Visible() {
+		return false
+	}
+	if item := e.autocomplete.SelectedItem(); item != nil {
+		e.acceptCompletion(item)
+	}
+	return true
 }
 
 func (e *SQLEditor) moveLeft() {
