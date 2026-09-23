@@ -10,10 +10,11 @@ import (
 
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/itchyny/gojq"
+	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/buble/dbx/internal/theme"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/itchyny/gojq"
 )
 
 const maxJQHistory = 50
@@ -42,14 +43,14 @@ type GridPreviewExpandFKResultMsg struct {
 }
 
 type GridPreview struct {
-	styles    *theme.Styles
-	keybinds  map[string]string
-	lines     []string
-	scrollY   int
-	width     int
-	height    int
-	expanded  bool
-	focused   bool
+	styles   *theme.Styles
+	keybinds config.Resolver
+	lines    []string
+	scrollY  int
+	width    int
+	height   int
+	expanded bool
+	focused  bool
 
 	rawJSON []byte
 	jqExpr  string
@@ -74,7 +75,7 @@ type GridPreview struct {
 	nestedFKs   map[string][]postgres.ForeignKeyInfo // FK metadata per dotted path
 }
 
-func New(styles *theme.Styles, keybinds map[string]string) *GridPreview {
+func New(styles *theme.Styles, keybinds config.Resolver) *GridPreview {
 	p := &GridPreview{
 		styles:   styles,
 		keybinds: keybinds,
@@ -83,13 +84,13 @@ func New(styles *theme.Styles, keybinds map[string]string) *GridPreview {
 	return p
 }
 
-func (p *GridPreview) SetWidth(w int)  { p.width = w }
-func (p *GridPreview) SetHeight(h int) { p.height = h }
-func (p *GridPreview) Focus()          { p.focused = true }
-func (p *GridPreview) Blur()           { p.focused = false; p.jqMode = false }
-func (p *GridPreview) IsFocused() bool { return p.focused }
+func (p *GridPreview) SetWidth(w int)   { p.width = w }
+func (p *GridPreview) SetHeight(h int)  { p.height = h }
+func (p *GridPreview) Focus()           { p.focused = true }
+func (p *GridPreview) Blur()            { p.focused = false; p.jqMode = false }
+func (p *GridPreview) IsFocused() bool  { return p.focused }
 func (p *GridPreview) IsExpanded() bool { return p.expanded }
-func (p *GridPreview) IsJQMode() bool  { return p.jqMode }
+func (p *GridPreview) IsJQMode() bool   { return p.jqMode }
 
 func (p *GridPreview) SetForeignKeys(fks []postgres.ForeignKeyInfo) {
 	p.foreignKeys = fks
@@ -968,36 +969,41 @@ func (p *GridPreview) Update(msg tea.Msg) (tea.Cmd, bool) {
 	case tea.KeyPressMsg:
 		key := msg.String()
 
-		switch key {
-		case p.keybinds["grid-preview.cursor_up"], "up":
+		if p.keybinds == nil {
+			return nil, false
+		}
+		action, ok := p.keybinds.Resolve(key, config.ContextGridPreview)
+		if !ok {
+			return nil, false
+		}
+
+		switch action {
+		case "navigate_up":
 			p.cursorUp()
 			return nil, true
-		case p.keybinds["grid-preview.cursor_down"], "down":
+		case "navigate_down":
 			p.cursorDown()
 			return nil, true
-		case p.keybinds["grid-preview.first"]:
+		case "go_first":
 			p.cursorLine = 0
 			p.ensureCursorVisible()
 			return nil, true
-		case p.keybinds["grid-preview.last"]:
+		case "go_last":
 			if len(p.lines) > 0 {
 				p.cursorLine = len(p.lines) - 1
 			}
 			p.ensureCursorVisible()
 			return nil, true
-		case p.keybinds["grid-preview.half_up"]:
+		case "half_page_up":
 			p.halfPageUp()
 			return nil, true
-		case p.keybinds["grid-preview.half_down"]:
+		case "half_page_down":
 			p.halfPageDown()
 			return nil, true
-		case p.keybinds["grid-preview.toggle_explorer"]:
-			p.ToggleExpand()
-			return nil, true
-		case p.keybinds["grid-preview.jq_filter"]:
+		case "jq_filter":
 			p.EnterJQMode()
 			return nil, true
-		case p.keybinds["grid-preview.expand"]:
+		case "expand_fk":
 			return p.handleExpand()
 		}
 	}
@@ -1089,7 +1095,7 @@ func (p *GridPreview) renderJQPrompt() string {
 
 	bar := prefix + inputText
 
-	barWidth := 	lipgloss.Width(bar)
+	barWidth := lipgloss.Width(bar)
 	if barWidth < p.width-4 {
 		bar += strings.Repeat(" ", p.width-4-barWidth)
 	}
@@ -1117,16 +1123,16 @@ func (p *GridPreview) renderJQSuggestions() string {
 		isSelected := i == p.jqSugSelected
 
 		path := sug.Path
-		if 	lipgloss.Width(path) > pathWidth {
+		if lipgloss.Width(path) > pathWidth {
 			path = ansi.Truncate(path, pathWidth, "...")
 		}
-		pathPad := pathWidth - 	lipgloss.Width(path)
+		pathPad := pathWidth - lipgloss.Width(path)
 		if pathPad > 0 {
 			path += strings.Repeat(" ", pathPad)
 		}
 
 		typeStr := p.styles.TextMuted.Render(sug.Type)
-		typePad := 14 - 	lipgloss.Width(typeStr)
+		typePad := 14 - lipgloss.Width(typeStr)
 		if typePad > 0 {
 			typeStr += strings.Repeat(" ", typePad)
 		}

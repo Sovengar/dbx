@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/theme"
 	"github.com/buble/dbx/internal/ui/bordered"
 )
@@ -37,14 +38,14 @@ type ExplorerRefreshMsg struct{}
 type Explorer struct {
 	tree        *Tree
 	styles      *theme.Styles
-	keybindings map[string]string
+	keybindings config.Resolver
 	width       int
 	height      int
 	focused     bool
 	filtering   bool
 }
 
-func New(styles *theme.Styles, zones interface{}, keybindings map[string]string) *Explorer {
+func New(styles *theme.Styles, zones interface{}, keybindings config.Resolver) *Explorer {
 	return &Explorer{
 		tree:        NewTree(styles),
 		styles:      styles,
@@ -89,99 +90,127 @@ func (e *Explorer) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 
-		key := msg.String()
-
-		if node := e.tree.Selected(); node != nil {
-			if key == e.keybindings["explorer.toggle_columns"] {
-				if node.Type == NodeTable {
-					if node.Parent != nil && node.Parent.Type == NodeSchema {
-						schemaNode := node.Parent
-						schemaNode.Expanded = false
-						e.tree.flattenNodes()
-						for i, n := range e.tree.filtered {
-							if n == schemaNode {
-								e.tree.cursor = i
-								break
-							}
-						}
-						e.tree.clampOffset()
-					}
-					return nil, true
-				}
-				if node.Type == NodeSchema {
-					node.ToggleExpand()
-					e.tree.flattenNodes()
-					if e.tree.cursor >= len(e.tree.filtered) {
-						e.tree.cursor = len(e.tree.filtered) - 1
-					}
-					e.tree.clampOffset()
-					return nil, true
+		if e.keybindings != nil {
+			if action, ok := e.keybindings.Resolve(msg.String(), config.ContextExplorer); ok {
+				if cmd, handled := e.handleAction(action); handled {
+					return cmd, handled
 				}
 			}
-
-			if node.Type == NodeTable {
-				schema := ""
-				if s, ok := node.Metadata["schema"].(string); ok {
-					schema = s
-				}
-
-				if key == e.keybindings["explorer.expand"] {
-					return func() tea.Msg {
-						return TableSelectedMsg{
-							Schema: schema,
-							Table:  node.Name,
-						}
-					}, true
-				}
-
-				if key == e.keybindings["explorer.drop"] {
-					return func() tea.Msg {
-						return DropTableMsg{
-							Schema: schema,
-							Table:  node.Name,
-						}
-					}, true
-				}
-
-				if key == e.keybindings["explorer.view_ddl"] {
-					return func() tea.Msg {
-						return ViewDDLMsg{
-							Schema: schema,
-							Table:  node.Name,
-						}
-					}, true
-				}
-			}
-		}
-
-		if key == e.keybindings["explorer.new"] {
-			schema := ""
-			if node := e.tree.Selected(); node != nil {
-				if s, ok := node.Metadata["schema"].(string); ok {
-					schema = s
-				}
-			}
-			return func() tea.Msg {
-				return NewTableMsg{
-					Schema: schema,
-				}
-			}, true
-		}
-
-		if key == e.keybindings["explorer.filter"] {
-			e.StartFilter()
-			return nil, true
-		}
-
-		if key == e.keybindings["explorer.refresh"] {
-			return func() tea.Msg {
-				return ExplorerRefreshMsg{}
-			}, true
 		}
 
 		return e.tree.Update(msg)
 	}
 	return nil, false
+}
+
+// handleAction dispatches a resolved explorer action. Returns handled=false so
+// unknown keys fall through to the tree.
+func (e *Explorer) handleAction(action config.ActionID) (tea.Cmd, bool) {
+	switch action {
+	case "navigate_down":
+		e.tree.moveDown()
+		return nil, true
+	case "navigate_up":
+		e.tree.moveUp()
+		return nil, true
+	case "go_first":
+		e.tree.cursor = 0
+		e.tree.offset = 0
+		return nil, true
+	case "go_last":
+		e.tree.cursor = len(e.tree.filtered) - 1
+		if e.tree.cursor < 0 {
+			e.tree.cursor = 0
+		}
+		e.tree.clampOffset()
+		return nil, true
+	case "collapse_node":
+		return e.tree.collapse(), true
+	case "toggle_columns":
+		return e.toggleColumns(), true
+	case "expand_node":
+		if node := e.tree.Selected(); node != nil && node.Type == NodeTable {
+			schema := ""
+			if s, ok := node.Metadata["schema"].(string); ok {
+				schema = s
+			}
+			return func() tea.Msg {
+				return TableSelectedMsg{Schema: schema, Table: node.Name}
+			}, true
+		}
+		return e.tree.toggleExpand(), true
+	case "drop_table":
+		if node := e.tree.Selected(); node != nil && node.Type == NodeTable {
+			schema := ""
+			if s, ok := node.Metadata["schema"].(string); ok {
+				schema = s
+			}
+			return func() tea.Msg {
+				return DropTableMsg{Schema: schema, Table: node.Name}
+			}, true
+		}
+		return nil, true
+	case "view_ddl":
+		if node := e.tree.Selected(); node != nil && node.Type == NodeTable {
+			schema := ""
+			if s, ok := node.Metadata["schema"].(string); ok {
+				schema = s
+			}
+			return func() tea.Msg {
+				return ViewDDLMsg{Schema: schema, Table: node.Name}
+			}, true
+		}
+		return nil, true
+	case "new_table":
+		schema := ""
+		if node := e.tree.Selected(); node != nil {
+			if s, ok := node.Metadata["schema"].(string); ok {
+				schema = s
+			}
+		}
+		return func() tea.Msg {
+			return NewTableMsg{Schema: schema}
+		}, true
+	case "filter_tables":
+		e.StartFilter()
+		return nil, true
+	case "refresh_schema":
+		return func() tea.Msg {
+			return ExplorerRefreshMsg{}
+		}, true
+	}
+	return nil, false
+}
+
+func (e *Explorer) toggleColumns() tea.Cmd {
+	node := e.tree.Selected()
+	if node == nil {
+		return nil
+	}
+	if node.Type == NodeTable {
+		if node.Parent != nil && node.Parent.Type == NodeSchema {
+			schemaNode := node.Parent
+			schemaNode.Expanded = false
+			e.tree.flattenNodes()
+			for i, n := range e.tree.filtered {
+				if n == schemaNode {
+					e.tree.cursor = i
+					break
+				}
+			}
+			e.tree.clampOffset()
+		}
+		return nil
+	}
+	if node.Type == NodeSchema {
+		node.ToggleExpand()
+		e.tree.flattenNodes()
+		if e.tree.cursor >= len(e.tree.filtered) {
+			e.tree.cursor = len(e.tree.filtered) - 1
+		}
+		e.tree.clampOffset()
+	}
+	return nil
 }
 
 func (e *Explorer) handleFilterKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {

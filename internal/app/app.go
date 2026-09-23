@@ -20,6 +20,7 @@ import (
 	aiContext "github.com/buble/dbx/internal/ai/context"
 	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/drivers/postgres"
+	"github.com/buble/dbx/internal/store"
 	"github.com/buble/dbx/internal/theme"
 	"github.com/buble/dbx/internal/ui"
 	"github.com/buble/dbx/internal/ui/bordered"
@@ -28,11 +29,10 @@ import (
 	"github.com/buble/dbx/internal/ui/components/explorerpreview"
 	"github.com/buble/dbx/internal/ui/components/grid"
 	"github.com/buble/dbx/internal/ui/components/gridpreview"
+	"github.com/buble/dbx/internal/ui/components/gridsidebarpreview"
 	"github.com/buble/dbx/internal/ui/components/palette"
 	"github.com/buble/dbx/internal/ui/components/picker"
-	"github.com/buble/dbx/internal/ui/components/gridsidebarpreview"
 	"github.com/buble/dbx/internal/ui/components/querybrowser"
-	"github.com/buble/dbx/internal/store"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -55,37 +55,36 @@ const (
 )
 
 type Model struct {
-	state           AppState
-	config          *config.Config
-	theme           *theme.Theme
-	styles          *theme.Styles
-	picker          *picker.Picker
-	explorer        *explorer.Explorer
-	grid            *grid.Grid
-	editor          *editor.SQLEditor
-	gridSidebarPreview *gridsidebarpreview.Preview
-	gridPreview     *gridpreview.GridPreview
-	explorerPreview *explorerpreview.ExplorerPreview
-	router          *Router
-	keybindRegistry *config.KeybindRegistry
-	keybinds        map[string]string
-	palette         *palette.Palette
-	helpModal       *ui.HelpModal
-	toast           *ui.ToastManager
-	statusbar       *ui.StatusBar
-	project         *config.FoundProject
-	conn            *pgx.Conn
-	width           int
-	height          int
-	err             error
-	editorOpen      bool
-	queryExecuting  bool
-	lastClickTime   time.Time
-	lastClickX      int
-	lastClickY      int
-	navStack        []NavigationEntry
-	prevSchema      string
-	prevTable       string
+	state                      AppState
+	config                     *config.Config
+	theme                      *theme.Theme
+	styles                     *theme.Styles
+	picker                     *picker.Picker
+	explorer                   *explorer.Explorer
+	grid                       *grid.Grid
+	editor                     *editor.SQLEditor
+	gridSidebarPreview         *gridsidebarpreview.Preview
+	gridPreview                *gridpreview.GridPreview
+	explorerPreview            *explorerpreview.ExplorerPreview
+	router                     *Router
+	keybinds                   config.Resolver
+	palette                    *palette.Palette
+	helpModal                  *ui.HelpModal
+	toast                      *ui.ToastManager
+	keybindsPane               *ui.KeybindsPane
+	project                    *config.FoundProject
+	conn                       *pgx.Conn
+	width                      int
+	height                     int
+	err                        error
+	editorOpen                 bool
+	queryExecuting             bool
+	lastClickTime              time.Time
+	lastClickX                 int
+	lastClickY                 int
+	navStack                   []NavigationEntry
+	prevSchema                 string
+	prevTable                  string
 	gridSidebarFKPreviewCache  map[string][]gridSidebarFKPreviewCacheEntry
 	gridSidebarFKPreviewCursor int
 	schemaDetail               []postgres.SchemaDetail
@@ -97,9 +96,9 @@ type Model struct {
 	queryStore                 *store.QueryStore
 	queryBrowser               *querybrowser.QueryBrowser
 	queryBrowserOpen           bool
-	runner                   *statementRunner
-	connectCancelled         bool
-	forcePicker              bool
+	runner                     *statementRunner
+	connectCancelled           bool
+	forcePicker                bool
 }
 
 var spinnerChars = [9]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"}
@@ -107,7 +106,6 @@ var spinnerChars = [9]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 func NewModel(cfg *config.Config) Model {
 	t := theme.Resolve(cfg.Theme.Mode)
 	kbr := config.NewKeybindRegistry(cfg.Keybindings)
-	kbs := kbr.Flatten()
 	pageSize := 100
 	if cfg.UI.PageSize > 0 {
 		pageSize = cfg.UI.PageSize
@@ -116,7 +114,7 @@ func NewModel(cfg *config.Config) Model {
 	if cfg.UI.YankMaxRows > 0 {
 		yankMaxRows = cfg.UI.YankMaxRows
 	}
-	g := grid.New(t.Styles(), pageSize, kbs)
+	g := grid.New(t.Styles(), pageSize, kbr)
 	g.SetYankMaxRows(yankMaxRows)
 	// QueryStore is initialized later in initQueryStore after project selection
 	qs := &store.QueryStore{}
@@ -124,26 +122,25 @@ func NewModel(cfg *config.Config) Model {
 	ed := editor.NewSQLEditor(t.Styles())
 	ed.SetAutocompleteConfig(cfg.Editor.Autocomplete, cfg.Editor.AutocompleteTrigger)
 	return Model{
-		config:          cfg,
-		theme:           t,
-		styles:          t.Styles(),
-		picker:          picker.New(t.Styles()),
-		grid:            g,
-		editor:          ed,
+		config:             cfg,
+		theme:              t,
+		styles:             t.Styles(),
+		picker:             picker.New(t.Styles()),
+		grid:               g,
+		editor:             ed,
 		gridSidebarPreview: gridsidebarpreview.New(t.Styles()),
-		gridPreview:     gridpreview.New(t.Styles(), kbs),
-		explorerPreview: explorerpreview.New(t.Styles(), kbs),
-		router:          NewRouter(kbs),
-		keybindRegistry: kbr,
-		keybinds:        kbs,
-		palette:         palette.New(t.Styles(), kbs),
-		helpModal:       ui.NewHelpModal(t.Styles(), kbs),
-		toast:           ui.NewToastManager(t.Styles()),
-		statusbar:       ui.NewStatusBar(t.Styles(), kbs),
-		state:           StatePicker,
-		yankMaxRows:     yankMaxRows,
-		queryStore:      qs,
-		queryBrowser:    qb,
+		gridPreview:        gridpreview.New(t.Styles(), kbr),
+		explorerPreview:    explorerpreview.New(t.Styles(), kbr),
+		router:             NewRouter(kbr),
+		keybinds:           kbr,
+		palette:            palette.New(t.Styles(), kbr),
+		helpModal:          ui.NewHelpModal(t.Styles(), kbr),
+		toast:              ui.NewToastManager(t.Styles()),
+		keybindsPane:       ui.NewKeybindsPane(t.Styles(), kbr),
+		state:              StatePicker,
+		yankMaxRows:        yankMaxRows,
+		queryStore:         qs,
+		queryBrowser:       qb,
 	}
 }
 
@@ -311,7 +308,7 @@ func (m Model) loadAutocompleteData() tea.Cmd {
 }
 
 type autocompleteDataLoadedMsg struct {
-	schemaExport     *aiContext.SchemaExport
+	schemaExport      *aiContext.SchemaExport
 	schemaForeignKeys map[string][]postgres.ForeignKeyInfo
 }
 
@@ -968,8 +965,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.palette.SetHeight(msg.Height)
 		m.helpModal.SetWidth(msg.Width)
 		m.helpModal.SetHeight(msg.Height)
-		m.statusbar.SetWidth(msg.Width)
-		m.statusbar.SetHeight(msg.Height)
+		m.keybindsPane.SetWidth(msg.Width)
+		m.keybindsPane.SetHeight(msg.Height)
 		if m.explorer != nil {
 			m.explorer.SetWidth(msg.Width)
 			m.explorer.SetHeight(msg.Height - 2)
@@ -1080,7 +1077,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinnerActive = false
 		if msg.schemaExport != nil {
 			m.editor.SetSchema(msg.schemaExport)
-			m.statusbar.SetAutocompleteReady(true)
+			m.keybindsPane.SetAutocompleteReady(true)
 			m.toast.ShowSuccess("Autocomplete ready")
 		}
 		if msg.schemaForeignKeys != nil {
@@ -1378,7 +1375,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.editorOpen = false
 		m.editor.Blur()
-		m.statusbar.SetEditorOpen(false)
+		m.keybindsPane.SetEditorOpen(false)
 		m.editor.PushHistory(msg.sql)
 		m.queryStore.Add(msg.sql)
 
@@ -1399,13 +1396,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editorOpen = true
 		m.editor.Focus()
 		m.editor.SetContent(msg.SQL)
-		m.statusbar.SetEditorOpen(true)
-		m.statusbar.SetQueryBrowserOpen(false)
+		m.keybindsPane.SetEditorOpen(true)
+		m.keybindsPane.SetQueryBrowserOpen(false)
 		return m, nil
 
 	case querybrowser.QueryBrowserClosedMsg:
 		m.queryBrowserOpen = false
-		m.statusbar.SetQueryBrowserOpen(false)
+		m.keybindsPane.SetQueryBrowserOpen(false)
 		return m, nil
 
 	case explorer.TableSelectedMsg:
@@ -1422,21 +1419,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editor.Focus()
 		m.editor.SetContent(content)
 		m.editor.SetCursorPos(0, len(prefix))
-		m.statusbar.SetEditorOpen(true)
+		m.keybindsPane.SetEditorOpen(true)
 		return m, nil
 
 	case explorer.DropTableMsg:
 		m.editorOpen = true
 		m.editor.Focus()
 		m.editor.SetContent(fmt.Sprintf("DROP TABLE %s.%s;", msg.Schema, msg.Table))
-		m.statusbar.SetEditorOpen(true)
+		m.keybindsPane.SetEditorOpen(true)
 		return m, nil
 
 	case explorer.ViewDDLMsg:
 		m.editorOpen = true
 		m.editor.Focus()
 		m.editor.SetContent(fmt.Sprintf("-- DDL for %s.%s\n-- Run this query to see the table definition:\nSELECT pg_get_tabledef('%s', '%s');", msg.Schema, msg.Table, msg.Schema, msg.Table))
-		m.statusbar.SetEditorOpen(true)
+		m.keybindsPane.SetEditorOpen(true)
 		return m, nil
 
 	case explorer.ExplorerRefreshMsg:
@@ -1653,17 +1650,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.editorOpen = false
 					m.editor.Blur()
 					m.editor.SetCommitOnRun(false)
-					m.statusbar.SetEditorOpen(false)
+					m.keybindsPane.SetEditorOpen(false)
 					return m, nil
 				}
 
-			if key == "ctrl+enter" || key == "ctrl+r" {
-				sql := preprocessSQL(m.editor.Content())
-					if sql != "" && m.conn != nil && !m.queryExecuting {
-						m.queryExecuting = true
-						return m, m.executeQuery(sql)
-					}
-					return m, nil
+				if action, ok := m.keybinds.Resolve(key, config.ContextEditor); ok && m.hasAppAction(action) {
+					return m.dispatchAction(action)
 				}
 
 				if cmd, handled := m.editor.Update(msg); handled {
@@ -1700,138 +1692,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			if key == m.keybinds["global.help"] {
-				m.helpModal.Show()
-				return m, nil
-			}
+			context := m.router.Context()
 
-			if key == m.keybinds["global.palette"] {
-				m.palette.Show()
-				return m, nil
-			}
-
-			if key == m.keybinds["global.rollback"] {
-				return m.handleRollback()
-			}
-
+			// JQ input mode swallows every key except the few app-wide ones
+			// that stay available while typing a filter.
 			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil && m.gridPreview.IsJQMode() {
+				if action, ok := m.keybinds.Resolve(key, context); ok {
+					switch action {
+					case "help", "palette", "rollback":
+						return m.dispatchAction(action)
+					}
+				}
 				if cmd, handled := m.gridPreview.Update(msg); handled {
 					return m, cmd
 				}
 				return m, nil
 			}
 
-			if key == m.keybinds["global.quit"] {
-				m.rollbackOnExit()
-				return m, tea.Quit
-			}
-
-			if key == m.keybinds["grid.commit_pending"] && m.router.Focus() == FocusGrid && m.grid != nil {
-				appDebugLog("Ctrl+S: grid.commit_pending, hasDrafts=%v", m.grid.HasDrafts())
-				if m.grid.HasDrafts() {
-					sql := m.grid.DraftSQL()
-					appDebugLog("Ctrl+S: draft SQL=%q", sql)
-					if sql != "" {
-						m.editorOpen = true
-						m.editor.Focus()
-						m.editor.SetContent(sql)
-						m.editor.SetCommitOnRun(true)
-						m.statusbar.SetEditorOpen(true)
-						return m, nil
-					}
-				}
-			}
-
-			if key == m.keybinds["global.cycle_focus"] {
-				if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
-					m.router.FocusPane(FocusExplorer)
-					m.gridPreview.Blur()
-					return m, nil
-				}
-				if m.router.Focus() == FocusExplorerPreview && m.explorerPreview != nil {
-					m.router.FocusPane(FocusGrid)
-					m.explorerPreview.Blur()
-					return m, nil
-				}
-				m.router.CycleFocus()
-				return m, nil
-			}
-
-			if key == m.keybinds["global.focus_explorer"] {
-				m.router.FocusPane(FocusExplorer)
-				return m, nil
-			}
-
-			if key == m.keybinds["global.focus_grid"] {
-				m.router.FocusPane(FocusGrid)
-				return m, nil
-			}
-
-			if key == m.keybinds["global.focus_editor"] {
-				m.editorOpen = !m.editorOpen
-				if m.editorOpen {
-					m.editor.Focus()
-				} else {
-					m.editor.Blur()
-				}
-				m.statusbar.SetEditorOpen(m.editorOpen)
-				return m, nil
-			}
-
-			if key == m.keybinds["global.query_browser"] {
-				appDebugLog("QueryBrowser: key=%q queryBrowserOpen=%v editorOpen=%v", key, m.queryBrowserOpen, m.editorOpen)
-				if !m.queryBrowserOpen && !m.editorOpen {
-					m.queryBrowserOpen = true
-					m.queryBrowser.Show()
-					m.statusbar.SetQueryBrowserOpen(true)
-					appDebugLog("QueryBrowser: opened, queryBrowserOpen=%v", m.queryBrowserOpen)
-				}
-				return m, nil
-			}
-
-			if key == m.keybinds["grid.focus_preview"] && m.router.Focus() == FocusGrid && !m.grid.IsEditing() && !m.grid.IsWhereFiltering() {
-				m.router.FocusPane(FocusGridPreview)
-				if m.gridPreview != nil {
-					m.gridPreview.Focus()
-					m.syncGridPreview()
-				}
-				return m, nil
+			if action, ok := m.keybinds.Resolve(key, context); ok && m.hasAppAction(action) {
+				return m.dispatchAction(action)
 			}
 
 			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
-				if key == m.keybinds["grid.focus_preview"] || key == "esc" {
-					m.router.FocusPane(FocusGrid)
-					m.gridPreview.Blur()
-					return m, nil
-				}
 				if cmd, handled := m.gridPreview.Update(msg); handled {
 					return m, cmd
 				}
 			}
 
 			if m.router.Focus() == FocusExplorer && m.explorer != nil {
-				if key == "tab" {
-					if selected := m.explorer.Selected(); selected != nil && selected.Type == explorer.NodeTable {
-						schema := ""
-						if s, ok := selected.Metadata["schema"].(string); ok {
-							schema = s
-						}
-						m.router.FocusPane(FocusExplorerPreview)
-						m.explorerPreview.Focus()
-						return m, m.loadExplorerPreviewData(schema, selected.Name)
-					}
-				}
 				if cmd, handled := m.explorer.Update(msg); handled {
 					return m, cmd
 				}
 			}
 
 			if m.router.Focus() == FocusExplorerPreview && m.explorerPreview != nil {
-				if key == "tab" || key == "esc" {
-					m.router.FocusPane(FocusExplorer)
-					m.explorerPreview.Blur()
-					return m, nil
-				}
 				if cmd, handled := m.explorerPreview.Update(msg); handled {
 					return m, cmd
 				}
@@ -1850,113 +1744,236 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handlePaletteCommand(action string) (tea.Model, tea.Cmd) {
-	switch action {
-	case "global.quit":
-		m.rollbackOnExit()
-		return m, tea.Quit
-	case "global.cycle_focus":
-		m.router.CycleFocus()
-	case "global.focus_explorer":
-		m.router.FocusPane(FocusExplorer)
-	case "global.focus_grid":
-		m.router.FocusPane(FocusGrid)
-	case "global.focus_editor":
-		m.editorOpen = !m.editorOpen
-		if m.editorOpen {
-			m.editor.Focus()
-		} else {
-			m.editor.Blur()
-		}
-		m.statusbar.SetEditorOpen(m.editorOpen)
-	case "global.help":
-		m.helpModal.Show()
-	case "global.rollback":
-		return m.handleRollback()
-	case "global.switch_connection":
-		// Re-scan projects and show picker
-		m.state = StatePicker
-		return m, m.scanProjects()
-	case "global.query_browser":
-		if !m.queryBrowserOpen && !m.editorOpen {
-			m.queryBrowserOpen = true
-			m.queryBrowser.Show()
-			m.statusbar.SetQueryBrowserOpen(true)
-		}
-	case "grid.focus_preview":
-		if m.router.Focus() == FocusGrid && m.grid.HasData() {
-			m.router.FocusPane(FocusGridPreview)
-			if m.gridPreview != nil {
-				m.gridPreview.Focus()
-				m.syncGridPreview()
-			}
-		}
-	case "grid-preview.cursor_up":
-		if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
-			m.gridPreview.Update(tea.KeyPressMsg{Code: 'k'})
-		}
-	case "grid-preview.cursor_down":
-		if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
-			m.gridPreview.Update(tea.KeyPressMsg{Code: 'j'})
-		}
-	case "grid-preview.toggle_explorer":
-		if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
-			m.router.FocusPane(FocusExplorer)
-			m.gridPreview.Blur()
-		}
-	case "explorer.refresh":
-		if m.project != nil && m.conn != nil {
-			m.toast.ShowSuccess("Schema refreshed")
-			return m, m.loadSchema(m.conn, *m.project)
-		}
-	case "grid.refresh":
-		if m.router.Focus() == FocusGrid && m.grid.HasData() {
-			if m.grid.HasDrafts() {
-				m.grid.SetRefreshPending(true)
+func (m Model) handlePaletteCommand(action config.ActionID) (tea.Model, tea.Cmd) {
+	return m.dispatchAction(action)
+}
+
+// hasAppAction reports whether the app dispatches this action itself (as
+// opposed to a focused component handling it).
+func (m Model) hasAppAction(id config.ActionID) bool {
+	_, ok := m.appActions()[id]
+	return ok
+}
+
+// dispatchAction invokes the single app-level handler for an action. This is
+// the one table both key dispatch and the palette go through.
+func (m Model) dispatchAction(id config.ActionID) (tea.Model, tea.Cmd) {
+	if handler, ok := m.appActions()[id]; ok {
+		return handler(m)
+	}
+	m.toast.ShowInfo(fmt.Sprintf("Command: %s", id))
+	return m, nil
+}
+
+func (m Model) appActions() map[config.ActionID]func(Model) (tea.Model, tea.Cmd) {
+	return map[config.ActionID]func(Model) (tea.Model, tea.Cmd){
+		"quit": func(m Model) (tea.Model, tea.Cmd) {
+			m.rollbackOnExit()
+			return m, tea.Quit
+		},
+		"help": func(m Model) (tea.Model, tea.Cmd) {
+			m.helpModal.Show()
+			return m, nil
+		},
+		"palette": func(m Model) (tea.Model, tea.Cmd) {
+			m.palette.Show()
+			return m, nil
+		},
+		"toggle_explorer_focus": func(m Model) (tea.Model, tea.Cmd) {
+			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
+				m.router.FocusPane(FocusExplorer)
+				m.gridPreview.Blur()
 				return m, nil
 			}
-			m.toast.ShowSuccess("Query refreshed")
-			return m, m.loadTableDataWithSortAndWhere(
-				m.prevSchema, m.prevTable,
-				m.grid.SortColumn(), m.grid.SortDirection(),
-				m.grid.WhereClause(),
-			)
-		}
-	case "global.export", "grid.export":
-		if m.router.Focus() == FocusGrid && m.grid.HasData() {
-			if cmd, handled := m.grid.StartExport(); handled {
-				return m, cmd
+			if m.router.Focus() == FocusExplorerPreview && m.explorerPreview != nil {
+				m.router.FocusPane(FocusGrid)
+				m.explorerPreview.Blur()
+				return m, nil
 			}
-		}
-	case "grid.undo":
-		if m.router.Focus() == FocusGrid && m.grid.HasData() {
-			count := m.grid.UndoRowDrafts()
-			if count > 0 {
-				m.toast.ShowSuccess(fmt.Sprintf("Undid %d draft change(s) on row", count))
+			m.router.CycleFocus()
+			return m, nil
+		},
+		"focus_explorer": func(m Model) (tea.Model, tea.Cmd) {
+			m.router.FocusPane(FocusExplorer)
+			return m, nil
+		},
+		"focus_grid": func(m Model) (tea.Model, tea.Cmd) {
+			m.router.FocusPane(FocusGrid)
+			return m, nil
+		},
+		"focus_editor": func(m Model) (tea.Model, tea.Cmd) {
+			m.editorOpen = !m.editorOpen
+			if m.editorOpen {
+				m.editor.Focus()
 			} else {
-				m.toast.ShowInfo("No drafts on this row")
+				m.editor.Blur()
 			}
-		}
-	case "editor.execute":
-		if !m.editorOpen {
-			m.editorOpen = true
-			m.editor.Focus()
-			m.statusbar.SetEditorOpen(true)
-		}
-	case "editor.clear":
-		m.editor.Clear()
-		m.toast.ShowInfo("Editor cleared")
-	case "editor.copy":
-		if !m.editorOpen {
-			m.editorOpen = true
-			m.editor.Focus()
-			m.statusbar.SetEditorOpen(true)
-		}
-		return m, m.handleCopySQL()
-	default:
-		m.toast.ShowInfo(fmt.Sprintf("Command: %s", action))
+			m.keybindsPane.SetEditorOpen(m.editorOpen)
+			return m, nil
+		},
+		"rollback": func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleRollback()
+		},
+		"switch_connection": func(m Model) (tea.Model, tea.Cmd) {
+			m.state = StatePicker
+			return m, m.scanProjects()
+		},
+		"query_browser": func(m Model) (tea.Model, tea.Cmd) {
+			if !m.queryBrowserOpen && !m.editorOpen {
+				m.queryBrowserOpen = true
+				m.queryBrowser.Show()
+				m.keybindsPane.SetQueryBrowserOpen(true)
+			}
+			return m, nil
+		},
+		"focus_preview": func(m Model) (tea.Model, tea.Cmd) {
+			if m.router.Focus() == FocusGrid && m.grid != nil && m.grid.HasData() &&
+				!m.grid.IsEditing() && !m.grid.IsWhereFiltering() {
+				m.router.FocusPane(FocusGridPreview)
+				if m.gridPreview != nil {
+					m.gridPreview.Focus()
+					m.syncGridPreview()
+				}
+			}
+			return m, nil
+		},
+		"preview_back": func(m Model) (tea.Model, tea.Cmd) {
+			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
+				m.router.FocusPane(FocusGrid)
+				m.gridPreview.Blur()
+				return m, nil
+			}
+			if m.router.Focus() == FocusExplorerPreview && m.explorerPreview != nil {
+				m.router.FocusPane(FocusExplorer)
+				m.explorerPreview.Blur()
+			}
+			return m, nil
+		},
+		"explorer_open_preview": func(m Model) (tea.Model, tea.Cmd) {
+			if m.router.Focus() != FocusExplorer || m.explorer == nil {
+				return m, nil
+			}
+			selected := m.explorer.Selected()
+			if selected == nil || selected.Type != explorer.NodeTable {
+				return m, nil
+			}
+			schema := ""
+			if s, ok := selected.Metadata["schema"].(string); ok {
+				schema = s
+			}
+			m.router.FocusPane(FocusExplorerPreview)
+			m.explorerPreview.Focus()
+			return m, m.loadExplorerPreviewData(schema, selected.Name)
+		},
+		"preview_cursor_up": func(m Model) (tea.Model, tea.Cmd) {
+			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
+				m.gridPreview.Update(tea.KeyPressMsg{Code: 'k'})
+			}
+			return m, nil
+		},
+		"preview_cursor_down": func(m Model) (tea.Model, tea.Cmd) {
+			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
+				m.gridPreview.Update(tea.KeyPressMsg{Code: 'j'})
+			}
+			return m, nil
+		},
+		"refresh_schema": func(m Model) (tea.Model, tea.Cmd) {
+			if m.project != nil && m.conn != nil {
+				m.toast.ShowSuccess("Schema refreshed")
+				return m, m.loadSchema(m.conn, *m.project)
+			}
+			return m, nil
+		},
+		"refresh_data": func(m Model) (tea.Model, tea.Cmd) {
+			if m.router.Focus() == FocusGrid && m.grid != nil && m.grid.HasData() {
+				if m.grid.HasDrafts() {
+					m.grid.SetRefreshPending(true)
+					return m, nil
+				}
+				m.toast.ShowSuccess("Query refreshed")
+				return m, m.loadTableDataWithSortAndWhere(
+					m.prevSchema, m.prevTable,
+					m.grid.SortColumn(), m.grid.SortDirection(),
+					m.grid.WhereClause(),
+				)
+			}
+			return m, nil
+		},
+		"export": func(m Model) (tea.Model, tea.Cmd) {
+			if m.router.Focus() == FocusGrid && m.grid != nil && m.grid.HasData() {
+				if cmd, handled := m.grid.StartExport(); handled {
+					return m, cmd
+				}
+			}
+			return m, nil
+		},
+		"undo_drafts": func(m Model) (tea.Model, tea.Cmd) {
+			if m.router.Focus() == FocusGrid && m.grid != nil && m.grid.HasData() {
+				count := m.grid.UndoRowDrafts()
+				if count > 0 {
+					m.toast.ShowSuccess(fmt.Sprintf("Undid %d draft change(s) on row", count))
+				} else {
+					m.toast.ShowInfo("No drafts on this row")
+				}
+			}
+			return m, nil
+		},
+		"execute_query": func(m Model) (tea.Model, tea.Cmd) {
+			if !m.editorOpen {
+				m.editorOpen = true
+				m.editor.Focus()
+				m.keybindsPane.SetEditorOpen(true)
+				return m, nil
+			}
+			sql := preprocessSQL(m.editor.Content())
+			if sql != "" && m.conn != nil && !m.queryExecuting {
+				m.queryExecuting = true
+				return m, m.executeQuery(sql)
+			}
+			return m, nil
+		},
+		"clear_editor": func(m Model) (tea.Model, tea.Cmd) {
+			m.editor.Clear()
+			m.toast.ShowInfo("Editor cleared")
+			return m, nil
+		},
+		"copy_sql": func(m Model) (tea.Model, tea.Cmd) {
+			if !m.editorOpen {
+				m.editorOpen = true
+				m.editor.Focus()
+				m.keybindsPane.SetEditorOpen(true)
+			}
+			return m, m.handleCopySQL()
+		},
+		"commit_drafts": func(m Model) (tea.Model, tea.Cmd) {
+			if m.router.Focus() != FocusGrid || m.grid == nil {
+				return m, nil
+			}
+			appDebugLog("Ctrl+S: grid.commit_pending, hasDrafts=%v", m.grid.HasDrafts())
+			if m.grid.HasDrafts() {
+				sql := m.grid.DraftSQL()
+				appDebugLog("Ctrl+S: draft SQL=%q", sql)
+				if sql != "" {
+					m.editorOpen = true
+					m.editor.Focus()
+					m.editor.SetContent(sql)
+					m.editor.SetCommitOnRun(true)
+					m.keybindsPane.SetEditorOpen(true)
+				}
+			}
+			return m, nil
+		},
 	}
-	return m, nil
+}
+
+// HandledActions lists the app-level actions that have a dispatch handler.
+func (m Model) HandledActions() []config.ActionID {
+	handlers := m.appActions()
+	ids := make([]config.ActionID, 0, len(handlers))
+	for id := range handlers {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 func (m Model) handleRollback() (tea.Model, tea.Cmd) {
@@ -1993,10 +2010,10 @@ func (m Model) rollbackOnExit() {
 
 // syncTxStatus mirrors the pending transaction state into the statusbar.
 func (m *Model) syncTxStatus() {
-	if m.statusbar == nil || m.runner == nil {
+	if m.keybindsPane == nil || m.runner == nil {
 		return
 	}
-	m.statusbar.SetTxPending(m.runner.pending())
+	m.keybindsPane.SetTxPending(m.runner.pending())
 }
 
 func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
@@ -2072,7 +2089,7 @@ func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
 
 func exportAsSQL(schema, table string, result *postgres.QueryResult) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("INSERT INTO %q.%q (%s) VALUES\n", schema, table, 
+	sb.WriteString(fmt.Sprintf("INSERT INTO %q.%q (%s) VALUES\n", schema, table,
 		strings.Join(quoteColumns(result.Columns), ", ")))
 
 	for i, row := range result.Rows {
@@ -2158,7 +2175,7 @@ func exportAsCSV(result *postgres.QueryResult) string {
 
 func exportRowAsSQL(schema, table string, columns []string, row []interface{}) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("INSERT INTO %q.%q (%s) VALUES\n", schema, table, 
+	sb.WriteString(fmt.Sprintf("INSERT INTO %q.%q (%s) VALUES\n", schema, table,
 		strings.Join(quoteColumnNames(columns), ", ")))
 
 	values := make([]string, len(row))
@@ -2205,7 +2222,7 @@ func exportRowAsCSV(columns []string, row []interface{}) string {
 func copyToClipboard(content string) error {
 	// Try platform-specific commands
 	var cmd *exec.Cmd
-	
+
 	switch runtime.GOOS {
 	case "darwin":
 		cmd = exec.Command("pbcopy")
@@ -2227,7 +2244,7 @@ func copyToClipboard(content string) error {
 		}
 		cmd = exec.Command("xsel", "--clipboard", "--input")
 	}
-	
+
 	cmd.Stdin = strings.NewReader(content)
 	return cmd.Run()
 }
@@ -2319,8 +2336,8 @@ func (m Model) renderMainView() string {
 		}
 	}
 
-	m.statusbar.SetFocus(m.router.Context())
-	m.statusbar.SetHeight(m.height)
+	m.keybindsPane.SetFocus(m.router.Context())
+	m.keybindsPane.SetHeight(m.height)
 	topLine := m.renderTopLine(selSchema, selTable)
 
 	countLines := func(s string) int {
@@ -2377,7 +2394,7 @@ func (m Model) renderMainView() string {
 		}
 	}
 
-	content += "\n" + m.statusbar.View()
+	content += "\n" + m.keybindsPane.View()
 
 	return content
 }

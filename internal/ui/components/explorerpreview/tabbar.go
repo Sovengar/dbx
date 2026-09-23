@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/theme"
 )
 
@@ -20,14 +21,20 @@ type TabBar struct {
 	width  int
 }
 
-func NewTabBar(styles *theme.Styles, keybinds map[string]string) *TabBar {
+func NewTabBar(styles *theme.Styles, keybinds config.Resolver) *TabBar {
+	keyOf := func(id config.ActionID) string {
+		if keybinds == nil {
+			return ""
+		}
+		return keybinds.PrimaryKey(id)
+	}
 	tabs := []Tab{
-		{ID: "overview", Label: "Overview", Key: keybinds["explorer.tab_overview"]},
-		{ID: "columns", Label: "Columns", Key: keybinds["explorer.tab_columns"]},
-		{ID: "constraints", Label: "Constraints", Key: keybinds["explorer.tab_constraints"]},
-		{ID: "foreign_keys", Label: "Foreign Keys", Key: keybinds["explorer.tab_foreign_keys"]},
-		{ID: "indexes", Label: "Indexes", Key: keybinds["explorer.tab_indexes"]},
-		{ID: "ere", Label: "ERE", Key: keybinds["explorer.tab_ere"]},
+		{ID: "overview", Label: "Overview", Key: keyOf("overview_tab")},
+		{ID: "columns", Label: "Columns", Key: keyOf("columns_tab")},
+		{ID: "constraints", Label: "Constraints", Key: keyOf("constraints_tab")},
+		{ID: "foreign_keys", Label: "Foreign Keys", Key: keyOf("foreign_keys_tab")},
+		{ID: "indexes", Label: "Indexes", Key: keyOf("indexes_tab")},
+		{ID: "ere", Label: "ERE", Key: keyOf("ere_tab")},
 	}
 	return &TabBar{
 		tabs:   tabs,

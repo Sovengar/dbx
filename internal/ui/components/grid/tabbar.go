@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/theme"
 )
 
@@ -20,13 +21,19 @@ type TabBar struct {
 	width  int
 }
 
-func NewTabBar(styles *theme.Styles, keybinds map[string]string) *TabBar {
+func NewTabBar(styles *theme.Styles, keybinds config.Resolver) *TabBar {
+	keyOf := func(id config.ActionID) string {
+		if keybinds == nil {
+			return ""
+		}
+		return keybinds.PrimaryKey(id)
+	}
 	tabs := []Tab{
-		{ID: "records", Label: "Records", Key: keybinds["grid.tab_records"]},
-		{ID: "columns", Label: "Columns", Key: keybinds["grid.tab_columns"]},
-		{ID: "constraints", Label: "Constraints", Key: keybinds["grid.tab_constraints"]},
-		{ID: "foreign_keys", Label: "Foreign Keys", Key: keybinds["grid.tab_foreign_keys"]},
-		{ID: "indexes", Label: "Indexes", Key: keybinds["grid.tab_indexes"]},
+		{ID: "records", Label: "Records", Key: keyOf("grid_tab_records")},
+		{ID: "columns", Label: "Columns", Key: keyOf("grid_tab_columns")},
+		{ID: "constraints", Label: "Constraints", Key: keyOf("grid_tab_constraints")},
+		{ID: "foreign_keys", Label: "Foreign Keys", Key: keyOf("grid_tab_foreign_keys")},
+		{ID: "indexes", Label: "Indexes", Key: keyOf("grid_tab_indexes")},
 	}
 	return &TabBar{
 		tabs:   tabs,
