@@ -91,19 +91,3 @@ func (mh *MouseHandler) toggleSort(visibleCol int) tea.Cmd {
 		}
 	}
 }
-
-func (mh *MouseHandler) HandleScrollUp() bool {
-	if !mh.grid.focused {
-		return false
-	}
-	mh.grid.moveUp()
-	return true
-}
-
-func (mh *MouseHandler) HandleScrollDown() bool {
-	if !mh.grid.focused {
-		return false
-	}
-	mh.grid.moveDown()
-	return true
-}

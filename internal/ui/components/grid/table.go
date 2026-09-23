@@ -507,14 +507,6 @@ func (g *Grid) HandleClick(x, y int) (tea.Cmd, bool) {
 	return g.mouse.HandleClick(x, y)
 }
 
-func (g *Grid) HandleScrollUp() bool {
-	return g.mouse.HandleScrollUp()
-}
-
-func (g *Grid) HandleScrollDown() bool {
-	return g.mouse.HandleScrollDown()
-}
-
 func (g *Grid) Update(msg tea.Msg) (tea.Cmd, bool) {
 	if !g.focused {
 		return nil, false
