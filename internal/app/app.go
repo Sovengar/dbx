@@ -249,6 +249,9 @@ type dbConnectedMsg struct {
 }
 
 func (m Model) loadSchema(conn *pgx.Conn, project config.FoundProject) tea.Cmd {
+	if m.refuseIfBusy() {
+		return nil
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(conn)
@@ -271,6 +274,9 @@ func (m Model) loadSchema(conn *pgx.Conn, project config.FoundProject) tea.Cmd {
 }
 
 func (m Model) loadSchemaWithTarget(conn *pgx.Conn, project config.FoundProject, targetSchema, targetTable string) tea.Cmd {
+	if m.refuseIfBusy() {
+		return nil
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(conn)
@@ -299,6 +305,9 @@ func (m Model) loadSchemaWithTarget(conn *pgx.Conn, project config.FoundProject,
 }
 
 func (m Model) loadAutocompleteData() tea.Cmd {
+	if m.refuseIfBusy() {
+		return nil
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(m.conn)
@@ -563,6 +572,9 @@ type tableDataLoadedMsg struct {
 }
 
 func (m Model) loadMetadata(schema, table string) tea.Cmd {
+	if m.refuseIfBusy() {
+		return nil
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(m.conn)
@@ -623,6 +635,9 @@ func toIndexInfo(data []postgres.IndexInfo) []indexInfo {
 }
 
 func (m Model) loadExplorerPreviewData(schema, table string) tea.Cmd {
+	if m.refuseIfBusy() {
+		return nil
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(m.conn)
@@ -700,6 +715,9 @@ func (m Model) loadTableDataWithWhere(schema, table, where string) tea.Cmd {
 }
 
 func (m Model) loadTableDataWithSortAndWhere(schema, table, orderBy, orderDir, where string) tea.Cmd {
+	if m.refuseIfBusy() {
+		return nil
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(m.conn)
@@ -797,6 +815,9 @@ func (m Model) findFKForColumn(colName string) *postgres.ForeignKeyInfo {
 }
 
 func (m Model) fetchGridSidebarFKPreview(fkInfo *postgres.ForeignKeyInfo, fkValue interface{}, token int) tea.Cmd {
+	if m.refuseIfBusy() {
+		return nil
+	}
 	refSchema := fkInfo.RefSchema
 	if refSchema == "" {
 		refSchema = m.prevSchema
@@ -923,6 +944,27 @@ func isASCIILetter(b byte) bool {
 	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '_'
 }
 
+// dbBusy reports whether an ASK read-only transaction is still in flight on
+// the shared connection. While busy, no other DB command may start: pgx cannot
+// multiplex transactions on one connection, so a concurrent query would fail
+// read-only or be rolled back with the ASK transaction.
+func (m Model) dbBusy() bool {
+	return m.runner != nil && m.runner.readOnlyBusy()
+}
+
+// refuseIfBusy shows a clear message and reports whether a DB command must be
+// refused because an ASK read-only transaction is still running.
+func (m Model) refuseIfBusy() bool {
+	if !m.dbBusy() {
+		return false
+	}
+	if m.toast != nil {
+		m.toast.ShowError("a read-only ASK query is still running")
+	}
+	appDebugLog("DB: refused, a read-only ASK query is still running")
+	return true
+}
+
 func (m Model) executeQuery(sql string) tea.Cmd {
 	// Capture the intent at dispatch time: the grid sets commit-on-run when it
 	// dumps draft SQL into the editor, so executing it also commits the
@@ -1039,7 +1081,7 @@ func (m Model) executeAskSQL(sql string, seq int) tea.Cmd {
 		m.ask.SetError(fmt.Errorf("a DML transaction is pending: commit or roll back first"))
 		return nil
 	}
-	if m.runner.readOnlyActive {
+	if m.runner.readOnlyBusy() {
 		appDebugLog("Ask: refused, a read-only query is already running")
 		m.ask.SetError(fmt.Errorf("a read-only query is already running"))
 		return nil
@@ -1277,6 +1319,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.conn == nil {
 			return m, nil
 		}
+		if m.refuseIfBusy() {
+			return m, nil
+		}
 		var inserted int
 		for i, query := range msg.Queries {
 			_, err := m.conn.Exec(context.Background(), query, msg.Args[i]...)
@@ -1291,6 +1336,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case grid.GridCommitAllMsg:
 		if m.conn == nil {
+			return m, nil
+		}
+		if m.refuseIfBusy() {
 			return m, nil
 		}
 		var executed int

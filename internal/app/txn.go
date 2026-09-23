@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/jackc/pgx/v5"
@@ -51,11 +53,15 @@ type statementRunner struct {
 	// statement passes the client-side validation.
 	beginReadOnly func(ctx context.Context) (pgx.Tx, error)
 	exec          func(ctx context.Context, q postgres.Querier, sql string) (*postgres.QueryResult, error)
-	tx            pgx.Tx
+	// mu guards tx. It is written from tea.Cmd goroutines and read from
+	// Update, so access must be synchronized.
+	mu sync.Mutex
+	tx pgx.Tx
 	// readOnlyActive reports that an ASK read-only transaction is open on the
 	// shared connection. Other DB commands must not run while it is set, or
-	// they would either fail read-only or be rolled back with it.
-	readOnlyActive bool
+	// they would either fail read-only or be rolled back with it. It is read
+	// from Update and written from a tea.Cmd goroutine, hence atomic.
+	readOnlyActive atomic.Bool
 }
 
 func newStatementRunner(conn *pgx.Conn) *statementRunner {
@@ -70,7 +76,15 @@ func newStatementRunner(conn *pgx.Conn) *statementRunner {
 }
 
 // pending reports whether a transaction is waiting to be committed or rolled back.
-func (r *statementRunner) pending() bool { return r.tx != nil }
+func (r *statementRunner) pending() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.tx != nil
+}
+
+// readOnlyBusy reports whether an ASK read-only transaction is currently open.
+// It is safe to call from Update while a tea.Cmd goroutine is executing.
+func (r *statementRunner) readOnlyBusy() bool { return r.readOnlyActive.Load() }
 
 // execute runs every statement of sql in order and returns the last result.
 // It reports whether a pending DML transaction was committed along the way.
@@ -78,7 +92,7 @@ func (r *statementRunner) pending() bool { return r.tx != nil }
 // A new execution closes the transaction opened by the previous one: the
 // user's rollback window is the statement (or batch) currently being run.
 func (r *statementRunner) execute(ctx context.Context, sql string) (*postgres.QueryResult, bool, error) {
-	if r.readOnlyActive {
+	if r.readOnlyActive.Load() {
 		return nil, false, fmt.Errorf("a read-only ASK query is still running")
 	}
 	committed, err := r.commitPending(ctx)
@@ -117,16 +131,20 @@ func (r *statementRunner) execute(ctx context.Context, sql string) (*postgres.Qu
 // pending transaction and runs in autocommit.
 func (r *statementRunner) querierFor(ctx context.Context, stmt string) (postgres.Querier, bool, error) {
 	if isDML(stmt) {
+		r.mu.Lock()
 		if r.tx == nil {
 			tx, err := r.begin(ctx)
 			if err != nil {
+				r.mu.Unlock()
 				return nil, false, fmt.Errorf("failed to begin transaction: %w", err)
 			}
 			r.tx = tx
 		}
-		return r.tx, false, nil
+		tx := r.tx
+		r.mu.Unlock()
+		return tx, false, nil
 	}
-	if r.tx != nil {
+	if r.pending() {
 		committed, err := r.commitPending(ctx)
 		if err != nil {
 			return nil, false, err
@@ -139,11 +157,13 @@ func (r *statementRunner) querierFor(ctx context.Context, stmt string) (postgres
 // commitPending commits and clears the pending transaction, if any, and
 // reports whether there was one.
 func (r *statementRunner) commitPending(ctx context.Context) (bool, error) {
-	if r.tx == nil {
-		return false, nil
-	}
+	r.mu.Lock()
 	tx := r.tx
 	r.tx = nil
+	r.mu.Unlock()
+	if tx == nil {
+		return false, nil
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return true, fmt.Errorf("failed to commit transaction: %w", err)
 	}
@@ -152,11 +172,13 @@ func (r *statementRunner) commitPending(ctx context.Context) (bool, error) {
 
 // rollback discards the pending transaction and reports whether there was one.
 func (r *statementRunner) rollback(ctx context.Context) (bool, error) {
-	if r.tx == nil {
-		return false, nil
-	}
+	r.mu.Lock()
 	tx := r.tx
 	r.tx = nil
+	r.mu.Unlock()
+	if tx == nil {
+		return false, nil
+	}
 	if err := tx.Rollback(ctx); err != nil {
 		return true, fmt.Errorf("failed to roll back transaction: %w", err)
 	}
@@ -171,7 +193,7 @@ func (r *statementRunner) executeReadOnly(ctx context.Context, sql string) (*pos
 	if r.pending() {
 		return nil, fmt.Errorf("a DML transaction is pending: commit or roll back first")
 	}
-	if r.readOnlyActive {
+	if r.readOnlyActive.Load() {
 		return nil, fmt.Errorf("a read-only query is already running")
 	}
 	if r.beginReadOnly == nil {
@@ -181,9 +203,9 @@ func (r *statementRunner) executeReadOnly(ctx context.Context, sql string) (*pos
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin read-only transaction: %w", err)
 	}
-	r.readOnlyActive = true
+	r.readOnlyActive.Store(true)
 	defer func() {
-		r.readOnlyActive = false
+		r.readOnlyActive.Store(false)
 		_ = tx.Rollback(ctx)
 	}()
 

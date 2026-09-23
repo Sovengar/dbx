@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -132,7 +133,7 @@ func TestSelectOnlyViolation_Message(t *testing.T) {
 
 func TestExecute_RefusedWhileReadOnlyActive(t *testing.T) {
 	f := newFakeRunner()
-	f.runner.readOnlyActive = true
+	f.runner.readOnlyActive.Store(true)
 
 	if _, _, err := f.runner.execute(context.Background(), "UPDATE users SET a = 1"); err == nil {
 		t.Fatal("execute ran while a read-only query was active")
@@ -145,7 +146,7 @@ func TestExecute_RefusedWhileReadOnlyActive(t *testing.T) {
 func TestExecuteReadOnly_RefusesWhenAlreadyActive(t *testing.T) {
 	f := newFakeRunner()
 	f.runner.beginReadOnly = func(context.Context) (pgx.Tx, error) { return &fakeTx{}, nil }
-	f.runner.readOnlyActive = true
+	f.runner.readOnlyActive.Store(true)
 
 	if _, err := f.runner.executeReadOnly(context.Background(), "SELECT 1"); err == nil {
 		t.Fatal("executeReadOnly started while one was already active")
@@ -159,7 +160,76 @@ func TestExecuteReadOnly_ClearsActiveFlag(t *testing.T) {
 	if _, err := f.runner.executeReadOnly(context.Background(), "SELECT 1"); err != nil {
 		t.Fatalf("executeReadOnly: %v", err)
 	}
-	if f.runner.readOnlyActive {
+	if f.runner.readOnlyBusy() {
 		t.Fatal("readOnlyActive was not cleared after executeReadOnly returned")
+	}
+}
+
+func TestExecuteReadOnly_ClearsActiveFlagOnError(t *testing.T) {
+	f := newFakeRunner()
+	f.runner.beginReadOnly = func(context.Context) (pgx.Tx, error) { return &fakeTx{}, nil }
+	f.runner.exec = func(context.Context, postgres.Querier, string) (*postgres.QueryResult, error) {
+		return nil, errors.New("query failed")
+	}
+
+	if _, err := f.runner.executeReadOnly(context.Background(), "SELECT 1"); err == nil {
+		t.Fatal("executeReadOnly should have failed")
+	}
+	if f.runner.readOnlyBusy() {
+		t.Fatal("readOnlyActive was not cleared after executeReadOnly failed")
+	}
+}
+
+// The read-only flag is written from a tea.Cmd goroutine and read from Update;
+// this exercises both concurrently so -race can catch unsynchronized access.
+func TestRunner_ReadOnlyFlagIsConcurrencySafe(t *testing.T) {
+	f := newFakeRunner()
+	f.runner.beginReadOnly = func(context.Context) (pgx.Tx, error) { return &fakeTx{}, nil }
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	f.runner.exec = func(context.Context, postgres.Querier, string) (*postgres.QueryResult, error) {
+		close(started)
+		<-release
+		return &postgres.QueryResult{}, nil
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.runner.executeReadOnly(context.Background(), "SELECT 1")
+		done <- err
+	}()
+
+	<-started
+	for i := 0; i < 200; i++ {
+		_ = f.runner.pending()
+		_ = f.runner.readOnlyBusy()
+	}
+	if !f.runner.readOnlyBusy() {
+		t.Fatal("read-only flag should be set while the query runs")
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("executeReadOnly: %v", err)
+	}
+	if f.runner.readOnlyBusy() {
+		t.Fatal("read-only flag was not cleared after the query finished")
+	}
+}
+
+// Loaders that use the shared connection must be refused while an ASK
+// read-only transaction is in flight.
+func TestAsk_ReadOnlyInFlightBlocksLoaders(t *testing.T) {
+	runner, _ := newAskRunner(queryResult(), nil)
+	runner.readOnlyActive.Store(true)
+	m := newAskTestModel(t, &fakeProvider{name: "fake"})
+	m.runner = runner
+
+	if cmd := m.loadTableDataWithSortAndWhere("public", "users", "1", "", ""); cmd != nil {
+		t.Fatal("table loader ran while a read-only ASK query was active")
+	}
+	if !lastToastContains(m, "read-only ASK query is still running") {
+		t.Fatalf("toast = %q, want the busy refusal", lastToastText(t, m))
 	}
 }
