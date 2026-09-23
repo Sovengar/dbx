@@ -170,7 +170,7 @@ func defaultActions() []Action {
 		{ID: "execute_query", Keys: []string{"ctrl+enter", "ctrl+r"}, Section: SectionQuery, Description: "Execute Query",
 			Contexts: []string{ContextEditor}, Owner: "app"},
 		{ID: "clear_editor", Keys: []string{"ctrl+u"}, Section: SectionQuery, Description: "Clear Editor",
-			Contexts: []string{ContextEditor}, Owner: "editor"},
+			Contexts: []string{ContextEditor}, Owner: "app"},
 		{ID: "copy_sql", Keys: []string{"ctrl+y"}, Section: SectionQuery, Description: "Copy SQL",
 			Contexts: []string{ContextEditor}, Owner: "app"},
 		{ID: "autocomplete", Keys: []string{"tab"}, Section: SectionQuery, Description: "Autocomplete",

@@ -3,10 +3,11 @@ package editor
 import "github.com/buble/dbx/internal/config"
 
 // HandledActions lists the registry actions the editor dispatches itself while
-// focused. Editor keys are widget-local: they keep their raw key handling, but
-// exposing the set lets the app-wide coverage test verify action↔handler.
+// focused. execute_query, copy_sql and clear_editor are declared by the app,
+// which intercepts them before the editor sees the key; only the keys the app
+// leaves to the editor are listed here.
 func (e *SQLEditor) HandledActions() []config.ActionID {
 	return []config.ActionID{
-		"clear_editor", "copy_sql", "autocomplete", "history_prev", "history_next",
+		"autocomplete", "history_prev", "history_next",
 	}
 }
