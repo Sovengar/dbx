@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/viper"
+
+	"github.com/buble/dbx/internal/ai/nl2sql"
 )
 
 func SessionDir() string {
@@ -59,6 +61,19 @@ type AIConfig struct {
 type AIProviderConf struct {
 	APIKeyEnv string `mapstructure:"api_key_env"`
 	Model     string `mapstructure:"model"`
+}
+
+// Nl2sqlProviders converts the configured AI providers into the provider table
+// nl2sql.Resolve consumes. Shared by the CLI (`dbx ask`) and the TUI ASK pane.
+func (a AIConfig) Nl2sqlProviders() map[string]nl2sql.ProviderConfig {
+	result := make(map[string]nl2sql.ProviderConfig, len(a.Providers))
+	for k, v := range a.Providers {
+		result[k] = nl2sql.ProviderConfig{
+			APIKeyEnv: v.APIKeyEnv,
+			Model:     v.Model,
+		}
+	}
+	return result
 }
 
 type SessionConfig struct {

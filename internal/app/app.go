@@ -18,12 +18,14 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	aiContext "github.com/buble/dbx/internal/ai/context"
+	"github.com/buble/dbx/internal/ai/nl2sql"
 	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/buble/dbx/internal/store"
 	"github.com/buble/dbx/internal/theme"
 	"github.com/buble/dbx/internal/ui"
 	"github.com/buble/dbx/internal/ui/bordered"
+	"github.com/buble/dbx/internal/ui/components/ask"
 	"github.com/buble/dbx/internal/ui/components/editor"
 	"github.com/buble/dbx/internal/ui/components/explorer"
 	"github.com/buble/dbx/internal/ui/components/explorerpreview"
@@ -96,6 +98,13 @@ type Model struct {
 	queryStore                 *store.QueryStore
 	queryBrowser               *querybrowser.QueryBrowser
 	queryBrowserOpen           bool
+	ask                        *ask.Ask
+	askOpen                    bool
+	aiProvider                 nl2sql.Provider
+	aiProviderErr              error
+	askSchemaText              string
+	askContextHint             string
+	askGenSeq                  int
 	runner                     *statementRunner
 	connectCancelled           bool
 	forcePicker                bool
@@ -121,6 +130,14 @@ func NewModel(cfg *config.Config) Model {
 	qb := querybrowser.New(t.Styles(), qs)
 	ed := editor.NewSQLEditor(t.Styles())
 	ed.SetAutocompleteConfig(cfg.Editor.Autocomplete, cfg.Editor.AutocompleteTrigger)
+	// Resolve the NL→SQL provider once; a nil provider keeps ASK unavailable.
+	// The resolution error is kept so the user sees the real reason (e.g. a
+	// missing API key) instead of a generic "not configured".
+	aiProvider, aiProviderErr := nl2sql.Resolve(nl2sql.Config{
+		Provider:  cfg.AI.Provider,
+		Model:     cfg.AI.Model,
+		Providers: cfg.AI.Nl2sqlProviders(),
+	})
 	return Model{
 		config:             cfg,
 		theme:              t,
@@ -141,6 +158,9 @@ func NewModel(cfg *config.Config) Model {
 		yankMaxRows:        yankMaxRows,
 		queryStore:         qs,
 		queryBrowser:       qb,
+		ask:                ask.New(t.Styles()),
+		aiProvider:         aiProvider,
+		aiProviderErr:      aiProviderErr,
 	}
 }
 
@@ -229,6 +249,9 @@ type dbConnectedMsg struct {
 }
 
 func (m Model) loadSchema(conn *pgx.Conn, project config.FoundProject) tea.Cmd {
+	if m.refuseIfBusy() {
+		return nil
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(conn)
@@ -251,6 +274,9 @@ func (m Model) loadSchema(conn *pgx.Conn, project config.FoundProject) tea.Cmd {
 }
 
 func (m Model) loadSchemaWithTarget(conn *pgx.Conn, project config.FoundProject, targetSchema, targetTable string) tea.Cmd {
+	if m.refuseIfBusy() {
+		return nil
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(conn)
@@ -279,6 +305,9 @@ func (m Model) loadSchemaWithTarget(conn *pgx.Conn, project config.FoundProject,
 }
 
 func (m Model) loadAutocompleteData() tea.Cmd {
+	if m.refuseIfBusy() {
+		return nil
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(m.conn)
@@ -543,6 +572,9 @@ type tableDataLoadedMsg struct {
 }
 
 func (m Model) loadMetadata(schema, table string) tea.Cmd {
+	if m.refuseIfBusy() {
+		return nil
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(m.conn)
@@ -603,6 +635,9 @@ func toIndexInfo(data []postgres.IndexInfo) []indexInfo {
 }
 
 func (m Model) loadExplorerPreviewData(schema, table string) tea.Cmd {
+	if m.refuseIfBusy() {
+		return nil
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(m.conn)
@@ -653,6 +688,24 @@ type queryExecutedMsg struct {
 	committedTx bool
 }
 
+// askGeneratedMsg carries the result of an async NL→SQL generation. seq tags
+// the request so a stale result cannot attach to a newer turn.
+type askGeneratedMsg struct {
+	sql string
+	err error
+	seq int
+}
+
+// askQueryExecutedMsg carries the result of an ASK query run in a READ ONLY
+// transaction. seq tags the request so a stale result cannot attach to a newer
+// turn.
+type askQueryExecutedMsg struct {
+	result *postgres.QueryResult
+	sql    string
+	err    error
+	seq    int
+}
+
 func (m Model) loadTableData(schema, table string) tea.Cmd {
 	return m.loadTableDataWithWhere(schema, table, "")
 }
@@ -662,6 +715,9 @@ func (m Model) loadTableDataWithWhere(schema, table, where string) tea.Cmd {
 }
 
 func (m Model) loadTableDataWithSortAndWhere(schema, table, orderBy, orderDir, where string) tea.Cmd {
+	if m.refuseIfBusy() {
+		return nil
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(m.conn)
@@ -759,6 +815,9 @@ func (m Model) findFKForColumn(colName string) *postgres.ForeignKeyInfo {
 }
 
 func (m Model) fetchGridSidebarFKPreview(fkInfo *postgres.ForeignKeyInfo, fkValue interface{}, token int) tea.Cmd {
+	if m.refuseIfBusy() {
+		return nil
+	}
 	refSchema := fkInfo.RefSchema
 	if refSchema == "" {
 		refSchema = m.prevSchema
@@ -885,6 +944,27 @@ func isASCIILetter(b byte) bool {
 	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '_'
 }
 
+// dbBusy reports whether an ASK read-only transaction is still in flight on
+// the shared connection. While busy, no other DB command may start: pgx cannot
+// multiplex transactions on one connection, so a concurrent query would fail
+// read-only or be rolled back with the ASK transaction.
+func (m Model) dbBusy() bool {
+	return m.runner != nil && m.runner.readOnlyBusy()
+}
+
+// refuseIfBusy shows a clear message and reports whether a DB command must be
+// refused because an ASK read-only transaction is still running.
+func (m Model) refuseIfBusy() bool {
+	if !m.dbBusy() {
+		return false
+	}
+	if m.toast != nil {
+		m.toast.ShowError("a read-only ASK query is still running")
+	}
+	appDebugLog("DB: refused, a read-only ASK query is still running")
+	return true
+}
+
 func (m Model) executeQuery(sql string) tea.Cmd {
 	// Capture the intent at dispatch time: the grid sets commit-on-run when it
 	// dumps draft SQL into the editor, so executing it also commits the
@@ -909,47 +989,126 @@ func (m Model) executeQuery(sql string) tea.Cmd {
 	}
 }
 
-// splitSQL splits a SQL string by top-level semicolons, ignoring semicolons inside strings.
+// handleAskOpen opens the ASK overlay, refusing when no AI provider is
+// configured so the user gets a clear message instead of a dead pane.
+func (m Model) handleAskOpen() (tea.Model, tea.Cmd) {
+	if m.aiProvider == nil {
+		reason := "No AI provider configured"
+		if m.aiProviderErr != nil {
+			reason = fmt.Sprintf("No AI provider configured: %v", m.aiProviderErr)
+		}
+		appDebugLog("Ask: provider unavailable: %s", reason)
+		m.toast.ShowError(reason)
+		return m, nil
+	}
+	if m.ask == nil {
+		return m, nil
+	}
+	schema, table, where := m.gridContextHint()
+	m.ask.SetContextHint(schema, table, where)
+	m.askContextHint = buildAskContextHint(schema, table, where)
+	m.askOpen = true
+	m.ask.Show()
+	appDebugLog("Ask: opened context=%q", m.askContextHint)
+	return m, nil
+}
+
+// gridContextHint returns the loaded table and WHERE clause, if any.
+func (m Model) gridContextHint() (schema, table, where string) {
+	if m.grid == nil {
+		return "", "", ""
+	}
+	return m.grid.ContextHint()
+}
+
+// buildAskContextHint formats the grid context for the prompt. It is a hint,
+// never a restriction: ASK stays globally available. Query results (synthetic
+// table "query") and empty schemas carry no hint.
+func buildAskContextHint(schema, table, where string) string {
+	if schema == "" || table == "" || table == "query" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("The grid is currently showing table %s.%s.\n", schema, table))
+	if where != "" {
+		b.WriteString(fmt.Sprintf("The grid's current WHERE clause is: %s\n", where))
+	}
+	return b.String()
+}
+
+// generateAskSQL runs the NL→SQL provider asynchronously so the UI stays
+// responsive while the model generates. seq identifies the request so a stale
+// result (the pane was closed and reopened) is ignored by the caller.
+func (m Model) generateAskSQL(question string, seq int) tea.Cmd {
+	provider := m.aiProvider
+	schema := m.askSchemaText
+	if schema == "" {
+		schema = postgres.SchemaText(m.schemaDetail)
+	}
+	contextHint := m.askContextHint
+	return func() tea.Msg {
+		if provider == nil {
+			return askGeneratedMsg{err: fmt.Errorf("no AI provider configured"), seq: seq}
+		}
+		prompt := question
+		if contextHint != "" {
+			prompt = question + "\n\nContext (hint, not a restriction):\n" + contextHint
+		}
+		appDebugLog("Ask: generating seq=%d prompt=%q schemaLen=%d", seq, prompt, len(schema))
+		sql, err := provider.Generate(context.Background(), prompt, schema)
+		return askGeneratedMsg{sql: sql, err: err, seq: seq}
+	}
+}
+
+// executeAskSQL validates the generated SQL and runs it inside a READ ONLY
+// transaction, reporting the result as an askQueryExecutedMsg. seq identifies
+// the request so a stale result is ignored by the caller.
+func (m Model) executeAskSQL(sql string, seq int) tea.Cmd {
+	if m.ask == nil {
+		return nil
+	}
+	if reason := selectOnlyViolation(sql); reason != "" {
+		appDebugLog("Ask: rejected statement %q: %s", sql, reason)
+		m.ask.SetError(fmt.Errorf("%s", reason))
+		return nil
+	}
+	if m.runner == nil {
+		m.ask.SetError(fmt.Errorf("not connected to a database"))
+		return nil
+	}
+	if m.runner.pending() {
+		appDebugLog("Ask: refused, a DML transaction is pending")
+		m.ask.SetError(fmt.Errorf("a DML transaction is pending: commit or roll back first"))
+		return nil
+	}
+	if m.runner.readOnlyBusy() {
+		appDebugLog("Ask: refused, a read-only query is already running")
+		m.ask.SetError(fmt.Errorf("a read-only query is already running"))
+		return nil
+	}
+	runner := m.runner
+	return func() tea.Msg {
+		result, err := runner.executeReadOnly(context.Background(), sql)
+		return askQueryExecutedMsg{result: result, sql: sql, err: err, seq: seq}
+	}
+}
+
+// splitSQL splits a SQL string by top-level semicolons, ignoring semicolons
+// inside string literals, dollar-quoted strings, quoted identifiers and
+// comments.
 func splitSQL(sql string) []string {
+	masked := maskNonCode(sql)
 	var parts []string
-	var current strings.Builder
-	inSingleQuote := false
-	inDoubleQuote := false
-
+	start := 0
 	for i := 0; i < len(sql); i++ {
-		ch := sql[i]
-
-		if ch == '\'' && !inDoubleQuote {
-			if i+1 < len(sql) && sql[i+1] == '\'' {
-				current.WriteByte(ch)
-				current.WriteByte(ch)
-				i++
-				continue
-			}
-			inSingleQuote = !inSingleQuote
-			current.WriteByte(ch)
-			continue
+		if masked[i] == ';' {
+			parts = append(parts, sql[start:i])
+			start = i + 1
 		}
-
-		if ch == '"' && !inSingleQuote {
-			inDoubleQuote = !inDoubleQuote
-			current.WriteByte(ch)
-			continue
-		}
-
-		if ch == ';' && !inSingleQuote && !inDoubleQuote {
-			parts = append(parts, current.String())
-			current.Reset()
-			continue
-		}
-
-		current.WriteByte(ch)
 	}
-
-	if current.Len() > 0 {
-		parts = append(parts, current.String())
+	if start < len(sql) {
+		parts = append(parts, sql[start:])
 	}
-
 	return parts
 }
 
@@ -974,6 +1133,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.queryBrowser != nil {
 			m.queryBrowser.SetWidth(msg.Width)
 			m.queryBrowser.SetHeight(msg.Height)
+		}
+		if m.ask != nil {
+			m.ask.SetWidth(msg.Width)
+			m.ask.SetHeight(msg.Height)
 		}
 		return m, tickToast()
 
@@ -1058,6 +1221,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.grid.SetHeight(m.height - 4)
 		m.schemaDetail = msg.schemaDetail
 		m.dbName = msg.dbName
+		m.askSchemaText = postgres.SchemaText(msg.schemaDetail)
 		// Initialize per-project query store after project selection
 		if m.project != nil {
 			m.initQueryStore(m.project.Name, "")
@@ -1155,6 +1319,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.conn == nil {
 			return m, nil
 		}
+		if m.refuseIfBusy() {
+			return m, nil
+		}
 		var inserted int
 		for i, query := range msg.Queries {
 			_, err := m.conn.Exec(context.Background(), query, msg.Args[i]...)
@@ -1169,6 +1336,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case grid.GridCommitAllMsg:
 		if m.conn == nil {
+			return m, nil
+		}
+		if m.refuseIfBusy() {
 			return m, nil
 		}
 		var executed int
@@ -1400,6 +1570,60 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.keybindsPane.SetQueryBrowserOpen(false)
 		return m, nil
 
+	case ask.AskSubmittedMsg:
+		m.askGenSeq++
+		return m, m.generateAskSQL(msg.Question, m.askGenSeq)
+
+	case ask.AskConfirmMsg:
+		return m, m.executeAskSQL(msg.SQL, m.askGenSeq)
+
+	case ask.AskClosedMsg:
+		m.askOpen = false
+		return m, nil
+
+	case askGeneratedMsg:
+		if m.ask == nil {
+			return m, nil
+		}
+		if msg.seq != m.askGenSeq {
+			appDebugLog("Ask: ignoring stale generation seq=%d (current=%d)", msg.seq, m.askGenSeq)
+			return m, nil
+		}
+		if msg.err != nil {
+			m.ask.SetError(msg.err)
+			return m, nil
+		}
+		m.ask.SetGeneratedSQL(msg.sql)
+		return m, nil
+
+	case askQueryExecutedMsg:
+		if m.ask == nil {
+			return m, nil
+		}
+		if msg.seq != m.askGenSeq {
+			appDebugLog("Ask: ignoring stale execution seq=%d (current=%d)", msg.seq, m.askGenSeq)
+			return m, nil
+		}
+		if msg.err != nil {
+			m.ask.SetError(msg.err)
+			return m, nil
+		}
+		m.ask.MarkExecuted()
+		m.askOpen = false
+		m.ask.Hide()
+		// Record ASK queries in history like editor queries, so they can be
+		// recalled from the query browser and the editor.
+		if m.editor != nil {
+			m.editor.PushHistory(msg.sql)
+		}
+		if m.queryStore != nil {
+			m.queryStore.Add(msg.sql)
+		}
+		m.grid.SetData(msg.result, "", "query")
+		m.router.FocusPane(FocusGrid)
+		m.toast.ShowSuccess(fmt.Sprintf("Query returned %d rows", msg.result.Count))
+		return m, nil
+
 	case querybrowser.QueryBrowserClosedMsg:
 		m.queryBrowserOpen = false
 		m.keybindsPane.SetQueryBrowserOpen(false)
@@ -1483,7 +1707,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.editorOpen || m.palette.IsVisible() ||
-			(m.queryBrowserOpen && m.queryBrowser != nil) || m.grid.IsExporting() {
+			(m.queryBrowserOpen && m.queryBrowser != nil) || m.grid.IsExporting() ||
+			(m.askOpen && m.ask != nil) {
 			return m, nil
 		}
 
@@ -1532,7 +1757,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Ignore clicks while a modal-like overlay is on top; these used to
 		// swallow keys only, so a click behind them could act on a hidden pane.
 		if m.editorOpen || m.helpModal.IsVisible() || m.palette.IsVisible() ||
-			(m.queryBrowserOpen && m.queryBrowser != nil) || m.grid.IsExporting() {
+			(m.queryBrowserOpen && m.queryBrowser != nil) || m.grid.IsExporting() ||
+			(m.askOpen && m.ask != nil) {
 			return m, nil
 		}
 
@@ -1592,6 +1818,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.queryBrowserOpen && m.queryBrowser != nil {
 			if cmd, handled := m.queryBrowser.Update(msg); handled {
+				return m, cmd
+			}
+			return m, nil
+		}
+
+		if m.askOpen && m.ask != nil {
+			if cmd, handled := m.ask.Update(msg); handled {
 				return m, cmd
 			}
 			return m, nil
@@ -1778,6 +2011,9 @@ func (m Model) appActions() map[config.ActionID]func(Model) (tea.Model, tea.Cmd)
 		"palette": func(m Model) (tea.Model, tea.Cmd) {
 			m.palette.Show()
 			return m, nil
+		},
+		"ask": func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleAskOpen()
 		},
 		"toggle_explorer_focus": func(m Model) (tea.Model, tea.Cmd) {
 			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
@@ -2310,6 +2546,13 @@ func (m Model) View() tea.View {
 			appDebugLog("QueryBrowser View: overlay done, content length=%d", len(content))
 		} else {
 			appDebugLog("QueryBrowser View: browserView is empty!")
+		}
+	}
+
+	if m.askOpen && m.ask != nil {
+		askView := m.ask.View()
+		if askView != "" {
+			content = overlay(content, askView, m.width, m.height)
 		}
 	}
 

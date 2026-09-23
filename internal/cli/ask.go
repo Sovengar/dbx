@@ -42,7 +42,7 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	provider, err := nl2sql.Resolve(nl2sql.Config{
 		Provider:  cfg.AI.Provider,
 		Model:     cfg.AI.Model,
-		Providers: toProviderConfigs(cfg.AI.Providers),
+		Providers: cfg.AI.Nl2sqlProviders(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to resolve AI provider: %w", err)
@@ -121,13 +121,12 @@ func runAsk(cmd *cobra.Command, args []string) error {
 func getSchemaForLLM(ctx context.Context, conn *pgx.Conn) (string, error) {
 	loader := postgres.NewSchemaLoader(conn)
 
-	dbName := "database"
 	schemas, err := loader.ListSchemas(ctx)
 	if err != nil {
 		return "", err
 	}
 
-	var result string
+	var details []postgres.SchemaDetail
 	for _, schema := range schemas {
 		if schema == "pg_catalog" || schema == "information_schema" || schema == "pg_toast" {
 			continue
@@ -138,36 +137,20 @@ func getSchemaForLLM(ctx context.Context, conn *pgx.Conn) (string, error) {
 			continue
 		}
 
-		result += fmt.Sprintf("Schema: %s\n", schema)
+		sd := postgres.SchemaDetail{Name: schema}
 		for _, table := range tables {
 			columns, err := loader.ListColumns(ctx, schema, table.Name)
 			if err != nil {
 				continue
 			}
-
-			result += fmt.Sprintf("  Table: %s (%d rows)\n", table.Name, table.RowCount)
-			for _, col := range columns {
-				nullable := ""
-				if col.IsNullable == "YES" {
-					nullable = " NULL"
-				}
-				result += fmt.Sprintf("    %s %s%s\n", col.Name, col.DataType, nullable)
-			}
+			sd.Tables = append(sd.Tables, postgres.TableDetail{
+				Name:     table.Name,
+				RowCount: table.RowCount,
+				Columns:  columns,
+			})
 		}
-		result += "\n"
+		details = append(details, sd)
 	}
 
-	_ = dbName
-	return result, nil
-}
-
-func toProviderConfigs(m map[string]config.AIProviderConf) map[string]nl2sql.ProviderConfig {
-	result := make(map[string]nl2sql.ProviderConfig, len(m))
-	for k, v := range m {
-		result[k] = nl2sql.ProviderConfig{
-			APIKeyEnv: v.APIKeyEnv,
-			Model:     v.Model,
-		}
-	}
-	return result
+	return postgres.SchemaText(details), nil
 }

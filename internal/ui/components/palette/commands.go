@@ -34,6 +34,7 @@ func DefaultCommands() []command {
 		{Name: "Switch Connection", Alias: "switch", Action: "switch_connection", Section: SectionDatabase},
 
 		{Name: "Execute Query", Alias: "execute", Action: "execute_query", Section: SectionQuery},
+		{Name: "Ask AI", Alias: "ask", Action: "ask", Section: SectionQuery},
 		{Name: "Clear Editor", Alias: "clear", Action: "clear_editor", Section: SectionQuery},
 		{Name: "Copy SQL", Alias: "copy", Action: "copy_sql", Section: SectionQuery},
 

@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -148,16 +147,7 @@ func lastToastContains(m Model, want string) bool {
 	return false
 }
 
-// --- Real PostgreSQL harness (skipped unless DBX_TEST_DSN is set) ---
-
-func testDSN(t *testing.T) string {
-	t.Helper()
-	dsn := os.Getenv("DBX_TEST_DSN")
-	if dsn == "" {
-		t.Skip("set DBX_TEST_DSN to run the PostgreSQL integration tests")
-	}
-	return dsn
-}
+// --- Real PostgreSQL harness (testcontainers by default, DBX_TEST_DSN overrides) ---
 
 func connectTestDB(t *testing.T, dsn string) *pgx.Conn {
 	t.Helper()

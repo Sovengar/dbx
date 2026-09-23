@@ -123,9 +123,6 @@ executing. The same flow is available from the terminal via `dbx ask`, with
 `--json` and `--sql-only` flags. Supports Anthropic, OpenAI, DeepSeek, Qwen,
 OpenCode, and any OpenAI-compatible endpoint.
 
-> The in-TUI Ask handler is not wired yet; the action is declared and reserved so
-> its binding will not be reassigned. Use `dbx ask` from the CLI meanwhile.
-
 ### Navigation & UI
 
 - **Top bar** — active pane, `schema.table`, row count, WHERE filter, breadcrumbs.
@@ -283,6 +280,7 @@ See [docs/CLI.md](docs/CLI.md) for full reference.
 
 - [Features](docs/FEATURES.md) — DML transactions, action naming, non-keybind prose
 - [Architecture](docs/ARCHITECTURE.md) — Design decisions and patterns
+- [Decisions (ADR)](docs/decisions/) — Architecture decision records
 - [Config](docs/CONFIG.md) — Configuration reference
 - [CLI](docs/CLI.md) — CLI command reference
 
@@ -306,3 +304,32 @@ make test
 make lint
 
 ```
+
+### Server-enforced READ ONLY verification
+
+The ASK pane's SELECT-only guarantee is only *authoritative* when PostgreSQL
+rejects mutations inside the READ ONLY transaction — the client-side validator
+is defense in depth, not the guarantee.
+
+The proving tests (`TestAsk_ReadOnlyTxRejectsDML`,
+`TestAsk_ReadOnlyTxRejectsSelectBasedMutation`) run **automatically**: when
+`DBX_TEST_DSN` is unset they start a real PostgreSQL via
+[testcontainers-go](https://golang.testcontainers.org/) (`postgres:16-alpine`),
+so a plain `go test ./...` verifies the guarantee wherever Docker is available
+(including CI ubuntu runners, which ship Docker). If Docker is unavailable the
+tests skip with a clear message.
+
+To reuse an existing database instead of starting a container, set
+`DBX_TEST_DSN` (fast path, no container):
+
+```bash
+DBX_TEST_DSN='postgres://user:pass@localhost:5432/db' go test ./internal/app -run TestAsk -v
+```
+
+Either way this is a **mandatory verification step**, not optional.
+
+**Accepted tradeoff:** testcontainers-go pulls ~50 indirect Go modules for a
+test-only need, and the tests require Docker at run time. When Docker is
+unavailable they skip with a clear message instead of failing, so the suite
+still runs on machines without it. The alternative (a hand-rolled Docker
+invocation or a committed Postgres service) was rejected as more brittle.

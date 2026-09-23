@@ -849,6 +849,17 @@ func (g *Grid) WhereClause() string {
 	return g.whereClause
 }
 
+// ContextHint returns the currently loaded table and its WHERE clause, used by
+// the ASK pane as a prompt hint. It returns empty values when no real table is
+// loaded — including query results, which the grid stores under the synthetic
+// table name "query".
+func (g *Grid) ContextHint() (schema, table, where string) {
+	if g.schema == "" || g.tableName == "" || g.tableName == "query" {
+		return "", "", ""
+	}
+	return g.schema, g.tableName, g.whereClause
+}
+
 func (g *Grid) SortColumn() string {
 	return g.header.SortColumn()
 }

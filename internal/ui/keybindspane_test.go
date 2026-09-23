@@ -94,6 +94,13 @@ func TestKeybindsPane_GridDoesNotAnnounceCopySQL(t *testing.T) {
 	}
 }
 
+// Scenario: ASK keybind shown in the bottom bar.
+func TestKeybindsPane_ShowsAskKeybind(t *testing.T) {
+	if !linesContain(paneWith(config.ContextExplorer).renderLines(), "a Ask AI (NL→SQL)") {
+		t.Fatalf("pane does not show 'a Ask AI (NL→SQL)': %v", paneWith(config.ContextExplorer).renderLines())
+	}
+}
+
 // Pane reflects the pending transaction state.
 func TestKeybindsPane_TxPendingShowsRollback(t *testing.T) {
 	p := paneWith(config.ContextExplorer)

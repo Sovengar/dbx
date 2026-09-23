@@ -1,12 +1,14 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/theme"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func teaKey(key string) tea.KeyPressMsg {
@@ -31,6 +33,20 @@ func TestHelpModal_IncludesRollback(t *testing.T) {
 	view := modal.View()
 	if !strings.Contains(view, "Rollback Last Transaction") {
 		t.Fatal("Help modal does not contain 'Rollback Last Transaction'")
+	}
+}
+
+// Scenario: ASK action shown in the help modal
+func TestHelpModal_GlobalSection_IncludesAsk(t *testing.T) {
+	modal := modalWith(config.NewKeybindRegistry(config.KeybindingsConfig{}))
+	view := modal.View()
+	stripped := ansi.Strip(view)
+	if !strings.Contains(stripped, "Ask AI (NL→SQL)") {
+		t.Fatal("Help modal does not contain 'Ask AI (NL→SQL)' in Global section")
+	}
+	want := "  " + fmt.Sprintf("%-14s", "a") + "Ask AI (NL→SQL)"
+	if !strings.Contains(stripped, want) {
+		t.Fatalf("Help modal does not render key 'a' next to 'Ask AI (NL→SQL)'; want substring %q", want)
 	}
 }
 

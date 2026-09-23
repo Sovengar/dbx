@@ -40,7 +40,7 @@ func defaultActions() []Action {
 		{ID: "switch_connection", Keys: []string{"c"}, Section: SectionUI, Description: "Switch Connection",
 			Contexts: pageViews, Owner: "app"},
 		{ID: "ask", Keys: []string{"a"}, Section: SectionUI, Description: "Ask AI (NL→SQL)",
-			Contexts: pageViews, Owner: "app", Pending: true},
+			Contexts: pageViews, Owner: "app"},
 
 		// ── Navigation (shared) ───────────────────────────────────
 		{ID: "navigate_down", Keys: []string{"j", "down"}, Section: SectionNavigation, Description: "Navigate Down",
