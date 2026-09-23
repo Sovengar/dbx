@@ -120,3 +120,14 @@ Los escenarios de `behavior.feature` se traducen a tests Go reales:
 `go build ./... && go vet ./... && go test ./...` y luego `make install`
 (el usuario corre `~/.local/bin/dbx`). No commitear a `main`; commits atómicos
 Conventional Commits en la rama `feat/ask-nl2sql-chat`.
+
+La garantía autoritativa de SELECT-only (PostgreSQL rechazando mutaciones
+dentro de la transacción READ ONLY) **solo se verifica con base real**: el test
+`TestAsk_ReadOnlyTxRejectsDML` está gated por `DBX_TEST_DSN` y es un paso de
+verificación **obligatorio** (no opcional):
+
+```bash
+DBX_TEST_DSN='postgres://user:pass@localhost:5432/db' go test ./internal/app -run TestAsk -v
+```
+
+Sin `DBX_TEST_DSN` esa garantía queda sin verificar.

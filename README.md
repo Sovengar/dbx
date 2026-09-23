@@ -303,3 +303,18 @@ make test
 make lint
 
 ```
+
+### Mandatory verification: server-enforced READ ONLY
+
+The ASK pane's SELECT-only guarantee is only *authoritative* when PostgreSQL
+rejects mutations inside the READ ONLY transaction — the client-side validator
+is defense in depth, not the guarantee. The test that proves this
+(`TestAsk_ReadOnlyTxRejectsDML`) is gated behind `DBX_TEST_DSN` and is a
+**mandatory verification step**, not optional:
+
+```bash
+DBX_TEST_DSN='postgres://user:pass@localhost:5432/db' go test ./internal/app -run TestAsk -v
+```
+
+Without a real database this guarantee is unverified; CI must provide
+`DBX_TEST_DSN`.
