@@ -20,17 +20,39 @@ func scannerFor(root string, paths ...string) *Scanner {
 	return s
 }
 
+// connectionSpec describes a project connection for test fixtures.
+type connectionSpec struct {
+	driver    string
+	dsn       string
+	sshTunnel string
+}
+
 // writeConnections writes a .dbx.toml at dir with the given connection
-// name->DSN pairs.
+// name->DSN pairs and the postgres driver.
 func writeConnections(t *testing.T, dir string, conns map[string]string) {
+	t.Helper()
+	specs := make(map[string]connectionSpec, len(conns))
+	for name, dsn := range conns {
+		specs[name] = connectionSpec{driver: "postgres", dsn: dsn}
+	}
+	writeConnectionSpecs(t, dir, specs)
+}
+
+// writeConnectionSpecs writes a .dbx.toml at dir with full connection details,
+// letting tests vary driver and ssh_tunnel.
+func writeConnectionSpecs(t *testing.T, dir string, conns map[string]connectionSpec) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(%q): %v", dir, err)
 	}
 
 	var b strings.Builder
-	for name, dsn := range conns {
-		fmt.Fprintf(&b, "[connections.%q]\ndriver = \"postgres\"\ndsn = %q\n\n", name, dsn)
+	for name, spec := range conns {
+		fmt.Fprintf(&b, "[connections.%q]\ndriver = %q\ndsn = %q\n", name, spec.driver, spec.dsn)
+		if spec.sshTunnel != "" {
+			fmt.Fprintf(&b, "ssh_tunnel = %q\n", spec.sshTunnel)
+		}
+		b.WriteString("\n")
 	}
 	path := filepath.Join(dir, ".dbx.toml")
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
@@ -308,6 +330,84 @@ func TestScanner_DSNComparedAfterEnvExpansion(t *testing.T) {
 	got := scannerFor(root, dbxPath(a), dbxPath(b)).Scan()
 	if len(got) != 1 {
 		t.Fatalf("resolved DSNs are equal, len = %d, want 1 (%+v)", len(got), got)
+	}
+}
+
+func TestScanner_DifferentDriverKept(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	mkGitRepo(t, repo)
+
+	a := filepath.Join(repo, "a")
+	b := filepath.Join(repo, "b")
+	writeConnectionSpecs(t, a, map[string]connectionSpec{
+		"main": {driver: "postgres", dsn: "postgres://localhost/db"},
+	})
+	writeConnectionSpecs(t, b, map[string]connectionSpec{
+		"main": {driver: "mysql", dsn: "postgres://localhost/db"},
+	})
+
+	got := scannerFor(root, dbxPath(a), dbxPath(b)).Scan()
+	if len(got) != 2 {
+		t.Fatalf("different driver must not collapse: len = %d, want 2 (%+v)", len(got), got)
+	}
+}
+
+func TestScanner_DifferentSSHTunnelKept(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	mkGitRepo(t, repo)
+
+	a := filepath.Join(repo, "a")
+	b := filepath.Join(repo, "b")
+	writeConnectionSpecs(t, a, map[string]connectionSpec{
+		"main": {driver: "postgres", dsn: "postgres://localhost/db"},
+	})
+	writeConnectionSpecs(t, b, map[string]connectionSpec{
+		"main": {driver: "postgres", dsn: "postgres://localhost/db", sshTunnel: "user@host:22"},
+	})
+
+	got := scannerFor(root, dbxPath(a), dbxPath(b)).Scan()
+	if len(got) != 2 {
+		t.Fatalf("different ssh_tunnel must not collapse: len = %d, want 2 (%+v)", len(got), got)
+	}
+}
+
+func TestFindDotGit_DoesNotEscapeRoot(t *testing.T) {
+	parent := t.TempDir()
+	mkGitRepo(t, parent) // .git lives above the scan root
+
+	root := filepath.Join(parent, "root")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", root, err)
+	}
+	outside := filepath.Join(parent, "sibling") // descendant of parent, outside root
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", outside, err)
+	}
+
+	if got, ok := findDotGit(outside, root); ok {
+		t.Fatalf("findDotGit escaped root: got %q", got)
+	}
+}
+
+func TestScanner_ProjectOutsideRootNotAbsorbed(t *testing.T) {
+	parent := t.TempDir()
+	mkGitRepo(t, parent) // enclosing repo, above the scan root
+
+	root := filepath.Join(parent, "root")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", root, err)
+	}
+
+	a := filepath.Join(parent, "a")
+	b := filepath.Join(parent, "b")
+	writeConnections(t, a, map[string]string{"main": "postgres://localhost/db"})
+	writeConnections(t, b, map[string]string{"main": "postgres://localhost/db"})
+
+	got := scannerFor(root, dbxPath(a), dbxPath(b)).Scan()
+	if len(got) != 2 {
+		t.Fatalf("projects outside root must not inherit the enclosing repo: len = %d, want 2 (%+v)", len(got), got)
 	}
 }
 

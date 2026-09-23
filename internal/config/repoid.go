@@ -17,9 +17,10 @@ type repoIdentity struct {
 }
 
 // gitRepoIdentity derives the identity of the repository containing dir, without
-// spawning `git`. The upward search for `.git` is bounded by root: the walk never
-// inspects ancestors of root, so a git repo that merely contains root (e.g. a
-// dotfiles $HOME, or ~/dev) does not absorb non-git projects.
+// spawning `git`. root must already be canonical (callers canonicalize it once)
+// and bounds the upward search for `.git`: the walk never inspects ancestors of
+// root, so a git repo that merely contains root (e.g. a dotfiles $HOME, or ~/dev)
+// does not absorb non-git projects.
 //
 // When dir (or an ancestor up to root) is not inside a git repository, the
 // identity is the canonical path of dir itself: unique per directory, so nothing
@@ -27,7 +28,7 @@ type repoIdentity struct {
 func gitRepoIdentity(dir, root string) repoIdentity {
 	canonical := canonicalPath(dir)
 
-	gitPath, ok := findDotGit(canonical, canonicalPath(root))
+	gitPath, ok := findDotGit(canonical, root)
 	if !ok {
 		return repoIdentity{id: canonical}
 	}
@@ -53,7 +54,8 @@ func gitRepoIdentity(dir, root string) repoIdentity {
 }
 
 // findDotGit walks up from dir looking for a `.git` entry (file or directory),
-// stopping at root (inclusive) or the filesystem root, whichever comes first.
+// stopping at root (inclusive). If dir is not inside root, no ancestor of dir is
+// inspected: the walk never escapes root.
 func findDotGit(dir, root string) (string, bool) {
 	cur := dir
 	for {
@@ -62,7 +64,8 @@ func findDotGit(dir, root string) (string, bool) {
 			return candidate, true
 		}
 
-		if cur == root {
+		// Stop at root, or as soon as we would leave it.
+		if cur == root || !pathWithin(cur, root) {
 			return "", false
 		}
 
@@ -72,6 +75,18 @@ func findDotGit(dir, root string) (string, bool) {
 		}
 		cur = parent
 	}
+}
+
+// pathWithin reports whether path is root itself or a descendant of root.
+func pathWithin(path, root string) bool {
+	if path == root {
+		return true
+	}
+	prefix := root
+	if !strings.HasSuffix(prefix, string(filepath.Separator)) {
+		prefix += string(filepath.Separator)
+	}
+	return strings.HasPrefix(path, prefix)
 }
 
 // readGitdirFile parses a `.git` file of the form "gitdir: <path>". Relative

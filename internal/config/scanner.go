@@ -142,16 +142,19 @@ func (s *Scanner) loadProject(path string) (*FoundProject, error) {
 }
 
 // dedupeProjects collapses entries that share a (git repo identity, connection
-// name, driver, resolved DSN, ssh tunnel) key, keeping the survivor chosen by
-// survivor. Non-git directories use their own path as identity, so they never
-// collapse. root bounds the git search so an enclosing repo does not absorb
-// non-git projects.
+// name, driver, resolved DSN, ssh tunnel) key, keeping one survivor per group.
+// Non-git directories use their own path as identity, so they never collapse.
+// root bounds the git search so an enclosing repo does not absorb non-git
+// projects.
 func dedupeProjects(projects []FoundProject, root string) []FoundProject {
 	groups := make(map[projectKey][]dedupCandidate, len(projects))
 	order := make([]projectKey, 0, len(projects))
 
+	// Canonicalize the root once instead of once per project.
+	canonicalRoot := canonicalPath(root)
+
 	for _, p := range projects {
-		repo := gitRepoIdentity(p.Path, root)
+		repo := gitRepoIdentity(p.Path, canonicalRoot)
 		key := projectKey{
 			repo:      repo.id,
 			name:      p.Name,
