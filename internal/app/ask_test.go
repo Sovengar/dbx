@@ -528,3 +528,49 @@ func TestAsk_ReadOnlyTxRejectsDML(t *testing.T) {
 		t.Fatalf("name = %q, want it unchanged (%q)", got, "a")
 	}
 }
+
+// Scenario: A query result does not leak into the context hint
+func TestAsk_NoContextHintAfterQueryResult(t *testing.T) {
+	provider := &fakeProvider{name: "fake", sql: "SELECT n FROM public.users"}
+	runner, _ := newAskRunner(queryResult([]interface{}{"a"}), nil)
+	m := newAskTestModel(t, provider)
+	m.runner = runner
+	m = openAsk(t, m)
+	m = submitAsk(t, m, "list users")
+	m = confirmAndExecute(t, m) // grid now holds a synthetic "query" result
+	if m.grid.TableName() != "query" {
+		t.Fatalf("grid table = %q, want the synthetic query result", m.grid.TableName())
+	}
+
+	m = openAsk(t, m)
+	m = submitAsk(t, m, "how many users")
+
+	if strings.Contains(provider.gotPrompt, "grid is currently showing") {
+		t.Fatalf("prompt = %q, want no context hint after a query result", provider.gotPrompt)
+	}
+}
+
+func TestBuildAskContextHint(t *testing.T) {
+	cases := []struct {
+		name                          string
+		schema, table, where          string
+		wantSchemaAndTable, wantWhere bool
+	}{
+		{"real table", "public", "users", "active = true", true, true},
+		{"no table", "", "", "", false, false},
+		{"synthetic query result", "", "query", "", false, false},
+		{"missing schema", "", "users", "", false, false},
+		{"real table no where", "public", "users", "", true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hint := buildAskContextHint(tc.schema, tc.table, tc.where)
+			if got := strings.Contains(hint, tc.schema+"."+tc.table) && tc.schema != ""; got != tc.wantSchemaAndTable {
+				t.Fatalf("hint = %q, schema.table present = %v, want %v", hint, got, tc.wantSchemaAndTable)
+			}
+			if got := strings.Contains(hint, tc.where) && tc.where != ""; got != tc.wantWhere {
+				t.Fatalf("hint = %q, where present = %v, want %v", hint, got, tc.wantWhere)
+			}
+		})
+	}
+}

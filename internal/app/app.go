@@ -967,9 +967,10 @@ func (m Model) gridContextHint() (schema, table, where string) {
 }
 
 // buildAskContextHint formats the grid context for the prompt. It is a hint,
-// never a restriction: ASK stays globally available.
+// never a restriction: ASK stays globally available. Query results (synthetic
+// table "query") and empty schemas carry no hint.
 func buildAskContextHint(schema, table, where string) string {
-	if schema == "" && table == "" {
+	if schema == "" || table == "" || table == "query" {
 		return ""
 	}
 	var b strings.Builder
