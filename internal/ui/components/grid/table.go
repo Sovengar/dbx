@@ -1221,6 +1221,13 @@ func (g *Grid) handleRefreshKey() (tea.Cmd, bool) {
 	}, true
 }
 
+// Refresh runs the grid's two-step refresh: the first press while drafts exist
+// arms a pending confirmation; the second press (or a press with no drafts)
+// emits GridRefreshConfirmMsg so the app reloads the data.
+func (g *Grid) Refresh() (tea.Cmd, bool) {
+	return g.handleRefreshKey()
+}
+
 func (g *Grid) IsRefreshPending() bool {
 	return g.refreshPending
 }

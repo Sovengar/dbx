@@ -1885,17 +1885,11 @@ func (m Model) appActions() map[config.ActionID]func(Model) (tea.Model, tea.Cmd)
 			return m, nil
 		},
 		"refresh_data": func(m Model) (tea.Model, tea.Cmd) {
-			if m.router.Focus() == FocusGrid && m.grid != nil && m.grid.HasData() {
-				if m.grid.HasDrafts() {
-					m.grid.SetRefreshPending(true)
-					return m, nil
-				}
-				m.toast.ShowSuccess("Query refreshed")
-				return m, m.loadTableDataWithSortAndWhere(
-					m.prevSchema, m.prevTable,
-					m.grid.SortColumn(), m.grid.SortDirection(),
-					m.grid.WhereClause(),
-				)
+			if m.router.Focus() != FocusGrid || m.grid == nil {
+				return m, nil
+			}
+			if cmd, handled := m.grid.Refresh(); handled {
+				return m, cmd
 			}
 			return m, nil
 		},
