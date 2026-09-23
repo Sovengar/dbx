@@ -1,427 +1,156 @@
 # dbx Configuration Reference
 
-## Location
+Two different config files exist, with **different shapes**:
 
-Default: `~/.config/dbx/config.toml`
+- **Global config** — `~/.config/dbx/config.toml` (respects the OS config dir).
+  Created automatically on first run if missing. Documented below.
+- **Project config** — `.dbx.toml` in a project directory. See
+  [Project config](#project-config-dbxtoml).
 
-Can be overridden with `--config` flag or `DBX_CONFIG` env var.
+## Global config
 
-## Complete Config Example
+### `theme`
 
 ```toml
-# ═══════════════════════════════════════════════════════════════
-# dbx Configuration File
-# ═══════════════════════════════════════════════════════════════
-
-# ─── Version ───────────────────────────────────────────────────
-# Config version (for migrations)
-version = "1.0"
-
-# ─── Theme ─────────────────────────────────────────────────────
 [theme]
-# Theme mode: "system", "dark", "light", "nord", "gruvbox", "catppuccin"
-# "system" auto-detects terminal colors
+# system | dark | light | nord | gruvbox | catppuccin
 mode = "system"
+```
 
-# Force dark/light mode (overrides system detection)
-# mode_lock = "dark"
+Default: `system`. An unknown value also falls back to `system`.
 
-# Custom color overrides (optional)
-# [theme.colors]
-# primary = "#89b4fa"
-# secondary = "#f38ba8"
-# accent = "#a6e3a1"
-# background = "#1e1e2e"
-# foreground = "#cdd6f4"
-# error = "#f38ba8"
-# warning = "#fab387"
-# success = "#a6e3a1"
-# info = "#89dceb"
+### `keybindings.custom`
 
-# ─── Keybindings ───────────────────────────────────────────────
-# Custom keybind overrides, keyed by the action ID. Each action maps to a
-# single key string and the override replaces every key of that action; set an
-# action to "" to unbind it. Press ? inside dbx for the full action list.
+Override any default keybind, keyed by **action ID**:
+
+```toml
 [keybindings.custom]
-# App / UI
-# "quit" = "q"
-# "help" = "?"
-# "palette" = ":"
-# "ask" = "a"
-# "switch_connection" = "c"
-# "toggle_explorer_focus" = "e"
-# "focus_editor" = "E"
-# "query_browser" = "Q"
-# "rollback" = "U"
+"ask" = "ctrl+a"
+"edit_cell" = "enter"
+"navigate_down" = "ctrl+j"
+```
 
-# Grid
-# "navigate_down" = "j"
-# "edit_cell" = "enter"
-# "delete_rows" = "d"
-# "insert_row" = "i"
-# "yank" = "y"
-# "sort_column" = "s"
-# "filter_rows" = "/"
-# "find_column" = "f"
-# "next_page" = "n"
-# "prev_page" = "p"
-# "export" = "x"
+- Each action maps to a **single key string** (not a list). The override
+  **replaces every key** of that action.
+- Map an action to `""` to unbind it.
+- Press `?` inside dbx for the full action list. Unknown IDs are accepted but do
+  nothing (they have no handler).
 
-# Explorer
-# "expand_node" = "enter"
-# "toggle_columns" = "space"
-# "collapse_node" = "backspace"
-# "new_table" = "n"
-# "drop_table" = "d"
-# "view_ddl" = "v"
-# "filter_tables" = "/"
-# "refresh_schema" = "r"
+### `connections`
 
-# Editor
-# "execute_query" = "ctrl+enter"
-# "clear_editor" = "ctrl+u"
-# "copy_sql" = "ctrl+y"
-# "autocomplete" = "tab"
-# "history_prev" = "ctrl+p"
-# "history_next" = "ctrl+n"
+An **array of tables**. Used by the CLI (`-c/--connection`) and the project
+scanner.
 
-# ─── Connections ───────────────────────────────────────────────
-# Connections can be defined here or via CLI
-
+```toml
 [[connections]]
 name = "local-dev"
 provider = "postgres"
-host = "localhost"
-port = 5432
-database = "myapp_dev"
-user = "postgres"
-# Password: use password_env to read from environment variable
-password_env = "PGPASSWORD"
-# Or use password_file to read from file
-# password_file = "/path/to/password"
+url = "postgres://user:pass@localhost:5432/myapp"
 
 [[connections]]
 name = "staging"
 provider = "postgres"
-# Full URL overrides individual fields
-url = "postgres://user:pass@staging.example.com:5432/myapp"
-# Read-only mode blocks INSERT, UPDATE, DELETE, DROP
+host = "staging.example.com"
+port = 5432
+database = "myapp"
+user = "postgres"
+password_env = "PGPASSWORD"   # read the password from an env var
 read_only = true
+```
 
-[[connections]]
-name = "local-sqlite"
-provider = "sqlite"
-# Path to database file
-path = "./data/local.db"
+`url` (full DSN) takes precedence over the individual `host`/`port`/… fields.
 
-# ─── SSH Tunnels ───────────────────────────────────────────────
-# Define reusable tunnel configs
+### `ai`
 
-[tunnels]
-[tunnels.bastion]
-host = "bastion.example.com"
-user = "deploy"
-key = "~/.ssh/id_rsa"
-
-[tunnels.k8s]
-host = "k8s-master.example.com"
-user = "admin"
-key = "~/.ssh/k8s_key"
-port_forward = true
-
-# Reference tunnels in connections
-# [[connections]]
-# name = "prod-via-bastion"
-# provider = "postgres"
-# url = "postgres://..."
-# tunnel = "bastion"
-
-# ─── AI Configuration ─────────────────────────────────────────
+```toml
 [ai]
-# Provider: "anthropic", "openai", "deepseek", "qwen"
-# If not set, auto-detects from available API keys
-provider = "anthropic"
+provider = "opencode-go"   # default
+model = "mimo-v2.5"        # default
 
-# Default model (can be overridden per provider)
-model = "claude-sonnet-4-20250514"
-
-# Temperature for generation (0.0 - 1.0)
-temperature = 0.3
-
-# Max tokens for response
-max_tokens = 2048
-
-# Schema context inclusion
-# "full" = all tables, columns, types, indexes
-# "smart" = relevant tables only (based on prompt)
-# "none" = no schema context
-schema_context = "smart"
-
-# Provider-specific config
 [ai.providers.anthropic]
 api_key_env = "ANTHROPIC_API_KEY"
 model = "claude-sonnet-4-20250514"
-# base_url = "https://api.anthropic.com"  # For proxies
 
 [ai.providers.openai]
 api_key_env = "OPENAI_API_KEY"
 model = "gpt-4o"
-# base_url = "https://api.openai.com/v1"
+```
 
-[ai.providers.deepseek]
-api_key_env = "DEEPSEEK_API_KEY"
-model = "deepseek-chat"
-# base_url = "https://api.deepseek.com"
+`ai.providers` is a free-form map; each entry declares the env var holding the
+API key and an optional model. Used by both the TUI ASK pane and `dbx ask`.
 
-[ai.providers.qwen]
-api_key_env = "DASHSCOPE_API_KEY"
-model = "qwen-turbo"
+### `session`
 
-# ─── Session Logs ──────────────────────────────────────────────
+```toml
 [session]
-# Enable/disable session logging
 enabled = true
-
-# Log directory
-dir = "~/.config/dbx/sessions"
-
-# Retention in days (0 = keep forever)
+dir = "/tmp/dbx/sessions"
 retention_days = 30
+```
 
-# Log format: "jsonl" (JSON Lines) or "json"
-format = "jsonl"
+Defaults: `enabled = true`, `dir = $TMPDIR/dbx/sessions`, `retention_days = 30`.
 
-# Include SQL in logs (set false for sensitive data)
-include_sql = true
+> **Not implemented.** dbx does not write session logs. `dir` is only the search
+> path used by `dbx replay`; `enabled` and `retention_days` are inert. Executed
+> queries are recorded instead in the per-project query history that backs the
+> query browser (`~/.local/state/dbx/projects/{project}/query_history.json`).
 
-# Include query results in logs
-include_results = false
+### `ui`
 
-# ─── UI Configuration ─────────────────────────────────────────
+```toml
 [ui]
-# Show contextual statusbar at bottom
-statusbar = true
+page_size = 100        # rows per grid page
+yank_max_rows = 10     # clipboard if the selection is <= this, else a file
+```
 
-# Show keybind hints in statusbar
+Defaults: `page_size = 100`, `yank_max_rows = 10`.
+
+The following keys are accepted but **inert** (kept for backward compatibility;
+nothing reads them):
+
+```toml
+[ui]
+statusbar = true          # the statusbar was replaced by the keybinds pane
 statusbar_help = true
+history_size = 100
+query_history_path = "~/.local/state/dbx/query_history.json"
+```
 
-# Default page size for grids
-page_size = 100
+### `editor`
 
-# Maximum rows to yank to file (clipboard if below threshold)
-yank_max_rows = 10
-
-# Maximum page size
-max_page_size = 10000
-
-# Show row numbers in grid
-row_numbers = true
-
-# Truncate long cell values (true) or wrap (false)
-truncate_cells = true
-
-# Maximum cell width before truncation
-max_cell_width = 50
-
-# Show NULL as special value
-show_null = true
-
-# NULL display string
-null_display = "NULL"
-
-# Date format
-date_format = "2006-01-02 15:04:05"
-
-# Enable mouse support
-mouse = true
-
-# Animation enabled
-animations = true
-
-# Border style: "rounded", "normal", "double", "thick", "none"
-border_style = "rounded"
-
-# ─── Explorer ──────────────────────────────────────────────────
-[explorer]
-# Sort tables by: "name", "rows", "size"
-sort_by = "name"
-
-# Show column details in tree
-show_columns = false
-
-# Show indexes in tree
-show_indexes = false
-
-# Show foreign keys in tree
-show_foreign_keys = false
-
-# Auto-expand first schema
-auto_expand_first = false
-
-# Icon set: "unicode", "nerd", "ascii"
-icons = "unicode"
-
-# ─── Grid ──────────────────────────────────────────────────────
-[grid]
-# Auto-refresh interval (seconds, 0 = disabled)
-auto_refresh = 0
-
-# Show filters row
-show_filters = true
-
-# Show sort indicators
-show_sort = true
-
-# Zebra striping (alternate row colors)
-zebra = true
-
-# Selected row highlight style: "line", "background", "both"
-highlight_style = "both"
-
-# Edit mode: "inline", "modal"
-edit_mode = "inline"
-
-# ─── Editor ────────────────────────────────────────────────────
+```toml
 [editor]
-# Real-time autocomplete popup in the SQL editor
-autocomplete = true
-
-# Minimum token length before the popup opens on its own (0 = always show).
-# Ctrl+Space always opens it manually.
-autocomplete_trigger = 1
-
-# ─── Export ────────────────────────────────────────────────────
-[export]
-# Default format: "csv", "json", "sql", "markdown"
-default_format = "csv"
-
-# CSV options
-[export.csv]
-delimiter = ","
-quote = '"'
-escape = '"'
-header = true
-
-# JSON options
-[export.json]
-indent = 2
-pretty = true
-
-# SQL options
-[export.sql]
-# INSERT, UPDATE, or COPY
-type = "INSERT"
-# Include column names
-columns = true
-
-# ─── Query ─────────────────────────────────────────────────────
-[query]
-# Default limit if none specified
-default_limit = 1000
-
-# Maximum rows to fetch
-max_rows = 100000
-
-# Query timeout in seconds
-timeout = 30
-
-# Auto-commit transactions
-auto_commit = true
-
-# ─── Logging ───────────────────────────────────────────────────
-[logging]
-# Level: "debug", "info", "warn", "error"
-level = "info"
-
-# Log file (empty = stderr)
-file = ""
-
-# Max size in MB before rotation
-max_size = 10
-
-# Max rotations to keep
-max_rotations = 5
-
-# ─── Advanced ──────────────────────────────────────────────────
-[advanced]
-# Connection pool size
-pool_size = 5
-
-# Connection timeout in seconds
-connect_timeout = 10
-
-# SSH timeout in seconds
-ssh_timeout = 30
-
-# Use prepared statements
-prepared_statements = true
-
-# Binary format for data transfer
-binary_format = false
+autocomplete = true          # real-time autocomplete popup
+autocomplete_trigger = 1     # min chars before it opens on its own (0 = always)
 ```
 
-## Environment Variables
+Defaults: `autocomplete = true`, `autocomplete_trigger = 1`. `Ctrl+Space` always
+opens the popup manually. See
+[Features → Editor](FEATURES.md) for the clause-aware behavior.
 
-All config values can be overridden with env vars:
+## Project config (`.dbx.toml`)
 
-```bash
-# General
-DBX_CONFIG=/path/to/config.toml
-DBX_THEME=dark
+Placed in a project root. Uses a **different shape** from the global config:
 
-# Connection
-DBX_CONNECTION_NAME=local-dev
-DBX_DATABASE_URL=postgres://...
-
-# AI
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-DEEPSEEK_API_KEY=...
-DASHSCOPE_API_KEY=...
-
-# Session
-DBX_SESSION_DIR=/path/to/sessions
-
-# UI
-DBX_UI_MOUSE=false
-DBX_UI_STATUSBAR=true
-```
-
-## Config Priority
-
-1. CLI flags (highest)
-2. Environment variables
-3. Config file
-4. Built-in defaults (lowest)
-
-## Example Configs
-
-### Minimal
 ```toml
-[theme]
-mode = "system"
-
-[[connections]]
-name = "dev"
-provider = "postgres"
-url = "postgres://localhost/mydb"
+[connections.local-dev]
+driver = "postgres"
+dsn = "postgres://localhost/mydb"
+# ssh_tunnel = "bastion"   # optional
 ```
 
-### Full Featured
-See complete example above.
+- Keyed by connection name (`[connections.<name>]`), with `driver` and `dsn`.
+- The `dsn` supports env expansion: `${env:VAR}` and `$VAR`.
+- This is the format the TUI's connection picker discovers by scanning `~/dev`.
 
-### CI/CD Mode
-```toml
-[theme]
-mode = "dark"
+## Environment variables
 
-[ui]
-statusbar = false
-mouse = false
+**Not supported.** `DBX_*` environment overrides are not applied — viper's
+automatic env binding is not wired into the config unmarshal, so setting e.g.
+`DBX_AI_PROVIDER` has no effect. Configure through the files above.
 
-[session]
-enabled = false
+## Defaults & priority
 
-[query]
-timeout = 5
-```
+For the global config there is a single source: the config file, with built-in
+defaults for anything unset (no env or global-flag overrides). The only CLI-level
+override is `-c/--connection`, which selects a connection per command.
