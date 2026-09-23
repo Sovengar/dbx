@@ -119,9 +119,10 @@ autocomplete_trigger = 1   # min characters before the popup opens on its own
 ### AI (NL → SQL)
 
 Ask a question in natural language and dbx generates SQL for review before
-executing. The same flow is available from the terminal via `dbx ask`, with
-`--json` and `--sql-only` flags. Supports Anthropic, OpenAI, DeepSeek, Qwen,
-OpenCode, and any OpenAI-compatible endpoint.
+executing (the TUI ASK pane). The terminal command `dbx ask` runs the same
+generation but executes immediately, with no review step; it supports `--json`
+and `--sql-only` flags. Supports Anthropic, OpenAI, DeepSeek, Qwen, OpenCode,
+and any OpenAI-compatible endpoint.
 
 ### Navigation & UI
 
@@ -139,7 +140,7 @@ OpenCode, and any OpenAI-compatible endpoint.
 
 ## Dependencies
 
-- **Go 1.22+**
+- **Go 1.26+**
 - **PostgreSQL** (via pgx)
 - **Clipboard support** (optional, for copy to clipboard):
   - **Linux (Wayland)**: `wl-clipboard` (`wl-copy`/`wl-paste`)
@@ -160,11 +161,10 @@ gh release download buble/dbx
 ## Quick Start
 
 ```bash
-# Connect via DSN
-dbx postgres://localhost/mydb
-
-# Or use .dbx.toml in your project
+# Launch the TUI — the connection is chosen from the picker
 dbx
+
+# The picker lists the projects found by scanning ~/dev for .dbx.toml
 
 # Query mode (no TUI)
 dbx query "SELECT * FROM users LIMIT 10" --json
@@ -206,7 +206,7 @@ dsn = "postgres://staging.example.com/mydb"
 mode = "system"
 
 [keybindings.custom]
-"global.ask" = "ctrl+a"
+"ask" = "ctrl+a"
 
 [ai]
 provider = "anthropic"
@@ -222,33 +222,37 @@ See [docs/CONFIG.md](docs/CONFIG.md) for full reference.
 
 ### Natural Language to SQL
 
-Press `a` or run:
+Press `a` in the TUI, or run:
 
 ```bash
 dbx ask "show me users who signed up last week"
 ```
 
-dbx generates SQL, shows it for review, then executes on confirmation.
+The TUI ASK pane generates SQL, shows it for review, and executes on
+confirmation. The `dbx ask` command generates and executes in one step, with no
+review; use `--sql-only` to print the SQL without running it. Generated SQL is
+restricted to a single `SELECT`, enforced by a server-side READ ONLY
+transaction.
 
 ### Session Logs
 
-Every query is logged to `$TMPDIR/dbx/sessions/` (defaults to `/tmp/dbx/sessions`):
+> **Not implemented yet.** dbx does not write session logs: the logger exists in
+> the codebase but is never instantiated, and the `session.enabled` /
+> `retention_days` options are inert.
+
+`dbx replay` can read session files that something else produced. The format is
+newline-delimited JSON, one object per line, with at least `level` (`"query"`)
+and `sql`:
 
 ```bash
-# View session
-cat /tmp/dbx/sessions/2026-09-11.jsonl
-
-# Replay session
+# Replay a session file (looked up in the session dir)
 dbx replay 2026-09-11.jsonl
 ```
 
-Override in `config.toml`:
-
-```toml
-[session]
-dir = "/path/to/persistent/sessions"
-retention_days = 30
-```
+The session directory (`[session] dir`, default `$TMPDIR/dbx/sessions`) is only
+the search path for `dbx replay`. Queries you execute are instead recorded in the
+per-project query history that backs the query browser
+(`~/.local/state/dbx/projects/{project}/query_history.json`).
 
 ### Schema Context for LLMs
 
@@ -267,22 +271,21 @@ dbx query "SELECT count(*) FROM users" --json
 # List tables
 dbx list tables --json
 
-# Export table
-dbx export users --format csv --output users.csv
+# Export the full schema as JSON for agents
+dbx context --json > schema.json
 
 # Pipe mode
 echo "SELECT 1" | dbx pipe --json
 ```
 
-See [docs/CLI.md](docs/CLI.md) for full reference.
+See [Features → Part 1 — CLI](docs/FEATURES.md) for the command reference.
 
 ## Documentation
 
-- [Features](docs/FEATURES.md) — DML transactions, action naming, non-keybind prose
+- [Features](docs/FEATURES.md) — CLI and TUI features by pane, plus conventions
 - [Architecture](docs/ARCHITECTURE.md) — Design decisions and patterns
 - [Decisions (ADR)](docs/decisions/) — Architecture decision records
 - [Config](docs/CONFIG.md) — Configuration reference
-- [CLI](docs/CLI.md) — CLI command reference
 
 ## Development
 
