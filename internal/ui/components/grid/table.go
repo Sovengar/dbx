@@ -1232,10 +1232,6 @@ func (g *Grid) IsRefreshPending() bool {
 	return g.refreshPending
 }
 
-func (g *Grid) SetRefreshPending(v bool) {
-	g.refreshPending = v
-}
-
 func (g *Grid) isRowDeleted(rowIdx int) bool {
 	for _, d := range g.pendingDeletes {
 		if d.RowIdx == rowIdx {
