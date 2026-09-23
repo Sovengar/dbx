@@ -87,6 +87,27 @@ func TestRegistry_EveryActionHasSectionAndDescription(t *testing.T) {
 	}
 }
 
+// Scenario: A group is a real group only when its members agree on the label.
+func TestRegistry_GroupLabelsAreConsistent(t *testing.T) {
+	labels := map[string]string{}
+	for _, a := range NewKeybindRegistry(KeybindingsConfig{}).All() {
+		if a.Group == "" {
+			if a.GroupLabel != "" {
+				t.Errorf("action %q has a GroupLabel but no Group", a.ID)
+			}
+			continue
+		}
+		if a.GroupLabel == "" {
+			t.Errorf("action %q is in group %q but has an empty GroupLabel", a.ID, a.Group)
+			continue
+		}
+		if prev, ok := labels[a.Group]; ok && prev != a.GroupLabel {
+			t.Errorf("group %q has inconsistent labels %q and %q", a.Group, prev, a.GroupLabel)
+		}
+		labels[a.Group] = a.GroupLabel
+	}
+}
+
 func TestRegistry_ActionIDsAreUnique(t *testing.T) {
 	seen := make(map[ActionID]bool)
 	for _, a := range NewKeybindRegistry(KeybindingsConfig{}).All() {
