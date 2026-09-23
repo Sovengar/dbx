@@ -48,6 +48,20 @@ func TestExplorer_HandleAction_NavigateWorksUnfocused(t *testing.T) {
 	}
 }
 
+// Scenario: the wheel must not move the cursor while the filter input is active.
+func TestExplorer_HandleAction_NoOpWhileFiltering(t *testing.T) {
+	e := newExplorerTest()
+	e.StartFilter()
+	before := e.tree.cursor
+
+	if _, handled := e.HandleAction("navigate_down"); handled {
+		t.Fatal("HandleAction(navigate_down) was handled while filtering")
+	}
+	if e.tree.cursor != before {
+		t.Fatalf("cursor moved from %d to %d while filtering", before, e.tree.cursor)
+	}
+}
+
 // Scenario: Dead raw-key handling in the explorer tree is removed.
 func TestExplorer_TreeNoLongerHandlesRawKeys(t *testing.T) {
 	e := newExplorerTest()
