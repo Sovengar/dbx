@@ -1018,9 +1018,9 @@ func (m Model) executeAskSQL(sql string) tea.Cmd {
 	if m.ask == nil {
 		return nil
 	}
-	if !isSelectOnly(sql) {
-		appDebugLog("Ask: rejected non-SELECT statement %q", sql)
-		m.ask.SetError(fmt.Errorf("only SELECT statements are allowed"))
+	if reason := selectOnlyViolation(sql); reason != "" {
+		appDebugLog("Ask: rejected statement %q: %s", sql, reason)
+		m.ask.SetError(fmt.Errorf("%s", reason))
 		return nil
 	}
 	if m.runner == nil {

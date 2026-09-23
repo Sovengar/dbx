@@ -180,9 +180,12 @@ func (r *statementRunner) executeReadOnly(ctx context.Context, sql string) (*pos
 	return result, nil
 }
 
-// forbiddenStatementKeywords are mutation/DDL keywords that must never appear
-// in a statement run through the ASK read-only path. WITH is intentionally
-// absent: a data-modifying CTE is caught by its inner DELETE/INSERT/UPDATE.
+// forbiddenStatementKeywords are mutation/DDL/locking keywords that must never
+// appear in a statement run through the ASK read-only path. WITH is
+// intentionally absent: a data-modifying CTE is caught by its inner
+// DELETE/INSERT/UPDATE. INTO and FOR catch SELECT-based writes and row locks
+// (SELECT ... INTO, SELECT ... FOR UPDATE/SHARE); NEXTVAL catches sequence
+// advancement, which the READ ONLY transaction would also reject.
 var forbiddenStatementKeywords = map[string]bool{
 	"INSERT":   true,
 	"UPDATE":   true,
@@ -202,6 +205,9 @@ var forbiddenStatementKeywords = map[string]bool{
 	"CLUSTER":  true,
 	"REFRESH":  true,
 	"IMPORT":   true,
+	"INTO":     true,
+	"FOR":      true,
+	"NEXTVAL":  true,
 }
 
 // isSelectOnly reports whether sql is a single SELECT or WITH ... SELECT
@@ -209,6 +215,12 @@ var forbiddenStatementKeywords = map[string]bool{
 // READ ONLY transaction is the authoritative one. It tolerates leading
 // comments and stray semicolons, and rejects data-modifying CTEs.
 func isSelectOnly(sql string) bool {
+	return selectOnlyViolation(sql) == ""
+}
+
+// selectOnlyViolation returns a human-readable reason when sql is not a single
+// read-only SELECT, or "" when it is allowed.
+func selectOnlyViolation(sql string) string {
 	body := ""
 	count := 0
 	for _, stmt := range splitSQL(sql) {
@@ -218,31 +230,34 @@ func isSelectOnly(sql string) bool {
 		body = stmt
 		count++
 	}
-	if count != 1 {
-		return false
+	if count == 0 {
+		return "empty statement"
+	}
+	if count > 1 {
+		return "only a single statement is allowed"
 	}
 
 	tokens := sqlKeywordTokens(strings.ToUpper(maskNonCode(body)))
 	if len(tokens) == 0 {
-		return false
+		return "empty statement"
 	}
 	if tokens[0] != "SELECT" && tokens[0] != "WITH" {
-		return false
+		return fmt.Sprintf("%s statements are not allowed", tokens[0])
 	}
 	for _, tok := range tokens {
 		if forbiddenStatementKeywords[tok] {
-			return false
+			return fmt.Sprintf("%s is not allowed in an ASK query", tok)
 		}
 	}
 	if tokens[0] == "WITH" {
 		for _, tok := range tokens {
 			if tok == "SELECT" {
-				return true
+				return ""
 			}
 		}
-		return false
+		return "WITH queries must end in a SELECT"
 	}
-	return true
+	return ""
 }
 
 // maskNonCode returns a copy of sql with string literals (including E-strings

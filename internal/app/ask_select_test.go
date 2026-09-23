@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/buble/dbx/internal/drivers/postgres"
@@ -41,6 +42,12 @@ func TestIsSelectOnly(t *testing.T) {
 		{"e-string escaped quote", `SELECT E'\'; DROP TABLE t; --'`, true},
 		{"e-string then delete", `SELECT E'x'; DELETE FROM users`, false},
 		{"standard string backslash", `SELECT 'a\'; DELETE FROM users`, false},
+		// SELECT-based writes and locks must fail client-side.
+		{"select into", "SELECT * INTO newtab FROM users", false},
+		{"for update", "SELECT * FROM users FOR UPDATE", false},
+		{"for share", "SELECT * FROM users FOR SHARE", false},
+		{"nextval", "SELECT nextval('s')", false},
+		{"for in string", "SELECT 'for' AS x", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -87,5 +94,27 @@ func TestExecuteReadOnly_RunsInReadOnlyTxAndRollsBack(t *testing.T) {
 	}
 	if tx.rollbacks != 1 || tx.commits != 0 {
 		t.Fatalf("tx commits=%d rollbacks=%d, want 0/1", tx.commits, tx.rollbacks)
+	}
+}
+
+func TestSelectOnlyViolation_Message(t *testing.T) {
+	cases := []struct {
+		sql  string
+		want string
+	}{
+		{"SELECT * FROM users FOR SHARE", "FOR is not allowed"},
+		{"SELECT * INTO t FROM users", "INTO is not allowed"},
+		{"SELECT nextval('s')", "NEXTVAL is not allowed"},
+		{"DELETE FROM users", "DELETE statements are not allowed"},
+		{"SELECT 1; SELECT 2", "single statement"},
+	}
+	for _, tc := range cases {
+		got := selectOnlyViolation(tc.sql)
+		if !strings.Contains(got, tc.want) {
+			t.Fatalf("selectOnlyViolation(%q) = %q, want it to contain %q", tc.sql, got, tc.want)
+		}
+	}
+	if got := selectOnlyViolation("SELECT 1"); got != "" {
+		t.Fatalf("selectOnlyViolation(SELECT 1) = %q, want empty", got)
 	}
 }
