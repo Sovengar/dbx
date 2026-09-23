@@ -122,12 +122,19 @@ Los escenarios de `behavior.feature` se traducen a tests Go reales:
 Conventional Commits en la rama `feat/ask-nl2sql-chat`.
 
 La garantía autoritativa de SELECT-only (PostgreSQL rechazando mutaciones
-dentro de la transacción READ ONLY) **solo se verifica con base real**: el test
-`TestAsk_ReadOnlyTxRejectsDML` está gated por `DBX_TEST_DSN` y es un paso de
-verificación **obligatorio** (no opcional):
+dentro de la transacción READ ONLY) se verifica **automáticamente**: los tests
+`TestAsk_ReadOnlyTxRejectsDML` y `TestAsk_ReadOnlyTxRejectsSelectBasedMutation`
+levantan un PostgreSQL real con **testcontainers-go** (`postgres:16-alpine`)
+cuando `DBX_TEST_DSN` no está seteado, así que `go test ./...` la valida en
+cualquier entorno con Docker (incluido CI en runners ubuntu, que ya traen
+Docker). Si Docker no está disponible, los tests se saltan con un mensaje
+claro.
+
+`DBX_TEST_DSN` sigue funcionando como **override** para usar una base existente
+sin levantar contenedor:
 
 ```bash
 DBX_TEST_DSN='postgres://user:pass@localhost:5432/db' go test ./internal/app -run TestAsk -v
 ```
 
-Sin `DBX_TEST_DSN` esa garantía queda sin verificar.
+En cualquier caso es un paso de verificación **obligatorio**, no opcional.
