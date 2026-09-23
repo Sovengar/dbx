@@ -2047,13 +2047,13 @@ func (m Model) appActions() map[config.ActionID]func(Model) (tea.Model, tea.Cmd)
 		},
 		"preview_cursor_up": func(m Model) (tea.Model, tea.Cmd) {
 			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
-				m.gridPreview.Update(tea.KeyPressMsg{Code: 'k'})
+				m.gridPreview.HandleAction("navigate_up")
 			}
 			return m, nil
 		},
 		"preview_cursor_down": func(m Model) (tea.Model, tea.Cmd) {
 			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
-				m.gridPreview.Update(tea.KeyPressMsg{Code: 'j'})
+				m.gridPreview.HandleAction("navigate_down")
 			}
 			return m, nil
 		},
