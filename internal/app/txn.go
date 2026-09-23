@@ -390,7 +390,7 @@ func maskNonCode(sql string) string {
 		case sql[i] == '/' && i+1 < len(sql) && sql[i+1] == '*':
 			start := i
 			i += 2
-			for i+1 < len(sql) && !(sql[i] == '*' && sql[i+1] == '/') {
+			for i+1 < len(sql) && (sql[i] != '*' || sql[i+1] != '/') {
 				i++
 			}
 			if i+1 < len(sql) {
@@ -456,6 +456,6 @@ func isIdentifierByte(b byte) bool {
 // sqlKeywordTokens splits cleaned SQL into upper-case keyword-ish tokens.
 func sqlKeywordTokens(s string) []string {
 	return strings.FieldsFunc(s, func(r rune) bool {
-		return !(r >= 'A' && r <= 'Z') && r != '_'
+		return (r < 'A' || r > 'Z') && r != '_'
 	})
 }

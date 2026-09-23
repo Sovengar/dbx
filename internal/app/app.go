@@ -979,9 +979,9 @@ func buildAskContextHint(schema, table, where string) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("The grid is currently showing table %s.%s.\n", schema, table))
+	fmt.Fprintf(&b, "The grid is currently showing table %s.%s.\n", schema, table)
 	if where != "" {
-		b.WriteString(fmt.Sprintf("The grid's current WHERE clause is: %s\n", where))
+		fmt.Fprintf(&b, "The grid's current WHERE clause is: %s\n", where)
 	}
 	return b.String()
 }

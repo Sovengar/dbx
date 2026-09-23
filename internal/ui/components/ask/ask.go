@@ -312,6 +312,6 @@ func askDebugLog(format string, args ...interface{}) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	fmt.Fprintf(f, "Ask: "+format+"\n", args...)
+	defer func() { _ = f.Close() }()
+	_, _ = fmt.Fprintf(f, "Ask: "+format+"\n", args...)
 }
