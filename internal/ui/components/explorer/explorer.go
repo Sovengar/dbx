@@ -103,6 +103,13 @@ func (e *Explorer) Update(msg tea.Msg) (tea.Cmd, bool) {
 	return nil, false
 }
 
+// HandleAction dispatches an action ID without synthesizing a key press. Mouse
+// handlers use it, and it deliberately works regardless of focus so the pane
+// under the cursor reacts.
+func (e *Explorer) HandleAction(id config.ActionID) (tea.Cmd, bool) {
+	return e.handleAction(id)
+}
+
 // handleAction dispatches a resolved explorer action. Returns handled=false so
 // unknown keys fall through to the tree.
 func (e *Explorer) handleAction(action config.ActionID) (tea.Cmd, bool) {

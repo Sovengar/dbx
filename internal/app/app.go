@@ -1686,18 +1686,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case ui.InBounds(zonePaneGrid, msg) && m.grid != nil:
 			if direction < 0 {
-				m.grid.Update(tea.KeyPressMsg{Code: 'k'})
+				m.grid.HandleAction("navigate_up")
 			} else {
-				m.grid.Update(tea.KeyPressMsg{Code: 'j'})
+				m.grid.HandleAction("navigate_down")
 			}
 			if cmd := m.syncGridSidebarPreviewForCursor(); cmd != nil {
 				return m, cmd
 			}
 		case ui.InBounds(zonePaneExplorer, msg) && m.explorer != nil:
 			if direction < 0 {
-				m.explorer.Update(tea.KeyPressMsg{Code: 'k'})
+				m.explorer.HandleAction("navigate_up")
 			} else {
-				m.explorer.Update(tea.KeyPressMsg{Code: 'j'})
+				m.explorer.HandleAction("navigate_down")
 			}
 		}
 		return m, nil
@@ -1732,7 +1732,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			localX, localY := ui.Pos(zonePaneGrid, msg)
 			cmd, hitCell := m.grid.HandleClick(localX, localY)
 			if isDoubleClick && hitCell {
-				enterCmd, _ := m.grid.Update(tea.KeyPressMsg{Code: 13})
+				enterCmd, _ := m.grid.HandleAction("edit_cell")
 				return m, tea.Batch(cmd, enterCmd)
 			}
 			var sidebarCmd tea.Cmd
