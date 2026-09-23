@@ -141,6 +141,20 @@ func TestKeybindsPane_MaxSevenKeybindsPerLine(t *testing.T) {
 	}
 }
 
+// Scenario: Go Back only appears when there is a table to navigate back to.
+func TestKeybindsPane_GoBackHiddenWithoutHistory(t *testing.T) {
+	p := paneWith(config.ContextGrid)
+	p.SetCanGoBack(false)
+	if linesContain(p.renderLines(), "Go Back") {
+		t.Fatalf("grid pane shows Go Back without navigation history: %v", p.renderLines())
+	}
+
+	p.SetCanGoBack(true)
+	if !linesContain(p.renderLines(), "H Go Back") {
+		t.Fatalf("grid pane hides Go Back with navigation history: %v", p.renderLines())
+	}
+}
+
 func TestKeybindsPane_NoTxHidesRollback(t *testing.T) {
 	p := paneWith(config.ContextExplorer)
 	p.SetTxPending(false)
@@ -156,6 +170,7 @@ func TestKeybindsPane_GridRendersGroups(t *testing.T) {
 		"hjkl Navigate",
 		"g/G First/Last",
 		"ctrl+u/ctrl+d Half Page",
+		"n/p/P/N Page",
 		"f1-f9 Go to Page",
 	} {
 		if !linesContain(lines, want) {
@@ -167,8 +182,8 @@ func TestKeybindsPane_GridRendersGroups(t *testing.T) {
 // Scenario: The pane shows only the primary key of an action.
 func TestKeybindsPane_ShowsPrimaryKeysOnly(t *testing.T) {
 	lines := paneWith(config.ContextGrid).renderLines()
-	if !linesContain(lines, "n Next Page") {
-		t.Fatalf("grid pane does not show 'n Next Page': %v", lines)
+	if !linesContain(lines, "n/p/P/N Page") {
+		t.Fatalf("grid pane does not show the page group 'n/p/P/N Page': %v", lines)
 	}
 	joined := strings.Join(lines, "\n")
 	if strings.Contains(joined, "ctrl+right") {

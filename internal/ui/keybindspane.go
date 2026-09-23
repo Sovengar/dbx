@@ -30,6 +30,7 @@ type KeybindsPane struct {
 	autocompleteReady bool
 	queryBrowserOpen  bool
 	txPending         bool
+	canGoBack         bool
 }
 
 func NewKeybindsPane(styles *theme.Styles, keybinds config.Resolver) *KeybindsPane {
@@ -46,6 +47,7 @@ func (s *KeybindsPane) SetEditorOpen(open bool)       { s.editorOpen = open }
 func (s *KeybindsPane) SetAutocompleteReady(r bool)   { s.autocompleteReady = r }
 func (s *KeybindsPane) SetQueryBrowserOpen(open bool) { s.queryBrowserOpen = open }
 func (s *KeybindsPane) SetTxPending(pending bool)     { s.txPending = pending }
+func (s *KeybindsPane) SetCanGoBack(can bool)         { s.canGoBack = can }
 func (s *KeybindsPane) Focus()                        { s.focused = true }
 func (s *KeybindsPane) Blur()                         { s.focused = false }
 
@@ -110,6 +112,9 @@ func (s *KeybindsPane) renderLines() []string {
 			continue
 		}
 		if a.ID == "autocomplete" && s.editorOpen && !s.autocompleteReady {
+			continue
+		}
+		if a.ID == "go_back" && !s.canGoBack {
 			continue
 		}
 		active = append(active, a)

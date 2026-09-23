@@ -2535,6 +2535,7 @@ func (m Model) renderMainView() string {
 
 	m.keybindsPane.SetFocus(m.router.Context())
 	m.keybindsPane.SetHeight(m.height)
+	m.keybindsPane.SetCanGoBack(len(m.navStack) > 0)
 	topLine := m.renderTopLine(selSchema, selTable)
 
 	countLines := func(s string) int {

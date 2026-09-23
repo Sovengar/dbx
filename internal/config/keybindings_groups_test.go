@@ -25,6 +25,7 @@ func TestGroupActions_GridCollapsesSiblingSets(t *testing.T) {
 		"Navigate":   "hjkl",
 		"First/Last": "g/G",
 		"Half Page":  "ctrl+u/ctrl+d",
+		"Page":       "n/p/P/N",
 		"Go to Page": "f1-f9",
 	}
 	for label, keyText := range want {
@@ -48,20 +49,20 @@ func TestGroupActions_UngroupedUsesPrimaryKey(t *testing.T) {
 	r := NewKeybindRegistry(KeybindingsConfig{})
 	groups := gridGroups(t, r)
 
-	var next *DisplayGroup
+	var edit *DisplayGroup
 	for i := range groups {
-		if groups[i].Members[0].ID == "next_page" {
-			next = &groups[i]
+		if groups[i].Members[0].ID == "edit_cell" {
+			edit = &groups[i]
 		}
 	}
-	if next == nil {
-		t.Fatal("next_page is missing from the grid groups")
+	if edit == nil {
+		t.Fatal("edit_cell is missing from the grid groups")
 	}
-	if next.Grouped {
-		t.Error("next_page must not be grouped")
+	if edit.Grouped {
+		t.Error("edit_cell must not be grouped")
 	}
-	if next.KeyText != "n" {
-		t.Errorf("next_page KeyText = %q, want %q (primary only)", next.KeyText, "n")
+	if edit.KeyText != "enter" {
+		t.Errorf("edit_cell KeyText = %q, want %q (primary only)", edit.KeyText, "enter")
 	}
 }
 

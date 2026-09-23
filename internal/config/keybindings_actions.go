@@ -18,6 +18,7 @@ const (
 	GroupNavigate  = "nav"
 	GroupFirstLast = "first_last"
 	GroupHalfPage  = "half_page"
+	GroupPage      = "page"
 	GroupGotoPage  = "goto_page"
 )
 
@@ -80,13 +81,13 @@ func defaultActions() []Action {
 
 		// ── Grid ──────────────────────────────────────────────────
 		{ID: "next_page", Keys: []string{"n", "]", "ctrl+right"}, Section: SectionData, Description: "Next Page",
-			Contexts: []string{ContextGrid}, Owner: "grid"},
+			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupPage, GroupLabel: "Page"},
 		{ID: "prev_page", Keys: []string{"p", "[", "ctrl+left"}, Section: SectionData, Description: "Previous Page",
-			Contexts: []string{ContextGrid}, Owner: "grid"},
+			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupPage, GroupLabel: "Page"},
 		{ID: "first_page", Keys: []string{"P"}, Section: SectionData, Description: "First Page",
-			Contexts: []string{ContextGrid}, Owner: "grid"},
+			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupPage, GroupLabel: "Page"},
 		{ID: "last_page", Keys: []string{"N"}, Section: SectionData, Description: "Last Page",
-			Contexts: []string{ContextGrid}, Owner: "grid"},
+			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupPage, GroupLabel: "Page"},
 		{ID: "goto_page_1", Keys: []string{"f1"}, Section: SectionData, Description: "Go to Page 1",
 			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupGotoPage, GroupLabel: "Go to Page"},
 		{ID: "goto_page_2", Keys: []string{"f2"}, Section: SectionData, Description: "Go to Page 2",
