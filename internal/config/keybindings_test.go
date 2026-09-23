@@ -108,6 +108,27 @@ func TestRegistry_GroupLabelsAreConsistent(t *testing.T) {
 	}
 }
 
+// Scenario: GroupActions merges consecutive members, so registry groups must be
+// declared as one contiguous run.
+func TestRegistry_GroupMembersAreConsecutive(t *testing.T) {
+	seen := map[string]bool{}
+	prevGroup := ""
+	for _, a := range NewKeybindRegistry(KeybindingsConfig{}).All() {
+		if a.Group == "" {
+			prevGroup = ""
+			continue
+		}
+		if a.Group == prevGroup {
+			continue
+		}
+		if seen[a.Group] {
+			t.Errorf("group %q restarts at action %q; members must be consecutive", a.Group, a.ID)
+		}
+		seen[a.Group] = true
+		prevGroup = a.Group
+	}
+}
+
 func TestRegistry_ActionIDsAreUnique(t *testing.T) {
 	seen := make(map[ActionID]bool)
 	for _, a := range NewKeybindRegistry(KeybindingsConfig{}).All() {
