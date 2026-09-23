@@ -159,6 +159,10 @@ The same registry that renders that overlay also drives execution, so what you
 see is exactly what runs. Override any action under `[keybindings.custom]` in
 your config, keyed by action ID.
 
+The status-bar keybind pane shows the primary key of each action and collapses
+sibling actions into one segment (e.g. `hjkl Navigate`, `f1-f9 Go to Page`);
+the `?` overlay is where every alias stays visible.
+
 ## Configuration
 
 ### Project config (`.dbx.toml`)
