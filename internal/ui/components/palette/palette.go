@@ -5,11 +5,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/theme"
 )
 
 type CommandSelectedMsg struct {
-	Action string
+	Action config.ActionID
 }
 
 type Palette struct {
@@ -24,7 +25,7 @@ type Palette struct {
 	height       int
 }
 
-func New(styles *theme.Styles, keybindings map[string]string) *Palette {
+func New(styles *theme.Styles, keybindings config.Resolver) *Palette {
 	cmds := BuildCommands(keybindings)
 	return &Palette{
 		styles:   styles,

@@ -81,17 +81,17 @@ func newFakeRunner() *fakeRunner {
 // key handling consults before dispatching global actions.
 func newRollbackTestModel() Model {
 	styles := testStyles()
-	kbs := config.NewKeybindRegistry(config.KeybindingsConfig{}).Flatten()
+	kb := config.NewKeybindRegistry(config.KeybindingsConfig{})
 	return Model{
-		state:     StateMain,
-		styles:    styles,
-		router:    NewRouter(kbs),
-		keybinds:  kbs,
-		editor:    editor.NewSQLEditor(styles),
-		palette:   palette.New(styles, kbs),
-		helpModal: ui.NewHelpModal(styles, kbs),
-		toast:     ui.NewToastManager(styles),
-		statusbar: ui.NewStatusBar(styles, kbs),
+		state:        StateMain,
+		styles:       styles,
+		router:       NewRouter(kb),
+		keybinds:     kb,
+		editor:       editor.NewSQLEditor(styles),
+		palette:      palette.New(styles, kb),
+		helpModal:    ui.NewHelpModal(styles, kb),
+		toast:        ui.NewToastManager(styles),
+		keybindsPane: ui.NewKeybindsPane(styles, kb),
 	}
 }
 

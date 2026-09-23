@@ -3,16 +3,16 @@ package app
 import "github.com/buble/dbx/internal/config"
 
 type Router struct {
-	focus       FocusPane
-	panes       []FocusPane
-	keybindings map[string]string
+	focus    FocusPane
+	panes    []FocusPane
+	keybinds config.Resolver
 }
 
-func NewRouter(kb map[string]string) *Router {
+func NewRouter(kb config.Resolver) *Router {
 	return &Router{
-		focus:       FocusExplorer,
-		panes:       []FocusPane{FocusExplorer, FocusGrid},
-		keybindings: kb,
+		focus:    FocusExplorer,
+		panes:    []FocusPane{FocusExplorer, FocusGrid},
+		keybinds: kb,
 	}
 }
 
@@ -52,9 +52,10 @@ func (r *Router) Context() string {
 	return r.focus.String()
 }
 
-func (r *Router) KeyFor(action string) string {
-	if k := r.keybindings[action]; k != "" {
-		return k
+// KeyFor returns the primary key bound to an action, or "" when unbound.
+func (r *Router) KeyFor(id config.ActionID) string {
+	if r.keybinds == nil {
+		return ""
 	}
-	return config.DefaultKeybindings()[action]
+	return r.keybinds.PrimaryKey(id)
 }

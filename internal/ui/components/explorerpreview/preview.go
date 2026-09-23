@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/buble/dbx/internal/theme"
 )
@@ -27,7 +28,7 @@ type ExplorerPreview struct {
 	focused           bool
 	width             int
 	height            int
-	keybinds          map[string]string
+	keybinds          config.Resolver
 	tableName         string
 	schema            string
 	columns           []postgres.ColumnInfo
@@ -43,7 +44,7 @@ type ExplorerPreview struct {
 	ereDiagram        *ERDiagram
 }
 
-func New(styles *theme.Styles, keybinds map[string]string) *ExplorerPreview {
+func New(styles *theme.Styles, keybinds config.Resolver) *ExplorerPreview {
 	return &ExplorerPreview{
 		styles:   styles,
 		tabBar:   NewTabBar(styles, keybinds),
@@ -51,14 +52,14 @@ func New(styles *theme.Styles, keybinds map[string]string) *ExplorerPreview {
 	}
 }
 
-func (e *ExplorerPreview) Focus()  { e.focused = true }
-func (e *ExplorerPreview) Blur()   { e.focused = false }
+func (e *ExplorerPreview) Focus()          { e.focused = true }
+func (e *ExplorerPreview) Blur()           { e.focused = false }
 func (e *ExplorerPreview) IsFocused() bool { return e.focused }
 
 func (e *ExplorerPreview) SetWidth(w int)  { e.width = w }
 func (e *ExplorerPreview) SetHeight(h int) { e.height = h }
 
-func (e *ExplorerPreview) ActiveTab() int    { return e.activeTab }
+func (e *ExplorerPreview) ActiveTab() int      { return e.activeTab }
 func (e *ExplorerPreview) ActiveTabID() string { return e.tabBar.ActiveID() }
 
 func (e *ExplorerPreview) SetData(
@@ -163,29 +164,29 @@ func (e *ExplorerPreview) Update(msg tea.Msg) (tea.Cmd, bool) {
 		key := msg.String()
 
 		// Tab keys — switch tabs within explorer-preview
-		if key == e.keybinds["explorer.tab_overview"] {
-			e.setActiveTab(0)
-			return func() tea.Msg { return ExplorerPreviewTabChangeMsg{Tab: 0} }, true
-		}
-		if key == e.keybinds["explorer.tab_columns"] {
-			e.setActiveTab(1)
-			return func() tea.Msg { return ExplorerPreviewTabChangeMsg{Tab: 1} }, true
-		}
-		if key == e.keybinds["explorer.tab_constraints"] {
-			e.setActiveTab(2)
-			return func() tea.Msg { return ExplorerPreviewTabChangeMsg{Tab: 2} }, true
-		}
-		if key == e.keybinds["explorer.tab_foreign_keys"] {
-			e.setActiveTab(3)
-			return func() tea.Msg { return ExplorerPreviewTabChangeMsg{Tab: 3} }, true
-		}
-		if key == e.keybinds["explorer.tab_indexes"] {
-			e.setActiveTab(4)
-			return func() tea.Msg { return ExplorerPreviewTabChangeMsg{Tab: 4} }, true
-		}
-		if key == e.keybinds["explorer.tab_ere"] {
-			e.setActiveTab(5)
-			return func() tea.Msg { return ExplorerPreviewTabChangeMsg{Tab: 5} }, true
+		if e.keybinds != nil {
+			if action, ok := e.keybinds.Resolve(key, config.ContextExplorerPreview); ok {
+				switch action {
+				case "overview_tab":
+					e.setActiveTab(0)
+					return func() tea.Msg { return ExplorerPreviewTabChangeMsg{Tab: 0} }, true
+				case "columns_tab":
+					e.setActiveTab(1)
+					return func() tea.Msg { return ExplorerPreviewTabChangeMsg{Tab: 1} }, true
+				case "constraints_tab":
+					e.setActiveTab(2)
+					return func() tea.Msg { return ExplorerPreviewTabChangeMsg{Tab: 2} }, true
+				case "foreign_keys_tab":
+					e.setActiveTab(3)
+					return func() tea.Msg { return ExplorerPreviewTabChangeMsg{Tab: 3} }, true
+				case "indexes_tab":
+					e.setActiveTab(4)
+					return func() tea.Msg { return ExplorerPreviewTabChangeMsg{Tab: 4} }, true
+				case "ere_tab":
+					e.setActiveTab(5)
+					return func() tea.Msg { return ExplorerPreviewTabChangeMsg{Tab: 5} }, true
+				}
+			}
 		}
 
 		// ERE navigation keys (only when ERE tab is active)

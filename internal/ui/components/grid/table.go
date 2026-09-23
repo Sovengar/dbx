@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/buble/dbx/internal/theme"
 	"github.com/buble/dbx/internal/ui/bordered"
@@ -107,67 +108,67 @@ type GridTabChangeMsg struct {
 }
 
 type Grid struct {
-	styles      *theme.Styles
-	header      *Header
-	cells       *CellRenderer
-	pager       *Pager
-	mouse       *MouseHandler
-	exportPicker *ExportPicker
-	data        *postgres.QueryResult
-	columns     []string
-	widths      []int
-	cursorRow   int
-	cursorCol   int
-	scrollRow   int
-	scrollCol   int
-	width       int
-	height      int
-	focused     bool
-	tableName   string
-	schema      string
-	editing     bool
-	editRow     int
-	editCol     int
-	editValue   string
-	editStartValue string
-	editCursor  int
-	editOrigWidth int
+	styles            *theme.Styles
+	header            *Header
+	cells             *CellRenderer
+	pager             *Pager
+	mouse             *MouseHandler
+	exportPicker      *ExportPicker
+	data              *postgres.QueryResult
+	columns           []string
+	widths            []int
+	cursorRow         int
+	cursorCol         int
+	scrollRow         int
+	scrollCol         int
+	width             int
+	height            int
+	focused           bool
+	tableName         string
+	schema            string
+	editing           bool
+	editRow           int
+	editCol           int
+	editValue         string
+	editStartValue    string
+	editCursor        int
+	editOrigWidth     int
 	displayDraftCount int
-	filtering   bool
-	filter      string
-	whereFilter  *WhereFilter
-	whereClause  string
-	pendingDigits string
-	keybinds     map[string]string
-	constraintsData []postgres.ConstraintInfo
-	foreignKeysData []postgres.ForeignKeyInfo
-	indexesData     []postgres.IndexInfo
-	keyIcons        map[int]KeyIcon
-	selectedRows    map[int]bool
-	pendingRows     [][]interface{}
-	inserting       bool
-	pendingRow      int
-	pendingCol      int
-	pendingUpdates  []PendingUpdate
-	pendingDeletes  []PendingDelete
-	discardPending  bool
-	commitPending   bool
-	refreshPending  bool
-	activeTab       int
-	yankMaxRows     int
+	filtering         bool
+	filter            string
+	whereFilter       *WhereFilter
+	whereClause       string
+	pendingDigits     string
+	keybinds          config.Resolver
+	constraintsData   []postgres.ConstraintInfo
+	foreignKeysData   []postgres.ForeignKeyInfo
+	indexesData       []postgres.IndexInfo
+	keyIcons          map[int]KeyIcon
+	selectedRows      map[int]bool
+	pendingRows       [][]interface{}
+	inserting         bool
+	pendingRow        int
+	pendingCol        int
+	pendingUpdates    []PendingUpdate
+	pendingDeletes    []PendingDelete
+	discardPending    bool
+	commitPending     bool
+	refreshPending    bool
+	activeTab         int
+	yankMaxRows       int
 }
 
-func New(styles *theme.Styles, pageSize int, keybinds map[string]string) *Grid {
+func New(styles *theme.Styles, pageSize int, keybinds config.Resolver) *Grid {
 	g := &Grid{
-		styles:      styles,
-		header:      NewHeader(styles),
-		cells:       NewCellRenderer(styles),
-		pager:       NewPager(styles, pageSize),
+		styles:       styles,
+		header:       NewHeader(styles),
+		cells:        NewCellRenderer(styles),
+		pager:        NewPager(styles, pageSize),
 		exportPicker: NewExportPicker(styles),
-		keybinds:    keybinds,
-		widths:      make([]int, 0),
+		keybinds:     keybinds,
+		widths:       make([]int, 0),
 		selectedRows: make(map[int]bool),
-		yankMaxRows: 10,
+		yankMaxRows:  10,
 	}
 	g.mouse = NewMouseHandler(g)
 	return g
@@ -581,34 +582,41 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return func() tea.Msg { return GridCursorMovedMsg{} }, true
 	}
 
+	// Resolve the key against the grid context. Registry-backed actions and
+	// raw mode keys coexist: anything the registry does not know (digits,
+	// esc-to-clear-selection) keeps its widget-local handling.
+	action, hasAction := g.keybinds.Resolve(key, config.ContextGrid)
+
 	// Keys that work regardless of whether there are rows
-	switch key {
-	case "i":
-		return g.startInsertRow()
-	case g.keybinds["grid.go_back"]:
-		return func() tea.Msg { return GridGoBackMsg{} }, true
-	case "s":
-		return g.toggleSort(), true
-	case "/":
-		g.startWhereFilter()
-		return nil, true
-	case "f":
-		g.startColumnFind()
-		return nil, true
+	if hasAction {
+		switch action {
+		case "insert_row":
+			return g.startInsertRow()
+		case "go_back":
+			return func() tea.Msg { return GridGoBackMsg{} }, true
+		case "sort_column":
+			return g.toggleSort(), true
+		case "filter_rows":
+			g.startWhereFilter()
+			return nil, true
+		case "find_column":
+			g.startColumnFind()
+			return nil, true
+		}
 	}
 
 	// Cancel discard pending on any key except D
-	if key != "D" {
+	if action != "discard_drafts" {
 		g.discardPending = false
 	}
 
 	// Cancel commit pending on any key except ctrl+s
-	if key != g.keybinds["grid.commit_pending"] {
+	if action != "commit_drafts" {
 		g.commitPending = false
 	}
 
 	// Cancel refresh pending on any key except r
-	if key != g.keybinds["grid.refresh"] {
+	if action != "refresh_data" {
 		g.refreshPending = false
 	}
 
@@ -620,8 +628,7 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 
 	// Goto page F1-F9 — must be before 0-9 digit handler
 	for i := 1; i <= 9; i++ {
-		action := fmt.Sprintf("grid.goto_page_%d", i)
-		if key == g.keybinds[action] {
+		if action == config.ActionID(fmt.Sprintf("goto_page_%d", i)) {
 			g.pager.GoToPage(i)
 			g.scrollRow = 0
 			g.clampCursor()
@@ -642,52 +649,52 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	}
 	g.pendingDigits = ""
 
-	switch key {
-	case "j", "down":
+	switch action {
+	case "navigate_down":
 		g.moveDown()
 		return g.cursorMovedCmd(), true
-	case "k", "up":
+	case "navigate_up":
 		g.moveUp()
 		return g.cursorMovedCmd(), true
-	case "h", "left":
+	case "navigate_left":
 		g.moveLeft()
 		return g.cursorMovedCmd(), true
-	case "l", "right":
+	case "navigate_right":
 		g.moveRight()
 		return g.cursorMovedCmd(), true
-	case "g":
+	case "go_first":
 		g.moveToFirst()
 		return g.cursorMovedCmd(), true
-	case "G":
+	case "go_last":
 		g.moveToLast()
 		return g.cursorMovedCmd(), true
-	case "ctrl+u":
+	case "half_page_up":
 		g.halfPageUp()
 		return g.cursorMovedCmd(), true
-	case "ctrl+d":
+	case "half_page_down":
 		g.halfPageDown()
 		return g.cursorMovedCmd(), true
-	case "N":
+	case "last_page":
 		g.pager.LastPage()
 		g.scrollRow = 0
 		g.clampCursor()
 		return g.cursorMovedCmd(), true
-	case "P":
+	case "first_page":
 		g.pager.FirstPage()
 		g.scrollRow = 0
 		g.clampCursor()
 		return g.cursorMovedCmd(), true
-	case "n", "]", "ctrl+right":
+	case "next_page":
 		g.pager.NextPage()
 		g.scrollRow = 0
 		g.clampCursor()
 		return g.cursorMovedCmd(), true
-	case "p", "[", "ctrl+left":
+	case "prev_page":
 		g.pager.PrevPage()
 		g.scrollRow = 0
 		g.clampCursor()
 		return g.cursorMovedCmd(), true
-	case "enter":
+	case "edit_cell":
 		if g.cursorRowType() == "insert" {
 			idx := g.pendingInsertIndex()
 			if idx >= 0 {
@@ -726,52 +733,28 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 		g.startEdit()
 		return nil, true
-	case g.keybinds["grid.navigate_fk"]:
+	case "navigate_fk":
 		return g.navigateFK()
-	}
-
-	// Handle yank via keybinding
-	if key == g.keybinds["grid.yank"] {
+	case "yank":
 		return g.startYank()
-	}
-
-	// Handle export via keybinding
-	if key == g.keybinds["grid.export"] {
+	case "export":
 		return g.startExport()
-	}
-
-	// Handle delete via keybinding
-	if key == g.keybinds["grid.delete_row"] {
+	case "delete_rows":
 		return g.startDelete()
-	}
-
-	// Handle commit pending drafts
-	if key == g.keybinds["grid.commit_pending"] {
+	case "commit_drafts":
 		return g.handleCommitPendingKey()
-	}
-
-	// Handle select_row keybinding
-	if key == g.keybinds["grid.select_row"] {
+	case "select_row":
 		g.toggleRowSelection()
 		return func() tea.Msg { return GridCursorMovedMsg{} }, true
-	}
-
-	// Handle discard drafts keybinding
-	if key == "D" {
+	case "discard_drafts":
 		return g.handleDiscardKey()
-	}
-
-	// Handle undo row drafts keybinding
-	if key == g.keybinds["grid.undo"] {
+	case "undo_drafts":
 		count := g.UndoRowDrafts()
 		if count > 0 {
 			return func() tea.Msg { return GridUndoRowMsg{Count: count} }, true
 		}
 		return nil, true
-	}
-
-	// Handle refresh keybinding
-	if key == g.keybinds["grid.refresh"] {
+	case "refresh_data":
 		return g.handleRefreshKey()
 	}
 
@@ -1238,12 +1221,15 @@ func (g *Grid) handleRefreshKey() (tea.Cmd, bool) {
 	}, true
 }
 
-func (g *Grid) IsRefreshPending() bool {
-	return g.refreshPending
+// Refresh runs the grid's two-step refresh: the first press while drafts exist
+// arms a pending confirmation; the second press (or a press with no drafts)
+// emits GridRefreshConfirmMsg so the app reloads the data.
+func (g *Grid) Refresh() (tea.Cmd, bool) {
+	return g.handleRefreshKey()
 }
 
-func (g *Grid) SetRefreshPending(v bool) {
-	g.refreshPending = v
+func (g *Grid) IsRefreshPending() bool {
+	return g.refreshPending
 }
 
 func (g *Grid) isRowDeleted(rowIdx int) bool {
@@ -1320,10 +1306,10 @@ func (g *Grid) toggleRowSelection() {
 	if g.data == nil || len(g.data.Rows) == 0 {
 		return
 	}
-	
+
 	// Calculate the actual row index considering pagination and scroll
 	actualRow := g.scrollRow + g.cursorRow + g.pager.Offset()
-	
+
 	if actualRow >= 0 && actualRow < len(g.data.Rows) {
 		if g.selectedRows[actualRow] {
 			delete(g.selectedRows, actualRow)
@@ -1341,7 +1327,7 @@ func (g *Grid) SelectedRows() [][]interface{} {
 	if g.data == nil || len(g.selectedRows) == 0 {
 		return nil
 	}
-	
+
 	var rows [][]interface{}
 	for i := range g.selectedRows {
 		if i >= 0 && i < len(g.data.Rows) {

@@ -9,19 +9,19 @@ import (
 func TestPendingTransaction_ShowsInStatusbar(t *testing.T) {
 	f := newFakeRunner()
 	m := newModelWithGrid(t)
-	m.statusbar.SetWidth(200)
+	m.keybindsPane.SetWidth(200)
 	m.runner = f.runner
 
 	msg := runExecuteQuery(t, m, "UPDATE users SET name='test' WHERE id=1")
 	updated, _ := m.Update(msg)
 	m = updated.(Model)
 
-	view := m.statusbar.View()
+	view := m.keybindsPane.View()
 	if !strings.Contains(view, "tx pending") {
 		t.Fatalf("statusbar does not show 'tx pending': %q", view)
 	}
-	if !strings.Contains(view, "U rollback") {
-		t.Fatalf("statusbar does not show 'U rollback': %q", view)
+	if !strings.Contains(view, "U Rollback Last Transaction") {
+		t.Fatalf("statusbar does not show the rollback keybind: %q", view)
 	}
 }
 
@@ -29,20 +29,20 @@ func TestPendingTransaction_ShowsInStatusbar(t *testing.T) {
 func TestRollbackKey_ClearsStatusbarIndicator(t *testing.T) {
 	f := newFakeRunner()
 	m := newModelWithGrid(t)
-	m.statusbar.SetWidth(200)
+	m.keybindsPane.SetWidth(200)
 	m.runner = f.runner
 
 	msg := runExecuteQuery(t, m, "UPDATE users SET name='test' WHERE id=1")
 	updated, _ := m.Update(msg)
 	m = updated.(Model)
-	if !strings.Contains(m.statusbar.View(), "tx pending") {
+	if !strings.Contains(m.keybindsPane.View(), "tx pending") {
 		t.Fatalf("precondition failed: statusbar should show the pending transaction")
 	}
 
 	m = pressRollback(t, m)
 
-	if strings.Contains(m.statusbar.View(), "tx pending") {
-		t.Fatalf("statusbar still shows 'tx pending' after rollback: %q", m.statusbar.View())
+	if strings.Contains(m.keybindsPane.View(), "tx pending") {
+		t.Fatalf("statusbar still shows 'tx pending' after rollback: %q", m.keybindsPane.View())
 	}
 }
 
@@ -50,14 +50,14 @@ func TestRollbackKey_ClearsStatusbarIndicator(t *testing.T) {
 func TestNoPendingTransaction_StatusbarHasNoIndicator(t *testing.T) {
 	f := newFakeRunner()
 	m := newModelWithGrid(t)
-	m.statusbar.SetWidth(200)
+	m.keybindsPane.SetWidth(200)
 	m.runner = f.runner
 
 	msg := runExecuteQuery(t, m, "SELECT * FROM users LIMIT 10")
 	updated, _ := m.Update(msg)
 	m = updated.(Model)
 
-	if strings.Contains(m.statusbar.View(), "tx pending") {
-		t.Fatalf("statusbar shows 'tx pending' after a SELECT: %q", m.statusbar.View())
+	if strings.Contains(m.keybindsPane.View(), "tx pending") {
+		t.Fatalf("statusbar shows 'tx pending' after a SELECT: %q", m.keybindsPane.View())
 	}
 }

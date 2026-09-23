@@ -12,7 +12,7 @@ func TestPalette_RollbackCommandRollsBackPendingTransaction(t *testing.T) {
 
 	runExecuteQuery(t, m, "UPDATE users SET name='test' WHERE id=1")
 
-	updated, _ := m.handlePaletteCommand("global.rollback")
+	updated, _ := m.handlePaletteCommand("rollback")
 	m = updated.(Model)
 
 	if f.txs[0].rollbacks != 1 {

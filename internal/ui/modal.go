@@ -5,19 +5,20 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/theme"
 )
 
 type HelpModal struct {
-	styles    *theme.Styles
-	keybinds  map[string]string
-	visible   bool
-	scroll    int
-	width     int
-	height    int
+	styles   *theme.Styles
+	keybinds config.Resolver
+	visible  bool
+	scroll   int
+	width    int
+	height   int
 }
 
-func NewHelpModal(styles *theme.Styles, keybinds map[string]string) *HelpModal {
+func NewHelpModal(styles *theme.Styles, keybinds config.Resolver) *HelpModal {
 	return &HelpModal{
 		styles:   styles,
 		keybinds: keybinds,
@@ -91,6 +92,19 @@ func (m *HelpModal) Update(msg tea.Msg) (tea.Cmd, bool) {
 	return nil, false
 }
 
+// modalSections are the registry-backed sections, in display order, each with
+// the human header and the context it renders.
+var modalSections = []struct {
+	Header  string
+	Context string
+}{
+	{"Explorer", config.ContextExplorer},
+	{"Grid", config.ContextGrid},
+	{"Grid Preview", config.ContextGridPreview},
+	{"Explorer Preview", config.ContextExplorerPreview},
+	{"Editor", config.ContextEditor},
+}
+
 func (m *HelpModal) View() string {
 	if !m.visible {
 		return ""
@@ -108,100 +122,58 @@ func (m *HelpModal) View() string {
 
 	var lines []string
 
-	lines = append(lines, m.styles.Header.Render("Global"))
-	lines = append(lines, m.renderKeybind("global.quit", "Quit"))
-	lines = append(lines, m.renderKeybind("global.help", "Help"))
-	lines = append(lines, m.renderKeybind("global.palette", "Command Palette"))
-	lines = append(lines, m.renderKeybind("global.cycle_focus", "Toggle Explorer"))
-	lines = append(lines, m.renderKeybind("global.focus_editor", "Toggle Editor"))
-	lines = append(lines, m.renderKeybind("global.export", "Export"))
-	lines = append(lines, m.renderKeybind("global.query_browser", "Query Browser"))
-	lines = append(lines, m.renderKeybind("global.rollback", "Rollback Last Transaction"))
-	lines = append(lines, m.renderKeybind("global.switch_connection", "Switch Connection"))
-	lines = append(lines, "")
-
-	lines = append(lines, m.styles.Header.Render("Explorer"))
-	lines = append(lines, m.renderKeybind("explorer.down", "Navigate Down"))
-	lines = append(lines, m.renderKeybind("explorer.up", "Navigate Up"))
-	lines = append(lines, m.renderKeybind("explorer.expand", "Load Table"))
-	lines = append(lines, m.renderKeybind("explorer.toggle_columns", "Collapse Schema"))
-	lines = append(lines, m.renderKeybind("explorer.collapse", "Collapse / Go to Parent"))
-	lines = append(lines, m.renderKeybind("explorer.first", "First Node"))
-	lines = append(lines, m.renderKeybind("explorer.last", "Last Node"))
-	lines = append(lines, m.renderKeybind("explorer.filter", "Filter Tables"))
-	lines = append(lines, m.renderKeybind("explorer.new", "New Table"))
-	lines = append(lines, m.renderKeybind("explorer.drop", "Drop Table"))
-	lines = append(lines, m.renderKeybind("explorer.view_ddl", "View DDL"))
-	lines = append(lines, m.renderKeybind("explorer.refresh", "Refresh Schema"))
-	lines = append(lines, "")
-
-	lines = append(lines, m.styles.Header.Render("Grid"))
-	lines = append(lines, m.renderKeybind("grid.down", "Row Down"))
-	lines = append(lines, m.renderKeybind("grid.up", "Row Up"))
-	lines = append(lines, m.renderKeybind("grid.left", "Column Left"))
-	lines = append(lines, m.renderKeybind("grid.right", "Column Right"))
-	lines = append(lines, m.renderKeybind("grid.first", "First Row"))
-	lines = append(lines, m.renderKeybind("grid.last", "Last Row"))
-	lines = append(lines, m.renderKeybind("grid.half_up", "Half Page Up"))
-	lines = append(lines, m.renderKeybind("grid.half_down", "Half Page Down"))
-	lines = append(lines, m.renderKeybind("grid.next_page", "Next Page"))
-	lines = append(lines, m.renderKeybind("grid.prev_page", "Previous Page"))
-	lines = append(lines, m.renderKeybind("grid.first_page", "First Page"))
-	lines = append(lines, m.renderKeybind("grid.last_page", "Last Page"))
-	lines = append(lines, m.renderKeybind("grid.goto_page", "Go to Page"))
-	lines = append(lines, m.renderKeybind("grid.edit_cell", "Edit Cell"))
-	lines = append(lines, m.renderKeybind("grid.delete_row", "Delete Row(s)"))
-	lines = append(lines, m.renderKeybind("grid.insert_row", "Insert Row"))
-	lines = append(lines, m.renderKeybind("grid.select_row", "Select Row"))
-	lines = append(lines, m.renderKeybind("grid.commit_pending", "Commit Drafts"))
-	lines = append(lines, m.renderKeybind("grid.discard_all", "Discard Drafts"))
-	lines = append(lines, m.renderKeybind("grid.undo", "Undo Row Drafts"))
-	lines = append(lines, m.renderKeybind("grid.yank", "Yank to Clipboard"))
-	lines = append(lines, m.renderKeybind("grid.export", "Export (SQL/JSON/CSV)"))
-	lines = append(lines, m.renderKeybind("grid.sort", "Sort Column"))
-	lines = append(lines, m.renderKeybind("grid.find_and_jump_to_column", "Find & Jump to Column"))
-	lines = append(lines, m.renderKeybind("grid.filter", "Filter Rows"))
-	lines = append(lines, m.renderKeybind("grid.focus_preview", "Focus Preview"))
-	lines = append(lines, "")
-
-	lines = append(lines, m.styles.Header.Render("Explorer Preview"))
-	lines = append(lines, m.renderKeybind("explorer.tab_overview", "Overview Tab"))
-	lines = append(lines, m.renderKeybind("explorer.tab_columns", "Columns Tab"))
-	lines = append(lines, m.renderKeybind("explorer.tab_constraints", "Constraints Tab"))
-	lines = append(lines, m.renderKeybind("explorer.tab_foreign_keys", "Foreign Keys Tab"))
-	lines = append(lines, m.renderKeybind("explorer.tab_indexes", "Indexes Tab"))
-	lines = append(lines, m.renderKeybind("explorer.tab_ere", "ERE Diagram Tab"))
-	lines = append(lines, "  tab         Toggle Explorer/Preview")
-	lines = append(lines, "")
-
-	lines = append(lines, m.styles.Header.Render("Grid Preview"))
-	lines = append(lines, m.renderKeybind("grid-preview.cursor_up", "Navigate Up"))
-	lines = append(lines, m.renderKeybind("grid-preview.cursor_down", "Navigate Down"))
-	lines = append(lines, m.renderKeybind("grid-preview.expand", "Expand FK / Collapse"))
-	lines = append(lines, m.renderKeybind("grid-preview.first", "First Line"))
-	lines = append(lines, m.renderKeybind("grid-preview.last", "Last Line"))
-	lines = append(lines, m.renderKeybind("grid-preview.half_up", "Half Page Up"))
-	lines = append(lines, m.renderKeybind("grid-preview.half_down", "Half Page Down"))
-	lines = append(lines, m.renderKeybind("grid-preview.toggle_explorer", "Focus Explorer"))
-	lines = append(lines, m.renderKeybind("grid-preview.jq_filter", "JQ Filter"))
-	lines = append(lines, "")
-
-	lines = append(lines, m.styles.Header.Render("Editor"))
-	lines = append(lines, m.renderKeybind("editor.execute", "Execute Query"))
-	lines = append(lines, m.renderKeybind("editor.clear", "Clear Editor"))
-	lines = append(lines, m.renderKeybind("editor.copy", "Copy SQL"))
-	lines = append(lines, m.renderKeybind("editor.autocomplete", "Autocomplete"))
-	lines = append(lines, m.renderKeybind("editor.history_prev", "History Previous"))
-	lines = append(lines, m.renderKeybind("editor.history_next", "History Next"))
-	lines = append(lines, "")
+	for _, sec := range modalSections {
+		lines = append(lines, m.styles.Header.Render(sec.Header))
+		for _, a := range m.keybinds.ActionsFor(sec.Context) {
+			lines = append(lines, m.renderAction(a))
+		}
+		lines = append(lines, "")
+	}
 
 	lines = append(lines, m.styles.Header.Render("Query Browser"))
-	lines = append(lines, "  j/k         Navigate up/down")
-	lines = append(lines, "  Enter       Load query into editor")
-	lines = append(lines, "  f           Toggle favorite")
-	lines = append(lines, "  d           Delete entry")
-	lines = append(lines, "  /           Filter queries")
-	lines = append(lines, "  Tab         Switch History/Favorites")
+	lines = append(lines, m.staticLine("j/k", "Navigate up/down"))
+	lines = append(lines, m.staticLine("g/G", "First/last entry"))
+	lines = append(lines, m.staticLine("Enter", "Load query into editor"))
+	lines = append(lines, m.staticLine("f", "Toggle favorite"))
+	lines = append(lines, m.staticLine("d", "Delete entry"))
+	lines = append(lines, m.staticLine("/", "Filter queries"))
+	lines = append(lines, m.staticLine("Tab", "Switch History/Favorites"))
+	lines = append(lines, m.staticLine("Esc", "Close browser"))
+	lines = append(lines, "")
+
+	lines = append(lines, m.styles.Header.Render("Connection Picker"))
+	lines = append(lines, m.staticLine("j/k", "Navigate up/down"))
+	lines = append(lines, m.staticLine("Space", "Toggle active/inactive"))
+	lines = append(lines, m.staticLine("Enter", "Connect to selected project"))
+	lines = append(lines, m.staticLine("q", "Quit"))
+	lines = append(lines, "")
+
+	lines = append(lines, m.styles.Header.Render("EDIT Mode (grid cell)"))
+	lines = append(lines, m.staticLine("Esc", "Cancel edit (revert value)"))
+	lines = append(lines, m.staticLine("Enter/Tab", "Commit cell, move to next column"))
+	lines = append(lines, m.staticLine("Up/Down", "Move to prev/next row"))
+	lines = append(lines, m.staticLine("←/→", "Move cursor within the cell"))
+	lines = append(lines, m.staticLine("Home/End", "Jump to start/end of value"))
+	lines = append(lines, m.staticLine("Backspace/Delete", "Delete character"))
+	lines = append(lines, m.staticLine("Any char", "Type into cell"))
+	lines = append(lines, "")
+
+	lines = append(lines, m.styles.Header.Render("FILTER Mode (column find)"))
+	lines = append(lines, m.staticLine("Esc", "Cancel filter"))
+	lines = append(lines, m.staticLine("Enter", "Apply filter, jump to first match"))
+	lines = append(lines, m.staticLine("Any char", "Append to filter text"))
+	lines = append(lines, "")
+
+	lines = append(lines, m.styles.Header.Render("WHERE FILTER Mode"))
+	lines = append(lines, m.staticLine("Esc", "Cancel WHERE filter"))
+	lines = append(lines, m.staticLine("Enter", "Apply WHERE clause (re-query DB)"))
+	lines = append(lines, m.staticLine("Any char", "Type the WHERE clause"))
+	lines = append(lines, "")
+
+	lines = append(lines, m.styles.Header.Render("Mouse"))
+	lines = append(lines, m.staticLine("Click", "Select node/cell, move cursor"))
+	lines = append(lines, m.staticLine("Double click", "Expand/collapse, view full cell"))
+	lines = append(lines, m.staticLine("Wheel", "Scroll the focused pane"))
 	lines = append(lines, "")
 
 	lines = append(lines, m.styles.Help.Render("  j/k scroll · Esc close"))
@@ -233,14 +205,16 @@ func (m *HelpModal) View() string {
 	return modal
 }
 
-func (m *HelpModal) renderKeybind(action, description string) string {
-	key := m.keybinds[action]
+func (m *HelpModal) renderAction(a config.Action) string {
+	key := strings.Join(a.Keys, ", ")
 	if key == "" {
 		key = "?"
 	}
+	return m.staticLine(key, a.Description)
+}
 
-	keyStyled := m.styles.Primary.Render(fmt.Sprintf("%-12s", key))
+func (m *HelpModal) staticLine(key, description string) string {
+	keyStyled := m.styles.Primary.Render(fmt.Sprintf("%-14s", key))
 	descStyled := m.styles.Text.Render(description)
-
 	return "  " + keyStyled + descStyled
 }

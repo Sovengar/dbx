@@ -133,7 +133,7 @@ dbx/
 ├── docs/
 │   ├── PLAN.md                  # Este archivo
 │   ├── ARCHITECTURE.md          # Decisiones de arquitectura
-│   ├── KEYBINDS.md              # Reference de keybinds
+│   ├── FEATURES.md              # Features y convenciones (DML, naming)
 │   ├── CONFIG.md                # Reference de config
 │   └── CLI.md                   # Reference de CLI
 │
@@ -895,7 +895,7 @@ Features que añaden valor pero no son core. Se implementan cuando la base es s�
 ### Tareas
 - [ ] README completo con screenshots
 - [ ] Instalación: `go install`, brew, AUR
-- [ ] Docs: ARCHITECTURE.md, KEYBINDS.md, CONFIG.md, CLI.md
+- [ ] Docs: ARCHITECTURE.md, FEATURES.md, CONFIG.md, CLI.md
 - [ ] v0.1.0 release con GoReleaser
 - [ ] Config examples
 - [ ] Contributing guide
