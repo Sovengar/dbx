@@ -123,9 +123,6 @@ executing. The same flow is available from the terminal via `dbx ask`, with
 `--json` and `--sql-only` flags. Supports Anthropic, OpenAI, DeepSeek, Qwen,
 OpenCode, and any OpenAI-compatible endpoint.
 
-> The in-TUI Ask handler is not wired yet; the action is declared and reserved so
-> its binding will not be reassigned. Use `dbx ask` from the CLI meanwhile.
-
 ### Navigation & UI
 
 - **Top bar** — active pane, `schema.table`, row count, WHERE filter, breadcrumbs.

@@ -39,6 +39,42 @@ func TestBuildCommands_Rollback_IncludesKeybind(t *testing.T) {
 	t.Fatal("BuildCommands() missing rollback command")
 }
 
+// Scenario: ASK command available in the palette
+func TestDefaultCommands_IncludesAsk(t *testing.T) {
+	cmds := DefaultCommands()
+	for _, cmd := range cmds {
+		if cmd.Action != "ask" {
+			continue
+		}
+		if cmd.Name != "Ask AI" {
+			t.Fatalf("ask command name = %q, want %q", cmd.Name, "Ask AI")
+		}
+		if cmd.Alias != "ask" {
+			t.Fatalf("ask command alias = %q, want %q", cmd.Alias, "ask")
+		}
+		if cmd.Section != SectionQuery {
+			t.Fatalf("ask command section = %q, want %q", cmd.Section, SectionQuery)
+		}
+		return
+	}
+	t.Fatal("DefaultCommands() missing ask command")
+}
+
+func TestBuildCommands_Ask_IncludesKeybind(t *testing.T) {
+	kb := config.NewKeybindRegistry(config.KeybindingsConfig{})
+	cmds := BuildCommands(kb)
+	for _, cmd := range cmds {
+		if cmd.Action != "ask" {
+			continue
+		}
+		if cmd.Alias != "ask (a)" {
+			t.Fatalf("ask alias = %q, want %q", cmd.Alias, "ask (a)")
+		}
+		return
+	}
+	t.Fatal("BuildCommands() missing ask command")
+}
+
 func TestDefaultCommands_IncludesCopySQL(t *testing.T) {
 	cmds := DefaultCommands()
 	found := false

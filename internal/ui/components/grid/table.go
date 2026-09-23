@@ -849,6 +849,17 @@ func (g *Grid) WhereClause() string {
 	return g.whereClause
 }
 
+// ContextHint returns the currently loaded table and its WHERE clause, used by
+// the ASK pane as a prompt hint. All fields are empty when no table is loaded.
+func (g *Grid) ContextHint() (schema, table, where string) {
+	return g.schema, g.tableName, g.whereClause
+}
+
+// EditValue returns the text currently held by the cell editor.
+func (g *Grid) EditValue() string {
+	return g.editValue
+}
+
 func (g *Grid) SortColumn() string {
 	return g.header.SortColumn()
 }

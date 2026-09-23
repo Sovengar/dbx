@@ -18,12 +18,14 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	aiContext "github.com/buble/dbx/internal/ai/context"
+	"github.com/buble/dbx/internal/ai/nl2sql"
 	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/buble/dbx/internal/store"
 	"github.com/buble/dbx/internal/theme"
 	"github.com/buble/dbx/internal/ui"
 	"github.com/buble/dbx/internal/ui/bordered"
+	"github.com/buble/dbx/internal/ui/components/ask"
 	"github.com/buble/dbx/internal/ui/components/editor"
 	"github.com/buble/dbx/internal/ui/components/explorer"
 	"github.com/buble/dbx/internal/ui/components/explorerpreview"
@@ -96,6 +98,11 @@ type Model struct {
 	queryStore                 *store.QueryStore
 	queryBrowser               *querybrowser.QueryBrowser
 	queryBrowserOpen           bool
+	ask                        *ask.Ask
+	askOpen                    bool
+	aiProvider                 nl2sql.Provider
+	askSchemaText              string
+	askContextHint             string
 	runner                     *statementRunner
 	connectCancelled           bool
 	forcePicker                bool
@@ -121,6 +128,12 @@ func NewModel(cfg *config.Config) Model {
 	qb := querybrowser.New(t.Styles(), qs)
 	ed := editor.NewSQLEditor(t.Styles())
 	ed.SetAutocompleteConfig(cfg.Editor.Autocomplete, cfg.Editor.AutocompleteTrigger)
+	// Resolve the NL→SQL provider once; a nil provider keeps ASK unavailable.
+	aiProvider, _ := nl2sql.Resolve(nl2sql.Config{
+		Provider:  cfg.AI.Provider,
+		Model:     cfg.AI.Model,
+		Providers: nl2sqlProviderConfigs(cfg.AI.Providers),
+	})
 	return Model{
 		config:             cfg,
 		theme:              t,
@@ -141,7 +154,21 @@ func NewModel(cfg *config.Config) Model {
 		yankMaxRows:        yankMaxRows,
 		queryStore:         qs,
 		queryBrowser:       qb,
+		ask:                ask.New(t.Styles()),
+		aiProvider:         aiProvider,
 	}
+}
+
+// nl2sqlProviderConfigs maps the config provider table to the nl2sql contract.
+func nl2sqlProviderConfigs(m map[string]config.AIProviderConf) map[string]nl2sql.ProviderConfig {
+	result := make(map[string]nl2sql.ProviderConfig, len(m))
+	for k, v := range m {
+		result[k] = nl2sql.ProviderConfig{
+			APIKeyEnv: v.APIKeyEnv,
+			Model:     v.Model,
+		}
+	}
+	return result
 }
 
 // initQueryStore initializes the QueryStore for the given project.
@@ -653,6 +680,20 @@ type queryExecutedMsg struct {
 	committedTx bool
 }
 
+// askGeneratedMsg carries the result of an async NL→SQL generation.
+type askGeneratedMsg struct {
+	sql string
+	err error
+}
+
+// askQueryExecutedMsg carries the result of an ASK query run in a READ ONLY
+// transaction.
+type askQueryExecutedMsg struct {
+	result *postgres.QueryResult
+	sql    string
+	err    error
+}
+
 func (m Model) loadTableData(schema, table string) tea.Cmd {
 	return m.loadTableDataWithWhere(schema, table, "")
 }
@@ -909,6 +950,119 @@ func (m Model) executeQuery(sql string) tea.Cmd {
 	}
 }
 
+// handleAskOpen opens the ASK overlay, refusing when no AI provider is
+// configured so the user gets a clear message instead of a dead pane.
+func (m Model) handleAskOpen() (tea.Model, tea.Cmd) {
+	if m.aiProvider == nil {
+		appDebugLog("Ask: no AI provider configured")
+		m.toast.ShowError("No AI provider configured")
+		return m, nil
+	}
+	if m.ask == nil {
+		return m, nil
+	}
+	schema, table, where := m.gridContextHint()
+	m.ask.SetContextHint(schema, table, where)
+	m.askContextHint = buildAskContextHint(schema, table, where)
+	m.askOpen = true
+	m.ask.Show()
+	appDebugLog("Ask: opened context=%q", m.askContextHint)
+	return m, nil
+}
+
+// gridContextHint returns the loaded table and WHERE clause, if any.
+func (m Model) gridContextHint() (schema, table, where string) {
+	if m.grid == nil {
+		return "", "", ""
+	}
+	return m.grid.ContextHint()
+}
+
+// buildAskContextHint formats the grid context for the prompt. It is a hint,
+// never a restriction: ASK stays globally available.
+func buildAskContextHint(schema, table, where string) string {
+	if schema == "" && table == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("The grid is currently showing table %s.%s.\n", schema, table))
+	if where != "" {
+		b.WriteString(fmt.Sprintf("The grid's current WHERE clause is: %s\n", where))
+	}
+	return b.String()
+}
+
+// generateAskSQL runs the NL→SQL provider asynchronously so the UI stays
+// responsive while the model generates.
+func (m Model) generateAskSQL(question string) tea.Cmd {
+	provider := m.aiProvider
+	schema := m.askSchemaText
+	if schema == "" {
+		schema = buildSchemaTextForLLM(m.schemaDetail)
+	}
+	contextHint := m.askContextHint
+	return func() tea.Msg {
+		if provider == nil {
+			return askGeneratedMsg{err: fmt.Errorf("no AI provider configured")}
+		}
+		prompt := question
+		if contextHint != "" {
+			prompt = question + "\n\nContext (hint, not a restriction):\n" + contextHint
+		}
+		appDebugLog("Ask: generating prompt=%q schemaLen=%d", prompt, len(schema))
+		sql, err := provider.Generate(context.Background(), prompt, schema)
+		return askGeneratedMsg{sql: sql, err: err}
+	}
+}
+
+// executeAskSQL validates the generated SQL and runs it inside a READ ONLY
+// transaction, reporting the result as an askQueryExecutedMsg.
+func (m Model) executeAskSQL(sql string) tea.Cmd {
+	if m.ask == nil {
+		return nil
+	}
+	if !isSelectOnly(sql) {
+		appDebugLog("Ask: rejected non-SELECT statement %q", sql)
+		m.ask.SetError(fmt.Errorf("only SELECT statements are allowed"))
+		return nil
+	}
+	if m.runner == nil {
+		m.ask.SetError(fmt.Errorf("not connected to a database"))
+		return nil
+	}
+	if m.runner.pending() {
+		appDebugLog("Ask: refused, a DML transaction is pending")
+		m.ask.SetError(fmt.Errorf("a DML transaction is pending: commit or roll back first"))
+		return nil
+	}
+	runner := m.runner
+	return func() tea.Msg {
+		result, err := runner.executeReadOnly(context.Background(), sql)
+		return askQueryExecutedMsg{result: result, sql: sql, err: err}
+	}
+}
+
+// buildSchemaTextForLLM renders the in-memory schema in the same text format
+// the CLI uses for the LLM, so no round-trip to the database is needed.
+func buildSchemaTextForLLM(schemas []postgres.SchemaDetail) string {
+	var result strings.Builder
+	for _, sd := range schemas {
+		result.WriteString(fmt.Sprintf("Schema: %s\n", sd.Name))
+		for _, table := range sd.Tables {
+			result.WriteString(fmt.Sprintf("  Table: %s (%d rows)\n", table.Name, table.RowCount))
+			for _, col := range table.Columns {
+				nullable := ""
+				if col.IsNullable == "YES" {
+					nullable = " NULL"
+				}
+				result.WriteString(fmt.Sprintf("    %s %s%s\n", col.Name, col.DataType, nullable))
+			}
+		}
+		result.WriteString("\n")
+	}
+	return result.String()
+}
+
 // splitSQL splits a SQL string by top-level semicolons, ignoring semicolons inside strings.
 func splitSQL(sql string) []string {
 	var parts []string
@@ -974,6 +1128,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.queryBrowser != nil {
 			m.queryBrowser.SetWidth(msg.Width)
 			m.queryBrowser.SetHeight(msg.Height)
+		}
+		if m.ask != nil {
+			m.ask.SetWidth(msg.Width)
+			m.ask.SetHeight(msg.Height)
 		}
 		return m, tickToast()
 
@@ -1058,6 +1216,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.grid.SetHeight(m.height - 4)
 		m.schemaDetail = msg.schemaDetail
 		m.dbName = msg.dbName
+		m.askSchemaText = buildSchemaTextForLLM(msg.schemaDetail)
 		// Initialize per-project query store after project selection
 		if m.project != nil {
 			m.initQueryStore(m.project.Name, "")
@@ -1400,6 +1559,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.keybindsPane.SetQueryBrowserOpen(false)
 		return m, nil
 
+	case ask.AskSubmittedMsg:
+		return m, m.generateAskSQL(msg.Question)
+
+	case ask.AskConfirmMsg:
+		return m, m.executeAskSQL(msg.SQL)
+
+	case ask.AskClosedMsg:
+		m.askOpen = false
+		return m, nil
+
+	case askGeneratedMsg:
+		if m.ask == nil {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.ask.SetError(msg.err)
+			return m, nil
+		}
+		m.ask.SetGeneratedSQL(msg.sql)
+		return m, nil
+
+	case askQueryExecutedMsg:
+		if m.ask == nil {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.ask.SetError(msg.err)
+			return m, nil
+		}
+		m.ask.SetResultSummary(fmt.Sprintf("%d rows", msg.result.Count))
+		m.askOpen = false
+		m.ask.Hide()
+		m.grid.SetData(msg.result, "", "query")
+		m.router.FocusPane(FocusGrid)
+		m.toast.ShowSuccess(fmt.Sprintf("Query returned %d rows", msg.result.Count))
+		return m, nil
+
 	case querybrowser.QueryBrowserClosedMsg:
 		m.queryBrowserOpen = false
 		m.keybindsPane.SetQueryBrowserOpen(false)
@@ -1483,7 +1679,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.editorOpen || m.palette.IsVisible() ||
-			(m.queryBrowserOpen && m.queryBrowser != nil) || m.grid.IsExporting() {
+			(m.queryBrowserOpen && m.queryBrowser != nil) || m.grid.IsExporting() ||
+			(m.askOpen && m.ask != nil) {
 			return m, nil
 		}
 
@@ -1532,7 +1729,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Ignore clicks while a modal-like overlay is on top; these used to
 		// swallow keys only, so a click behind them could act on a hidden pane.
 		if m.editorOpen || m.helpModal.IsVisible() || m.palette.IsVisible() ||
-			(m.queryBrowserOpen && m.queryBrowser != nil) || m.grid.IsExporting() {
+			(m.queryBrowserOpen && m.queryBrowser != nil) || m.grid.IsExporting() ||
+			(m.askOpen && m.ask != nil) {
 			return m, nil
 		}
 
@@ -1592,6 +1790,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.queryBrowserOpen && m.queryBrowser != nil {
 			if cmd, handled := m.queryBrowser.Update(msg); handled {
+				return m, cmd
+			}
+			return m, nil
+		}
+
+		if m.askOpen && m.ask != nil {
+			if cmd, handled := m.ask.Update(msg); handled {
 				return m, cmd
 			}
 			return m, nil
@@ -1778,6 +1983,9 @@ func (m Model) appActions() map[config.ActionID]func(Model) (tea.Model, tea.Cmd)
 		"palette": func(m Model) (tea.Model, tea.Cmd) {
 			m.palette.Show()
 			return m, nil
+		},
+		"ask": func(m Model) (tea.Model, tea.Cmd) {
+			return m.handleAskOpen()
 		},
 		"toggle_explorer_focus": func(m Model) (tea.Model, tea.Cmd) {
 			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
@@ -2310,6 +2518,13 @@ func (m Model) View() tea.View {
 			appDebugLog("QueryBrowser View: overlay done, content length=%d", len(content))
 		} else {
 			appDebugLog("QueryBrowser View: browserView is empty!")
+		}
+	}
+
+	if m.askOpen && m.ask != nil {
+		askView := m.ask.View()
+		if askView != "" {
+			content = overlay(content, askView, m.width, m.height)
 		}
 	}
 

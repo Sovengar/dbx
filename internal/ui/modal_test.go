@@ -34,6 +34,18 @@ func TestHelpModal_IncludesRollback(t *testing.T) {
 	}
 }
 
+// Scenario: ASK action shown in the help modal
+func TestHelpModal_GlobalSection_IncludesAsk(t *testing.T) {
+	modal := modalWith(config.NewKeybindRegistry(config.KeybindingsConfig{}))
+	view := modal.View()
+	if !strings.Contains(view, "Ask AI (NL→SQL)") {
+		t.Fatal("Help modal does not contain 'Ask AI (NL→SQL)' in Global section")
+	}
+	if !strings.Contains(view, "a") {
+		t.Fatal("Help modal does not show the 'a' keybind for Ask AI")
+	}
+}
+
 func TestHelpModal_EditorSection_IncludesCopySQL(t *testing.T) {
 	modal := modalWith(config.NewKeybindRegistry(config.KeybindingsConfig{}))
 	view := modal.View()

@@ -102,8 +102,12 @@ func TestRegistry_OwnerHandlesItsActions(t *testing.T) {
 	}
 }
 
-// Scenario: Una acción con handler pendiente no rompe la validación.
-func TestRegistry_PendingActionExemptFromHandlerCoverage(t *testing.T) {
+// Scenario: The ASK action is wired — declared, no longer pending, handled by
+// the app owner.
+func TestRegistry_AskActionIsWired(t *testing.T) {
+	m := coverageModel(t)
+	owners := handledByOwner(m)
+
 	registry := config.NewKeybindRegistry(config.KeybindingsConfig{})
 	var ask *config.Action
 	for _, a := range registry.All() {
@@ -113,15 +117,18 @@ func TestRegistry_PendingActionExemptFromHandlerCoverage(t *testing.T) {
 		}
 	}
 	if ask == nil {
-		t.Fatal("registry is missing the pending 'ask' action")
+		t.Fatal("registry is missing the 'ask' action")
 	}
-	if !ask.Pending {
-		t.Fatal("'ask' must be declared Pending")
+	if ask.Pending {
+		t.Fatal("'ask' must not be declared Pending once its handler is wired")
 	}
 	if ask.Description != "Ask AI (NL→SQL)" {
 		t.Fatalf("'ask' description = %q, want %q", ask.Description, "Ask AI (NL→SQL)")
 	}
 	if ask.Keys[0] != "a" {
 		t.Fatalf("'ask' primary key = %q, want 'a'", ask.Keys[0])
+	}
+	if !owners["app"]["ask"] {
+		t.Fatal("'ask' is not handled by the app owner")
 	}
 }
