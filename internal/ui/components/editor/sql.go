@@ -46,8 +46,9 @@ func NewSQLEditor(styles *theme.Styles) *SQLEditor {
 
 // SetKeybinds injects the registry resolver the editor uses to dispatch its own
 // actions (autocomplete, history_prev, history_next). It is a setter rather than
-// a constructor parameter to keep NewSQLEditor's contract stable; a nil resolver
-// keeps the widget-local fallback for tests that build an editor in isolation.
+// a constructor parameter to keep NewSQLEditor's contract stable. A nil resolver
+// leaves those shortcuts unhandled by design: the raw key cases were removed so
+// a rebind cannot be bypassed, and production always wires a resolver.
 func (e *SQLEditor) SetKeybinds(k config.Resolver) { e.keybinds = k }
 
 // SetAutocompleteConfig enables or disables real-time suggestions and sets the
