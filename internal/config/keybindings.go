@@ -33,6 +33,13 @@ type Action struct {
 	Contexts    []string
 	Owner       string
 	Pending     bool
+
+	// Group collapses sibling actions into a single display segment. Actions
+	// that share a non-empty Group are aggregated by GroupActions; GroupLabel
+	// is the shared display label and must be identical for every member. The
+	// zero value leaves the action ungrouped (rendered on its own).
+	Group      string
+	GroupLabel string
 }
 
 // Resolver is the minimal read interface consumers depend on. Components take

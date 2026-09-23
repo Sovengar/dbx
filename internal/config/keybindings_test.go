@@ -26,6 +26,16 @@ func TestKeybindRegistry_QuitNotInEditor(t *testing.T) {
 	}
 }
 
+func TestKeybindRegistry_ResolveCloseEditor(t *testing.T) {
+	r := NewKeybindRegistry(KeybindingsConfig{})
+	if id, ok := r.Resolve("esc", ContextEditor); !ok || id != "close_editor" {
+		t.Fatalf("Resolve('esc','editor') = %q,%v want close_editor,true", id, ok)
+	}
+	if _, ok := r.Resolve("esc", ContextGrid); ok {
+		t.Fatal("close_editor must not resolve in the grid context")
+	}
+}
+
 func TestKeybindRegistry_PrimaryKey(t *testing.T) {
 	r := NewKeybindRegistry(KeybindingsConfig{})
 	if got := r.PrimaryKey("copy_sql"); got != "ctrl+y" {
@@ -74,6 +84,48 @@ func TestRegistry_EveryActionHasSectionAndDescription(t *testing.T) {
 		if a.Description == "" {
 			t.Errorf("action %q has an empty Description", a.ID)
 		}
+	}
+}
+
+// Scenario: A group is a real group only when its members agree on the label.
+func TestRegistry_GroupLabelsAreConsistent(t *testing.T) {
+	labels := map[string]string{}
+	for _, a := range NewKeybindRegistry(KeybindingsConfig{}).All() {
+		if a.Group == "" {
+			if a.GroupLabel != "" {
+				t.Errorf("action %q has a GroupLabel but no Group", a.ID)
+			}
+			continue
+		}
+		if a.GroupLabel == "" {
+			t.Errorf("action %q is in group %q but has an empty GroupLabel", a.ID, a.Group)
+			continue
+		}
+		if prev, ok := labels[a.Group]; ok && prev != a.GroupLabel {
+			t.Errorf("group %q has inconsistent labels %q and %q", a.Group, prev, a.GroupLabel)
+		}
+		labels[a.Group] = a.GroupLabel
+	}
+}
+
+// Scenario: GroupActions merges consecutive members, so registry groups must be
+// declared as one contiguous run.
+func TestRegistry_GroupMembersAreConsecutive(t *testing.T) {
+	seen := map[string]bool{}
+	prevGroup := ""
+	for _, a := range NewKeybindRegistry(KeybindingsConfig{}).All() {
+		if a.Group == "" {
+			prevGroup = ""
+			continue
+		}
+		if a.Group == prevGroup {
+			continue
+		}
+		if seen[a.Group] {
+			t.Errorf("group %q restarts at action %q; members must be consecutive", a.Group, a.ID)
+		}
+		seen[a.Group] = true
+		prevGroup = a.Group
 	}
 }
 

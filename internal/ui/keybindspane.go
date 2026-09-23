@@ -12,6 +12,11 @@ import (
 	"github.com/buble/dbx/internal/ui/bordered"
 )
 
+// maxKeybindsPerLine caps how many keybind segments the pane packs into a
+// single line. A group (e.g. "hjkl Navigate") counts as one segment. Extra
+// segments flow onto a new line below.
+const maxKeybindsPerLine = 7
+
 // KeybindsPane renders the keybinds of the currently focused view, derived
 // entirely from the keybind registry (no hardcoded key strings).
 type KeybindsPane struct {
@@ -96,7 +101,10 @@ func (s *KeybindsPane) renderLines() []string {
 	}
 
 	ctx := s.Context()
-	var segments []string
+
+	// Conditional skips are applied BEFORE grouping so a hidden member never
+	// keeps a group alive on its own.
+	var active []config.Action
 	for _, a := range s.keybinds.ActionsFor(ctx) {
 		if a.ID == "rollback" && !s.txPending {
 			continue
@@ -104,11 +112,17 @@ func (s *KeybindsPane) renderLines() []string {
 		if a.ID == "autocomplete" && s.editorOpen && !s.autocompleteReady {
 			continue
 		}
-		key := s.keybinds.PrimaryKey(a.ID)
-		if key == "" {
+		active = append(active, a)
+	}
+
+	// One segment per display group; the pane shows primary keys only (the help
+	// modal is where aliases live).
+	var segments []string
+	for _, g := range config.GroupActions(active, s.keybinds.PrimaryKey) {
+		if g.KeyText == "" {
 			continue
 		}
-		segments = append(segments, key+" "+a.Description)
+		segments = append(segments, g.KeyText+" "+g.Label)
 	}
 	if s.txPending {
 		segments = append(segments, "tx pending")
@@ -122,20 +136,25 @@ func (s *KeybindsPane) renderLines() []string {
 		return []string{strings.Join(segments, " · ")}
 	}
 
-	// Wrap segments into lines that fit the pane width.
+	// Wrap segments into lines. A line breaks either when it reaches
+	// maxKeybindsPerLine entries or when the next segment would overflow the
+	// pane width, whichever comes first.
 	var lines []string
 	current := ""
+	count := 0
 	for _, seg := range segments {
-		candidate := seg
-		if current != "" {
-			candidate = current + " · " + seg
-		}
-		if current != "" && lipgloss.Width(candidate) > s.width-2 {
+		if current != "" && (count >= maxKeybindsPerLine || lipgloss.Width(current+" · "+seg) > s.width-2) {
 			lines = append(lines, current)
 			current = seg
+			count = 1
 			continue
 		}
-		current = candidate
+		if current == "" {
+			current = seg
+		} else {
+			current += " · " + seg
+		}
+		count++
 	}
 	if current != "" {
 		lines = append(lines, current)

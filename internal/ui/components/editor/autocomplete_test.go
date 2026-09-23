@@ -251,6 +251,28 @@ func TestCompleteKeywordIsNotSuggested(t *testing.T) {
 	}
 }
 
+func TestCancelAutocompleteReportsAndHides(t *testing.T) {
+	ed := NewSQLEditor(testStyles())
+	ed.SetSchema(testExport())
+	ed.Focus()
+	ed.SetContent("SELECT * FROM users WH")
+	ed.SetCursorPos(0, len("SELECT * FROM users WH"))
+	ed.triggerAutocomplete()
+	if !ed.AutocompleteVisible() {
+		t.Fatal("precondition: autocomplete popup should be visible")
+	}
+
+	if !ed.CancelAutocomplete() {
+		t.Fatal("CancelAutocomplete() = false, want true when a popup is open")
+	}
+	if ed.AutocompleteVisible() {
+		t.Fatal("popup still visible after CancelAutocomplete")
+	}
+	if ed.CancelAutocomplete() {
+		t.Fatal("CancelAutocomplete() = true, want false when no popup is open")
+	}
+}
+
 func TestAutocompleteConfigDisables(t *testing.T) {
 	ed := NewSQLEditor(testStyles())
 	ed.SetSchema(testExport())

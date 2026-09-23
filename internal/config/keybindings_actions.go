@@ -11,6 +11,16 @@ const (
 	SectionUI         = "UI"
 )
 
+// Display groups. Sibling actions that share a Group collapse into one segment
+// in the keybinds pane; GroupLabel is the shared label. Sections stay a
+// palette/help concern and never drive grouping.
+const (
+	GroupNavigate  = "nav"
+	GroupFirstLast = "first_last"
+	GroupHalfPage  = "half_page"
+	GroupGotoPage  = "goto_page"
+)
+
 // defaultActions is the single keybind inventory. Keys absorb both the primary
 // binding and every alias so display and dispatch share one entry.
 func defaultActions() []Action {
@@ -44,21 +54,21 @@ func defaultActions() []Action {
 
 		// ── Navigation (shared) ───────────────────────────────────
 		{ID: "navigate_down", Keys: []string{"j", "down"}, Section: SectionNavigation, Description: "Navigate Down",
-			Contexts: navViews, Owner: "grid"},
+			Contexts: navViews, Owner: "grid", Group: GroupNavigate, GroupLabel: "Navigate"},
 		{ID: "navigate_up", Keys: []string{"k", "up"}, Section: SectionNavigation, Description: "Navigate Up",
-			Contexts: navViews, Owner: "grid"},
+			Contexts: navViews, Owner: "grid", Group: GroupNavigate, GroupLabel: "Navigate"},
 		{ID: "navigate_left", Keys: []string{"h", "left"}, Section: SectionNavigation, Description: "Column Left",
-			Contexts: []string{ContextGrid}, Owner: "grid"},
+			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupNavigate, GroupLabel: "Navigate"},
 		{ID: "navigate_right", Keys: []string{"l", "right"}, Section: SectionNavigation, Description: "Column Right",
-			Contexts: []string{ContextGrid}, Owner: "grid"},
+			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupNavigate, GroupLabel: "Navigate"},
 		{ID: "go_first", Keys: []string{"g"}, Section: SectionNavigation, Description: "First",
-			Contexts: navViews, Owner: "grid"},
+			Contexts: navViews, Owner: "grid", Group: GroupFirstLast, GroupLabel: "First/Last"},
 		{ID: "go_last", Keys: []string{"G"}, Section: SectionNavigation, Description: "Last",
-			Contexts: navViews, Owner: "grid"},
+			Contexts: navViews, Owner: "grid", Group: GroupFirstLast, GroupLabel: "First/Last"},
 		{ID: "half_page_up", Keys: []string{"ctrl+u"}, Section: SectionNavigation, Description: "Half Page Up",
-			Contexts: []string{ContextGrid, ContextGridPreview}, Owner: "grid"},
+			Contexts: []string{ContextGrid, ContextGridPreview}, Owner: "grid", Group: GroupHalfPage, GroupLabel: "Half Page"},
 		{ID: "half_page_down", Keys: []string{"ctrl+d"}, Section: SectionNavigation, Description: "Half Page Down",
-			Contexts: []string{ContextGrid, ContextGridPreview}, Owner: "grid"},
+			Contexts: []string{ContextGrid, ContextGridPreview}, Owner: "grid", Group: GroupHalfPage, GroupLabel: "Half Page"},
 		{ID: "focus_preview", Keys: []string{"tab"}, Section: SectionNavigation, Description: "Focus Preview",
 			Contexts: []string{ContextGrid}, Owner: "app"},
 		{ID: "explorer_open_preview", Keys: []string{"tab"}, Section: SectionNavigation, Description: "Preview Table",
@@ -78,23 +88,23 @@ func defaultActions() []Action {
 		{ID: "last_page", Keys: []string{"N"}, Section: SectionData, Description: "Last Page",
 			Contexts: []string{ContextGrid}, Owner: "grid"},
 		{ID: "goto_page_1", Keys: []string{"f1"}, Section: SectionData, Description: "Go to Page 1",
-			Contexts: []string{ContextGrid}, Owner: "grid"},
+			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupGotoPage, GroupLabel: "Go to Page"},
 		{ID: "goto_page_2", Keys: []string{"f2"}, Section: SectionData, Description: "Go to Page 2",
-			Contexts: []string{ContextGrid}, Owner: "grid"},
+			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupGotoPage, GroupLabel: "Go to Page"},
 		{ID: "goto_page_3", Keys: []string{"f3"}, Section: SectionData, Description: "Go to Page 3",
-			Contexts: []string{ContextGrid}, Owner: "grid"},
+			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupGotoPage, GroupLabel: "Go to Page"},
 		{ID: "goto_page_4", Keys: []string{"f4"}, Section: SectionData, Description: "Go to Page 4",
-			Contexts: []string{ContextGrid}, Owner: "grid"},
+			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupGotoPage, GroupLabel: "Go to Page"},
 		{ID: "goto_page_5", Keys: []string{"f5"}, Section: SectionData, Description: "Go to Page 5",
-			Contexts: []string{ContextGrid}, Owner: "grid"},
+			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupGotoPage, GroupLabel: "Go to Page"},
 		{ID: "goto_page_6", Keys: []string{"f6"}, Section: SectionData, Description: "Go to Page 6",
-			Contexts: []string{ContextGrid}, Owner: "grid"},
+			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupGotoPage, GroupLabel: "Go to Page"},
 		{ID: "goto_page_7", Keys: []string{"f7"}, Section: SectionData, Description: "Go to Page 7",
-			Contexts: []string{ContextGrid}, Owner: "grid"},
+			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupGotoPage, GroupLabel: "Go to Page"},
 		{ID: "goto_page_8", Keys: []string{"f8"}, Section: SectionData, Description: "Go to Page 8",
-			Contexts: []string{ContextGrid}, Owner: "grid"},
+			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupGotoPage, GroupLabel: "Go to Page"},
 		{ID: "goto_page_9", Keys: []string{"f9"}, Section: SectionData, Description: "Go to Page 9",
-			Contexts: []string{ContextGrid}, Owner: "grid"},
+			Contexts: []string{ContextGrid}, Owner: "grid", Group: GroupGotoPage, GroupLabel: "Go to Page"},
 		{ID: "edit_cell", Keys: []string{"enter"}, Section: SectionData, Description: "Edit Cell",
 			Contexts: []string{ContextGrid}, Owner: "grid"},
 		{ID: "delete_rows", Keys: []string{"d"}, Section: SectionData, Description: "Delete Row(s)",
@@ -179,6 +189,8 @@ func defaultActions() []Action {
 			Contexts: []string{ContextEditor}, Owner: "editor"},
 		{ID: "history_next", Keys: []string{"ctrl+n"}, Section: SectionQuery, Description: "History Next",
 			Contexts: []string{ContextEditor}, Owner: "editor"},
+		{ID: "close_editor", Keys: []string{"esc"}, Section: SectionUI, Description: "Close Editor",
+			Contexts: []string{ContextEditor}, Owner: "app"},
 	}
 
 	return actions

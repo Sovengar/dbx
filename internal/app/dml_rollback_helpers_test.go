@@ -81,12 +81,14 @@ func newFakeRunner() *fakeRunner {
 func newRollbackTestModel() Model {
 	styles := testStyles()
 	kb := config.NewKeybindRegistry(config.KeybindingsConfig{})
+	ed := editor.NewSQLEditor(styles)
+	ed.SetKeybinds(kb)
 	return Model{
 		state:        StateMain,
 		styles:       styles,
 		router:       NewRouter(kb),
 		keybinds:     kb,
-		editor:       editor.NewSQLEditor(styles),
+		editor:       ed,
 		palette:      palette.New(styles, kb),
 		helpModal:    ui.NewHelpModal(styles, kb),
 		toast:        ui.NewToastManager(styles),

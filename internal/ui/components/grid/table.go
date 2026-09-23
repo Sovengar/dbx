@@ -138,7 +138,6 @@ type Grid struct {
 	filter            string
 	whereFilter       *WhereFilter
 	whereClause       string
-	pendingDigits     string
 	keybinds          config.Resolver
 	constraintsData   []postgres.ConstraintInfo
 	foreignKeysData   []postgres.ForeignKeyInfo
@@ -582,51 +581,65 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return func() tea.Msg { return GridCursorMovedMsg{} }, true
 	}
 
-	// Resolve the key against the grid context. Registry-backed actions and
-	// raw mode keys coexist: anything the registry does not know (digits,
-	// esc-to-clear-selection) keeps its widget-local handling.
-	action, hasAction := g.keybinds.Resolve(key, config.ContextGrid)
+	// Resolve the key against the grid context. Anything the registry does not
+	// know (esc-to-clear-selection and widget-local mode keys) keeps its
+	// widget-local handling above.
+	action, _ := g.keybinds.Resolve(key, config.ContextGrid)
+	return g.dispatchAction(action)
+}
 
-	// Keys that work regardless of whether there are rows
-	if hasAction {
-		switch action {
-		case "insert_row":
-			return g.startInsertRow()
-		case "go_back":
-			return func() tea.Msg { return GridGoBackMsg{} }, true
-		case "sort_column":
-			return g.toggleSort(), true
-		case "filter_rows":
-			g.startWhereFilter()
-			return nil, true
-		case "find_column":
-			g.startColumnFind()
-			return nil, true
-		}
+// HandleAction dispatches an action ID without synthesizing a key press. Mouse
+// handlers (wheel, double-click) use it, and it deliberately skips Update's
+// focused guard so the pane under the cursor reacts even when unfocused.
+func (g *Grid) HandleAction(id config.ActionID) (tea.Cmd, bool) {
+	if g.data == nil {
+		return nil, false
+	}
+	if g.editing || g.filtering || (g.whereFilter != nil && g.whereFilter.Visible()) {
+		return nil, false
+	}
+	return g.dispatchAction(id)
+}
+
+// dispatchAction runs the shared grid action dispatch. It is the single entry
+// point for both key handling and mouse-driven action IDs. An empty action (an
+// unbound key) still cancels pending confirmations, preserving the previous
+// "any key cancels pending" behavior.
+func (g *Grid) dispatchAction(action config.ActionID) (tea.Cmd, bool) {
+	// Keys that work regardless of whether there are rows.
+	switch action {
+	case "insert_row":
+		return g.startInsertRow()
+	case "go_back":
+		return func() tea.Msg { return GridGoBackMsg{} }, true
+	case "sort_column":
+		return g.toggleSort(), true
+	case "filter_rows":
+		g.startWhereFilter()
+		return nil, true
+	case "find_column":
+		g.startColumnFind()
+		return nil, true
 	}
 
-	// Cancel discard pending on any key except D
+	// Cancel pending confirmations on any action except the one that consumes
+	// them.
 	if action != "discard_drafts" {
 		g.discardPending = false
 	}
-
-	// Cancel commit pending on any key except ctrl+s
 	if action != "commit_drafts" {
 		g.commitPending = false
 	}
-
-	// Cancel refresh pending on any key except r
 	if action != "refresh_data" {
 		g.refreshPending = false
 	}
 
-	// Keys that require existing rows
-	hasRows := len(g.data.Rows) > 0
-	if !hasRows {
+	// Keys that require existing rows.
+	if len(g.data.Rows) == 0 {
 		return nil, false
 	}
 
-	// Goto page F1-F9 — must be before 0-9 digit handler
+	// Goto page F1-F9.
 	for i := 1; i <= 9; i++ {
 		if action == config.ActionID(fmt.Sprintf("goto_page_%d", i)) {
 			g.pager.GoToPage(i)
@@ -635,19 +648,6 @@ func (g *Grid) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			return nil, true
 		}
 	}
-
-	if key >= "0" && key <= "9" {
-		g.pendingDigits += key
-		n := 0
-		for _, ch := range g.pendingDigits {
-			n = n*10 + int(ch-'0')
-		}
-		g.pager.GoToPage(n)
-		g.scrollRow = 0
-		g.clampCursor()
-		return nil, true
-	}
-	g.pendingDigits = ""
 
 	switch action {
 	case "navigate_down":

@@ -129,6 +129,7 @@ func NewModel(cfg *config.Config) Model {
 	qs := &store.QueryStore{}
 	qb := querybrowser.New(t.Styles(), qs)
 	ed := editor.NewSQLEditor(t.Styles())
+	ed.SetKeybinds(kbr)
 	ed.SetAutocompleteConfig(cfg.Editor.Autocomplete, cfg.Editor.AutocompleteTrigger)
 	// Resolve the NL→SQL provider once; a nil provider keeps ASK unavailable.
 	// The resolution error is kept so the user sees the real reason (e.g. a
@@ -1685,18 +1686,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case ui.InBounds(zonePaneGrid, msg) && m.grid != nil:
 			if direction < 0 {
-				m.grid.Update(tea.KeyPressMsg{Code: 'k'})
+				m.grid.HandleAction("navigate_up")
 			} else {
-				m.grid.Update(tea.KeyPressMsg{Code: 'j'})
+				m.grid.HandleAction("navigate_down")
 			}
 			if cmd := m.syncGridSidebarPreviewForCursor(); cmd != nil {
 				return m, cmd
 			}
 		case ui.InBounds(zonePaneExplorer, msg) && m.explorer != nil:
 			if direction < 0 {
-				m.explorer.Update(tea.KeyPressMsg{Code: 'k'})
+				m.explorer.HandleAction("navigate_up")
 			} else {
-				m.explorer.Update(tea.KeyPressMsg{Code: 'j'})
+				m.explorer.HandleAction("navigate_down")
 			}
 		}
 		return m, nil
@@ -1731,7 +1732,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			localX, localY := ui.Pos(zonePaneGrid, msg)
 			cmd, hitCell := m.grid.HandleClick(localX, localY)
 			if isDoubleClick && hitCell {
-				enterCmd, _ := m.grid.Update(tea.KeyPressMsg{Code: 13})
+				enterCmd, _ := m.grid.HandleAction("edit_cell")
 				return m, tea.Batch(cmd, enterCmd)
 			}
 			var sidebarCmd tea.Cmd
@@ -1830,14 +1831,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			appDebugLog("KeyPress: key=%q editorOpen=%v focus=%q", key, m.editorOpen, m.router.Focus())
 
 			if m.editorOpen {
-				if key == "esc" {
-					m.editorOpen = false
-					m.editor.Blur()
-					m.editor.SetCommitOnRun(false)
-					m.keybindsPane.SetEditorOpen(false)
-					return m, nil
-				}
-
 				if action, ok := m.keybinds.Resolve(key, config.ContextEditor); ok && m.hasAppAction(action) {
 					return m.dispatchAction(action)
 				}
@@ -2054,13 +2047,13 @@ func (m Model) appActions() map[config.ActionID]func(Model) (tea.Model, tea.Cmd)
 		},
 		"preview_cursor_up": func(m Model) (tea.Model, tea.Cmd) {
 			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
-				m.gridPreview.Update(tea.KeyPressMsg{Code: 'k'})
+				m.gridPreview.HandleAction("navigate_up")
 			}
 			return m, nil
 		},
 		"preview_cursor_down": func(m Model) (tea.Model, tea.Cmd) {
 			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil {
-				m.gridPreview.Update(tea.KeyPressMsg{Code: 'j'})
+				m.gridPreview.HandleAction("navigate_down")
 			}
 			return m, nil
 		},
@@ -2125,6 +2118,18 @@ func (m Model) appActions() map[config.ActionID]func(Model) (tea.Model, tea.Cmd)
 				m.keybindsPane.SetEditorOpen(true)
 			}
 			return m, m.handleCopySQL()
+		},
+		"close_editor": func(m Model) (tea.Model, tea.Cmd) {
+			// Esc first dismisses an open autocomplete popup; the editor only
+			// closes when there is nothing left to cancel.
+			if m.editor.CancelAutocomplete() {
+				return m, nil
+			}
+			m.editorOpen = false
+			m.editor.Blur()
+			m.editor.SetCommitOnRun(false)
+			m.keybindsPane.SetEditorOpen(false)
+			return m, nil
 		},
 		"commit_drafts": func(m Model) (tea.Model, tea.Cmd) {
 			if m.router.Focus() != FocusGrid || m.grid == nil {

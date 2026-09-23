@@ -907,36 +907,53 @@ func (p *GridPreview) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if !ok {
 			return nil, false
 		}
+		return p.dispatchAction(action)
+	}
 
-		switch action {
-		case "navigate_up":
-			p.cursorUp()
-			return nil, true
-		case "navigate_down":
-			p.cursorDown()
-			return nil, true
-		case "go_first":
-			p.cursorLine = 0
-			p.ensureCursorVisible()
-			return nil, true
-		case "go_last":
-			if len(p.lines) > 0 {
-				p.cursorLine = len(p.lines) - 1
-			}
-			p.ensureCursorVisible()
-			return nil, true
-		case "half_page_up":
-			p.halfPageUp()
-			return nil, true
-		case "half_page_down":
-			p.halfPageDown()
-			return nil, true
-		case "jq_filter":
-			p.EnterJQMode()
-			return nil, true
-		case "expand_fk":
-			return p.handleExpand()
+	return nil, false
+}
+
+// HandleAction dispatches an action ID without synthesizing a key press, so
+// callers (palette commands, mouse) respect rebinding. It skips Update's
+// focused guard but keeps the JQ-mode guard: while typing a filter the preview
+// owns the keys.
+func (p *GridPreview) HandleAction(id config.ActionID) (tea.Cmd, bool) {
+	if p.jqMode {
+		return nil, false
+	}
+	return p.dispatchAction(id)
+}
+
+// dispatchAction is the shared action switch for key and action-ID dispatch.
+func (p *GridPreview) dispatchAction(action config.ActionID) (tea.Cmd, bool) {
+	switch action {
+	case "navigate_up":
+		p.cursorUp()
+		return nil, true
+	case "navigate_down":
+		p.cursorDown()
+		return nil, true
+	case "go_first":
+		p.cursorLine = 0
+		p.ensureCursorVisible()
+		return nil, true
+	case "go_last":
+		if len(p.lines) > 0 {
+			p.cursorLine = len(p.lines) - 1
 		}
+		p.ensureCursorVisible()
+		return nil, true
+	case "half_page_up":
+		p.halfPageUp()
+		return nil, true
+	case "half_page_down":
+		p.halfPageDown()
+		return nil, true
+	case "jq_filter":
+		p.EnterJQMode()
+		return nil, true
+	case "expand_fk":
+		return p.handleExpand()
 	}
 
 	return nil, false

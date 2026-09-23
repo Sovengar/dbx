@@ -113,10 +113,96 @@ func TestKeybindsPane_TxPendingShowsRollback(t *testing.T) {
 	}
 }
 
+// Scenario: The editor announces its Esc binding (close editor).
+func TestKeybindsPane_EditorShowsCloseKey(t *testing.T) {
+	p := paneWith(config.ContextEditor)
+	p.SetEditorOpen(true)
+	if !linesContain(p.renderLines(), "esc Close Editor") {
+		t.Fatalf("editor pane does not show 'esc Close Editor': %v", p.renderLines())
+	}
+}
+
+// Scenario: The pane packs at most 7 keybinds per line and wraps the rest.
+func TestKeybindsPane_MaxSevenKeybindsPerLine(t *testing.T) {
+	p := paneWith(config.ContextGrid)
+	p.SetWidth(1000) // wide enough that only the count cap forces a wrap
+
+	lines := p.renderLines()
+	if len(lines) < 2 {
+		t.Fatalf("expected the grid keybinds to span multiple lines, got %d: %v", len(lines), lines)
+	}
+	for i, line := range lines {
+		if n := strings.Count(line, " · ") + 1; n > maxKeybindsPerLine {
+			t.Fatalf("line %d has %d keybinds (> %d): %q", i, n, maxKeybindsPerLine, line)
+		}
+	}
+	if n := strings.Count(lines[0], " · ") + 1; n != maxKeybindsPerLine {
+		t.Fatalf("first line should be full (%d keybinds), got %d: %q", maxKeybindsPerLine, n, lines[0])
+	}
+}
+
 func TestKeybindsPane_NoTxHidesRollback(t *testing.T) {
 	p := paneWith(config.ContextExplorer)
 	p.SetTxPending(false)
 	if linesContain(p.renderLines(), "Rollback") {
 		t.Fatalf("pane shows rollback without a pending transaction: %v", p.renderLines())
+	}
+}
+
+// Scenario: Sibling actions of a group render as one segment with combined keys.
+func TestKeybindsPane_GridRendersGroups(t *testing.T) {
+	lines := paneWith(config.ContextGrid).renderLines()
+	for _, want := range []string{
+		"hjkl Navigate",
+		"g/G First/Last",
+		"ctrl+u/ctrl+d Half Page",
+		"f1-f9 Go to Page",
+	} {
+		if !linesContain(lines, want) {
+			t.Errorf("grid pane does not show group segment %q: %v", want, lines)
+		}
+	}
+}
+
+// Scenario: The pane shows only the primary key of an action.
+func TestKeybindsPane_ShowsPrimaryKeysOnly(t *testing.T) {
+	lines := paneWith(config.ContextGrid).renderLines()
+	if !linesContain(lines, "n Next Page") {
+		t.Fatalf("grid pane does not show 'n Next Page': %v", lines)
+	}
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "ctrl+right") {
+		t.Errorf("pane leaked the next_page alias 'ctrl+right': %q", joined)
+	}
+	if strings.Contains(joined, "n/]/ctrl+right") {
+		t.Errorf("pane leaked the raw alias list for next_page: %q", joined)
+	}
+}
+
+// Scenario: Conditionally hidden actions do not break grouping.
+func TestKeybindsPane_TxPendingKeepsGroups(t *testing.T) {
+	p := paneWith(config.ContextGrid)
+	p.SetTxPending(true)
+	lines := p.renderLines()
+	if !linesContain(lines, "tx pending") {
+		t.Fatalf("pending-tx segment missing: %v", lines)
+	}
+	if !linesContain(lines, "hjkl Navigate") {
+		t.Fatalf("tx state broke the grouped segments: %v", lines)
+	}
+}
+
+// Scenario: A partially active group shows only the members of the current context.
+func TestKeybindsPane_ExplorerPartialGroup(t *testing.T) {
+	lines := paneWith(config.ContextExplorer).renderLines()
+	joined := strings.Join(lines, "\n")
+	if !linesContain(lines, "j/k Navigate") {
+		t.Fatalf("explorer pane does not show the partial nav group 'j/k Navigate': %v", lines)
+	}
+	if strings.Contains(joined, "Half Page") {
+		t.Errorf("explorer pane rendered the half-page group: %q", joined)
+	}
+	if strings.Contains(joined, "Go to Page") {
+		t.Errorf("explorer pane rendered the goto-page group: %q", joined)
 	}
 }
