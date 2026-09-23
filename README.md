@@ -280,6 +280,7 @@ See [docs/CLI.md](docs/CLI.md) for full reference.
 
 - [Features](docs/FEATURES.md) — DML transactions, action naming, non-keybind prose
 - [Architecture](docs/ARCHITECTURE.md) — Design decisions and patterns
+- [Decisions (ADR)](docs/decisions/) — Architecture decision records
 - [Config](docs/CONFIG.md) — Configuration reference
 - [CLI](docs/CLI.md) — CLI command reference
 

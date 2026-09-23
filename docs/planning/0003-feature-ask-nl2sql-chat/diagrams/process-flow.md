@@ -9,7 +9,7 @@ flowchart LR
     C --> G["diagrams"]
     G --> Z["commit on<br/>feat/ask-nl2sql-chat"]
 
-    P -. "ADR: ask-nl2sql-generic-execution" .-> ADR["docs/decisions/<br/>(to be written)"]
+    P -. "ADR: ask-nl2sql-generic-execution" .-> ADR["docs/decisions/<br/>0001-ask-nl2sql-generic-execution.md"]
     P -. "Risk: single connection +<br/>pending DML tx" .-> R["mitigated: refuse ASK"]
     P -. "Scope cut: no streaming,<br/>no opencode HTTP routing" .-> S["out of scope"]
 ```
