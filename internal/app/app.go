@@ -129,6 +129,7 @@ func NewModel(cfg *config.Config) Model {
 	qs := &store.QueryStore{}
 	qb := querybrowser.New(t.Styles(), qs)
 	ed := editor.NewSQLEditor(t.Styles())
+	ed.SetKeybinds(kbr)
 	ed.SetAutocompleteConfig(cfg.Editor.Autocomplete, cfg.Editor.AutocompleteTrigger)
 	// Resolve the NL→SQL provider once; a nil provider keeps ASK unavailable.
 	// The resolution error is kept so the user sees the real reason (e.g. a

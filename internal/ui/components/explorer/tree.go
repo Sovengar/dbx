@@ -142,38 +142,10 @@ func (t *Tree) ClearFilter() {
 }
 
 func (t *Tree) Update(msg tea.Msg) (tea.Cmd, bool) {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		return t.handleKey(msg)
-	}
-	return nil, false
-}
-
-func (t *Tree) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
-	key := msg.String()
-	switch key {
-	case "j", "down":
-		t.moveDown()
-		return nil, true
-	case "k", "up":
-		t.moveUp()
-		return nil, true
-	case "enter", "l":
-		return t.toggleExpand(), true
-	case "backspace", "h":
-		return t.collapse(), true
-	case "g":
-		t.cursor = 0
-		t.offset = 0
-		return nil, true
-	case "G":
-		t.cursor = len(t.filtered) - 1
-		if t.cursor < 0 {
-			t.cursor = 0
-		}
-		t.clampOffset()
-		return nil, true
-	}
+	// Key handling lives in Explorer, which resolves keys through the registry
+	// and dispatches action IDs (handleAction). The tree keeps no raw-key
+	// fallback: it is unreachable when a resolver is wired, which is always the
+	// case in production.
 	return nil, false
 }
 

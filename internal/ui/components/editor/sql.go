@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/buble/dbx/internal/ai/context"
+	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/theme"
 )
 
@@ -29,6 +30,8 @@ type SQLEditor struct {
 
 	autocompleteEnabled   bool
 	autocompleteMinPrefix int
+
+	keybinds config.Resolver
 }
 
 func NewSQLEditor(styles *theme.Styles) *SQLEditor {
@@ -40,6 +43,12 @@ func NewSQLEditor(styles *theme.Styles) *SQLEditor {
 		autocompleteMinPrefix: 1,
 	}
 }
+
+// SetKeybinds injects the registry resolver the editor uses to dispatch its own
+// actions (autocomplete, history_prev, history_next). It is a setter rather than
+// a constructor parameter to keep NewSQLEditor's contract stable; a nil resolver
+// keeps the widget-local fallback for tests that build an editor in isolation.
+func (e *SQLEditor) SetKeybinds(k config.Resolver) { e.keybinds = k }
 
 // SetAutocompleteConfig enables or disables real-time suggestions and sets the
 // minimum token length before the popup opens on its own. Manual triggering is
@@ -156,13 +165,19 @@ func (e *SQLEditor) Update(msg tea.Msg) (tea.Cmd, bool) {
 func (e *SQLEditor) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	key := msg.String()
 
+	// Registry-owned shortcuts first: the editor dispatches only the actions it
+	// declares in HandledActions. App-owned editor actions (execute_query,
+	// copy_sql, clear_editor, close_editor) are intercepted before Update and
+	// fall through here, keeping the widget-local switch below as the default.
+	if e.keybinds != nil {
+		if action, ok := e.keybinds.Resolve(key, config.ContextEditor); ok {
+			if cmd, handled := e.handleAction(action); handled {
+				return cmd, handled
+			}
+		}
+	}
+
 	switch key {
-	case "ctrl+enter":
-		return nil, false // handled by parent
-
-	case "ctrl+r":
-		return nil, false // handled by parent
-
 	case "ctrl+space":
 		e.triggerAutocomplete()
 		return nil, true
@@ -176,20 +191,6 @@ func (e *SQLEditor) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case "ctrl+u":
 		e.Clear()
 		e.autocomplete.Cancel()
-		return nil, true
-
-	case "ctrl+p":
-		if e.autocomplete.Visible() {
-			e.autocomplete.Cancel()
-		}
-		e.historyPrev()
-		return nil, true
-
-	case "ctrl+n":
-		if e.autocomplete.Visible() {
-			e.autocomplete.Cancel()
-		}
-		e.historyNext()
 		return nil, true
 
 	case "up":
@@ -245,17 +246,6 @@ func (e *SQLEditor) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		e.insertNewline()
 		return nil, true
 
-	case "tab":
-		if e.autocomplete.Visible() {
-			item := e.autocomplete.SelectedItem()
-			if item != nil {
-				e.acceptCompletion(item)
-			}
-			return nil, true
-		}
-		e.insertText("    ")
-		return nil, true
-
 	case "backspace":
 		e.deleteBackward()
 		e.updateAutocompleteAfterEdit()
@@ -279,6 +269,37 @@ func (e *SQLEditor) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 	}
 
+	return nil, false
+}
+
+// handleAction dispatches an editor-owned action resolved from the registry.
+// Returns handled=false for actions the editor does not own, so they fall
+// through to the widget-local handling.
+func (e *SQLEditor) handleAction(action config.ActionID) (tea.Cmd, bool) {
+	switch action {
+	case "history_prev":
+		if e.autocomplete.Visible() {
+			e.autocomplete.Cancel()
+		}
+		e.historyPrev()
+		return nil, true
+	case "history_next":
+		if e.autocomplete.Visible() {
+			e.autocomplete.Cancel()
+		}
+		e.historyNext()
+		return nil, true
+	case "autocomplete":
+		// One action, dual behavior: accept a visible completion, else indent.
+		if e.autocomplete.Visible() {
+			if item := e.autocomplete.SelectedItem(); item != nil {
+				e.acceptCompletion(item)
+			}
+			return nil, true
+		}
+		e.insertText("    ")
+		return nil, true
+	}
 	return nil, false
 }
 
