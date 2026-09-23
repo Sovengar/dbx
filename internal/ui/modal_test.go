@@ -105,3 +105,22 @@ func TestHelpModal_CustomKeyOverride(t *testing.T) {
 		t.Fatalf("modal still shows the default rollback key after override")
 	}
 }
+
+// Scenario: The help modal shows every key, including aliases, and groups by
+// the same registry field the pane uses.
+func TestHelpModal_GridShowsAliasesAndGroups(t *testing.T) {
+	view := ansi.Strip(modalWith(config.NewKeybindRegistry(config.KeybindingsConfig{})).View())
+
+	// next_page is ungrouped, so every alias must be listed on its line.
+	wantLine := "  " + fmt.Sprintf("%-14s", "n, ], ctrl+right") + "Next Page"
+	if !strings.Contains(view, wantLine) {
+		t.Errorf("Grid section is missing the full next_page alias line; want %q", wantLine)
+	}
+
+	// Sibling sets collapse under their shared group label.
+	for _, label := range []string{"Navigate", "First/Last", "Half Page", "Go to Page"} {
+		if !strings.Contains(view, label) {
+			t.Errorf("Grid section is missing the group label %q", label)
+		}
+	}
+}

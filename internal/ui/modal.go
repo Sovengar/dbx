@@ -50,6 +50,10 @@ func (m *HelpModal) Update(msg tea.Msg) (tea.Cmd, bool) {
 	case tea.KeyPressMsg:
 		key := msg.String()
 		switch key {
+		// Overlay exception (ADR 0002 §2): the help modal's close and scroll
+		// keys stay raw on purpose. The modal is an overlay, not a registry
+		// context, so these are documented here instead of promoted into the
+		// keybind inventory.
 		case "esc", "?", "q":
 			m.Hide()
 			return nil, true
@@ -124,8 +128,15 @@ func (m *HelpModal) View() string {
 
 	for _, sec := range modalSections {
 		lines = append(lines, m.styles.Header.Render(sec.Header))
-		for _, a := range m.keybinds.ActionsFor(sec.Context) {
-			lines = append(lines, m.renderAction(a))
+		for _, g := range config.GroupActions(m.keybinds.ActionsFor(sec.Context), m.keybinds.PrimaryKey) {
+			if g.Grouped {
+				lines = append(lines, m.groupLabelLine(g.Label))
+				for _, a := range g.Members {
+					lines = append(lines, m.renderAction(a))
+				}
+				continue
+			}
+			lines = append(lines, m.renderAction(g.Members[0]))
 		}
 		lines = append(lines, "")
 	}
@@ -211,6 +222,11 @@ func (m *HelpModal) renderAction(a config.Action) string {
 		key = "?"
 	}
 	return m.staticLine(key, a.Description)
+}
+
+// groupLabelLine renders the shared label a collapsed group's members sit under.
+func (m *HelpModal) groupLabelLine(label string) string {
+	return "  " + m.styles.TextMuted.Render(label)
 }
 
 func (m *HelpModal) staticLine(key, description string) string {
