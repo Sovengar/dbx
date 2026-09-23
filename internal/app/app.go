@@ -1039,47 +1039,22 @@ func (m Model) executeAskSQL(sql string) tea.Cmd {
 	}
 }
 
-// splitSQL splits a SQL string by top-level semicolons, ignoring semicolons inside strings.
+// splitSQL splits a SQL string by top-level semicolons, ignoring semicolons
+// inside string literals, dollar-quoted strings, quoted identifiers and
+// comments.
 func splitSQL(sql string) []string {
+	masked := maskNonCode(sql)
 	var parts []string
-	var current strings.Builder
-	inSingleQuote := false
-	inDoubleQuote := false
-
+	start := 0
 	for i := 0; i < len(sql); i++ {
-		ch := sql[i]
-
-		if ch == '\'' && !inDoubleQuote {
-			if i+1 < len(sql) && sql[i+1] == '\'' {
-				current.WriteByte(ch)
-				current.WriteByte(ch)
-				i++
-				continue
-			}
-			inSingleQuote = !inSingleQuote
-			current.WriteByte(ch)
-			continue
+		if masked[i] == ';' {
+			parts = append(parts, sql[start:i])
+			start = i + 1
 		}
-
-		if ch == '"' && !inSingleQuote {
-			inDoubleQuote = !inDoubleQuote
-			current.WriteByte(ch)
-			continue
-		}
-
-		if ch == ';' && !inSingleQuote && !inDoubleQuote {
-			parts = append(parts, current.String())
-			current.Reset()
-			continue
-		}
-
-		current.WriteByte(ch)
 	}
-
-	if current.Len() > 0 {
-		parts = append(parts, current.String())
+	if start < len(sql) {
+		parts = append(parts, sql[start:])
 	}
-
 	return parts
 }
 

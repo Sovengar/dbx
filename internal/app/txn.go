@@ -222,7 +222,7 @@ func isSelectOnly(sql string) bool {
 		return false
 	}
 
-	tokens := sqlKeywordTokens(strings.ToUpper(stripSQLLiterals(body)))
+	tokens := sqlKeywordTokens(strings.ToUpper(maskNonCode(body)))
 	if len(tokens) == 0 {
 		return false
 	}
@@ -245,14 +245,30 @@ func isSelectOnly(sql string) bool {
 	return true
 }
 
-// stripSQLLiterals removes string literals, quoted identifiers and comments so
-// keyword scanning cannot be fooled by their contents.
-func stripSQLLiterals(sql string) string {
-	var b strings.Builder
-	for i := 0; i < len(sql); i++ {
-		ch := sql[i]
+// maskNonCode returns a copy of sql with string literals (including E-strings
+// and dollar-quoted strings), quoted identifiers and comments replaced by
+// spaces, preserving byte length. Callers can then find top-level separators or
+// keywords without being fooled by their contents.
+func maskNonCode(sql string) string {
+	out := []byte(sql)
+	blank := func(from, to int) {
+		if from < 0 {
+			from = 0
+		}
+		if to > len(out) {
+			to = len(out)
+		}
+		for i := from; i < to; i++ {
+			if out[i] != '\n' {
+				out[i] = ' '
+			}
+		}
+	}
+
+	for i := 0; i < len(sql); {
 		switch {
-		case ch == '\'':
+		case sql[i] == '\'':
+			start := i
 			i++
 			for i < len(sql) {
 				if sql[i] == '\'' {
@@ -260,34 +276,108 @@ func stripSQLLiterals(sql string) string {
 						i += 2
 						continue
 					}
+					i++
 					break
 				}
 				i++
 			}
-			b.WriteByte(' ')
-		case ch == '"':
-			i++
-			for i < len(sql) && sql[i] != '"' {
+			blank(start, i)
+		case (sql[i] == 'e' || sql[i] == 'E') && i+1 < len(sql) && sql[i+1] == '\'' &&
+			(i == 0 || !isSQLIdentChar(sql[i-1])):
+			// E-string: backslash escapes are honored.
+			start := i
+			i += 2
+			for i < len(sql) {
+				if sql[i] == '\\' && i+1 < len(sql) {
+					i += 2
+					continue
+				}
+				if sql[i] == '\'' {
+					if i+1 < len(sql) && sql[i+1] == '\'' {
+						i += 2
+						continue
+					}
+					i++
+					break
+				}
 				i++
 			}
-			b.WriteByte(' ')
-		case ch == '-' && i+1 < len(sql) && sql[i+1] == '-':
+			blank(start, i)
+		case sql[i] == '"':
+			start := i
+			i++
+			for i < len(sql) {
+				if sql[i] == '"' {
+					if i+1 < len(sql) && sql[i+1] == '"' {
+						i += 2
+						continue
+					}
+					i++
+					break
+				}
+				i++
+			}
+			blank(start, i)
+		case sql[i] == '-' && i+1 < len(sql) && sql[i+1] == '-':
+			start := i
 			for i < len(sql) && sql[i] != '\n' {
 				i++
 			}
-			b.WriteByte(' ')
-		case ch == '/' && i+1 < len(sql) && sql[i+1] == '*':
+			blank(start, i)
+		case sql[i] == '/' && i+1 < len(sql) && sql[i+1] == '*':
+			start := i
 			i += 2
 			for i+1 < len(sql) && !(sql[i] == '*' && sql[i+1] == '/') {
 				i++
 			}
-			i++
-			b.WriteByte(' ')
+			if i+1 < len(sql) {
+				i += 2
+			} else {
+				i = len(sql)
+			}
+			blank(start, i)
+		case sql[i] == '$':
+			if end, ok := matchDollarQuote(sql, i); ok {
+				blank(i, end)
+				i = end
+			} else {
+				i++
+			}
 		default:
-			b.WriteByte(ch)
+			i++
 		}
 	}
-	return b.String()
+	return string(out)
+}
+
+// matchDollarQuote reports the end index of the dollar-quoted string starting
+// at i (sql[i] == '$'), if one starts there and is terminated.
+func matchDollarQuote(sql string, i int) (int, bool) {
+	j := i + 1
+	for j < len(sql) && sql[j] != '$' {
+		if !isSQLIdentChar(sql[j]) {
+			return 0, false
+		}
+		j++
+	}
+	if j >= len(sql) || sql[j] != '$' {
+		return 0, false
+	}
+	tag := sql[i : j+1]
+	idx := strings.Index(sql[j+1:], tag)
+	if idx < 0 {
+		return 0, false
+	}
+	return j + 1 + idx + len(tag), true
+}
+
+// isSQLIdentChar reports whether b can appear in an identifier or dollar-quote
+// tag.
+func isSQLIdentChar(b byte) bool {
+	return b == '_' ||
+		(b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9')
 }
 
 // sqlKeywordTokens splits cleaned SQL into upper-case keyword-ish tokens.

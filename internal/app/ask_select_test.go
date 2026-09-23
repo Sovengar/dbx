@@ -33,6 +33,14 @@ func TestIsSelectOnly(t *testing.T) {
 		{"multiple statements", "SELECT 1; DELETE FROM users", false},
 		{"with values only", "WITH t AS (VALUES (1)) SELECT * FROM t", true},
 		{"empty", "   ", false},
+		// Dollar-quoted and E-string literals must not be split or scanned.
+		{"dollar-quoted semicolon", "SELECT $q$a;b$q$", true},
+		{"dollar-quoted keyword", "SELECT $q$DELETE FROM users$q$", true},
+		{"dollar-quoted then delete", "SELECT $q$;$q$; DELETE FROM users", false},
+		{"tagged dollar quote", "SELECT $tag$a;b$tag$", true},
+		{"e-string escaped quote", `SELECT E'\'; DROP TABLE t; --'`, true},
+		{"e-string then delete", `SELECT E'x'; DELETE FROM users`, false},
+		{"standard string backslash", `SELECT 'a\'; DELETE FROM users`, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
