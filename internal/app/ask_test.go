@@ -477,6 +477,20 @@ func TestAsk_NoProvider(t *testing.T) {
 	}
 }
 
+// Scenario: A configured provider that failed to resolve surfaces the reason
+func TestAsk_ProviderResolutionErrorSurfaced(t *testing.T) {
+	m := newAskTestModel(t, nil)
+	m.aiProviderErr = fmt.Errorf("API key not found: set OPENAI_API_KEY env var")
+	m = openAsk(t, m)
+
+	if m.askOpen || m.ask.IsVisible() {
+		t.Fatal("ASK opened without an AI provider")
+	}
+	if !lastToastContains(m, "OPENAI_API_KEY") {
+		t.Fatalf("toast = %q, want the resolution error", lastToastText(t, m))
+	}
+}
+
 // Scenario: A pending DML transaction blocks ASK execution
 func TestAsk_PendingTxBlocksExecution(t *testing.T) {
 	provider := &fakeProvider{name: "fake", sql: "SELECT 1"}

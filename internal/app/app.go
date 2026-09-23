@@ -101,6 +101,7 @@ type Model struct {
 	ask                        *ask.Ask
 	askOpen                    bool
 	aiProvider                 nl2sql.Provider
+	aiProviderErr              error
 	askSchemaText              string
 	askContextHint             string
 	runner                     *statementRunner
@@ -129,7 +130,9 @@ func NewModel(cfg *config.Config) Model {
 	ed := editor.NewSQLEditor(t.Styles())
 	ed.SetAutocompleteConfig(cfg.Editor.Autocomplete, cfg.Editor.AutocompleteTrigger)
 	// Resolve the NL→SQL provider once; a nil provider keeps ASK unavailable.
-	aiProvider, _ := nl2sql.Resolve(nl2sql.Config{
+	// The resolution error is kept so the user sees the real reason (e.g. a
+	// missing API key) instead of a generic "not configured".
+	aiProvider, aiProviderErr := nl2sql.Resolve(nl2sql.Config{
 		Provider:  cfg.AI.Provider,
 		Model:     cfg.AI.Model,
 		Providers: cfg.AI.Nl2sqlProviders(),
@@ -156,6 +159,7 @@ func NewModel(cfg *config.Config) Model {
 		queryBrowser:       qb,
 		ask:                ask.New(t.Styles()),
 		aiProvider:         aiProvider,
+		aiProviderErr:      aiProviderErr,
 	}
 }
 
@@ -942,8 +946,12 @@ func (m Model) executeQuery(sql string) tea.Cmd {
 // configured so the user gets a clear message instead of a dead pane.
 func (m Model) handleAskOpen() (tea.Model, tea.Cmd) {
 	if m.aiProvider == nil {
-		appDebugLog("Ask: no AI provider configured")
-		m.toast.ShowError("No AI provider configured")
+		reason := "No AI provider configured"
+		if m.aiProviderErr != nil {
+			reason = fmt.Sprintf("No AI provider configured: %v", m.aiProviderErr)
+		}
+		appDebugLog("Ask: provider unavailable: %s", reason)
+		m.toast.ShowError(reason)
 		return m, nil
 	}
 	if m.ask == nil {
