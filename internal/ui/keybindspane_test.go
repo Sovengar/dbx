@@ -179,6 +179,19 @@ func TestKeybindsPane_ShowsPrimaryKeysOnly(t *testing.T) {
 	}
 }
 
+// Scenario: Conditionally hidden actions do not break grouping.
+func TestKeybindsPane_TxPendingKeepsGroups(t *testing.T) {
+	p := paneWith(config.ContextGrid)
+	p.SetTxPending(true)
+	lines := p.renderLines()
+	if !linesContain(lines, "tx pending") {
+		t.Fatalf("pending-tx segment missing: %v", lines)
+	}
+	if !linesContain(lines, "hjkl Navigate") {
+		t.Fatalf("tx state broke the grouped segments: %v", lines)
+	}
+}
+
 // Scenario: A partially active group shows only the members of the current context.
 func TestKeybindsPane_ExplorerPartialGroup(t *testing.T) {
 	lines := paneWith(config.ContextExplorer).renderLines()
