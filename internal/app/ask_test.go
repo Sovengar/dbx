@@ -11,6 +11,7 @@ import (
 	"github.com/buble/dbx/internal/ai/nl2sql"
 	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/buble/dbx/internal/ui/components/ask"
+	"github.com/buble/dbx/internal/ui/components/grid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -807,7 +808,7 @@ func TestAsk_StaleExecutionIgnored(t *testing.T) {
 // Scenario: An in-flight read-only ASK query blocks other DB commands
 func TestAsk_ReadOnlyInFlightBlocksEditorQuery(t *testing.T) {
 	runner, _ := newAskRunner(queryResult(), nil)
-	runner.readOnlyActive = true // ASK execution still in flight
+	runner.readOnlyActive.Store(true) // ASK execution still in flight
 	m := newAskTestModel(t, &fakeProvider{name: "fake"})
 	m.runner = runner
 
@@ -821,5 +822,28 @@ func TestAsk_ReadOnlyInFlightBlocksEditorQuery(t *testing.T) {
 	}
 	if msg.err == nil {
 		t.Fatal("editor query ran while a read-only ASK query was active")
+	}
+}
+
+// Scenario: An in-flight read-only ASK query blocks the grid commit path
+// (which writes through m.conn directly, not the runner).
+func TestAsk_ReadOnlyInFlightBlocksGridCommit(t *testing.T) {
+	dsn := testDSN(t)
+	conn := connectTestDB(t, dsn)
+	runner := newStatementRunner(conn)
+	runner.readOnlyActive.Store(true)
+	m := newAskTestModel(t, &fakeProvider{name: "fake"})
+	m.conn = conn
+	m.runner = runner
+
+	m, _ = press(t, m, grid.GridCommitPendingMsg{
+		Schema:  "public",
+		Table:   "users",
+		Queries: []string{"UPDATE users SET name = 'x'"},
+		Args:    [][]interface{}{{}},
+	})
+
+	if !lastToastContains(m, "read-only ASK query is still running") {
+		t.Fatalf("toast = %q, want the busy refusal", lastToastText(t, m))
 	}
 }
