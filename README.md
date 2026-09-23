@@ -6,40 +6,49 @@ dbx is a terminal UI for databases designed for both humans and AI agents.
 
 ## Features
 
+> **Keybindings**: press `?` inside dbx for the full, always-current keybind
+> reference. The TUI is the single source of truth — this README does not list
+> keys.
+
 ### Grid
 
-> **Draft model**: All edits, inserts, and deletes are staged locally (with color feedback). Press `Ctrl+S` to dump the generated SQL into the editor for review/edit/copy. Press `D` to discard.
+> **Draft model**: All edits, inserts, and deletes are staged locally (with
+> color feedback). Dump the generated SQL into the editor for review, or discard
+> everything.
 
-| Action                   | Behavior                                                                                          |
-| ------------------------ | ------------------------------------------------------------------------------------------------- |
-| Yank one row (`y`)       | Copies the row in the selected format (SQL, JSON, CSV) to clipboard                               |
-| Yank multiple rows (`y`) | Exports to file in the same directory as `.dbx.toml` (`<schema>_<table>.<ext>`)                   |
-| Sort (`s`)               | Cycles ASC → DESC → none on current column (server-side `ORDER BY`)                               |
-| Filter (`/`)             | Inline WHERE clause with autocomplete for columns, operators, and values                          |
-| Edit cell (`enter`)      | Inline editing with type-aware parsing (int, float, bool), stores draft locally (blue cell)       |
-| Insert row (`i`)         | Staged insert: creates a pending row in the grid (shown in green)                                 |
-| Delete row (`d`)         | Stages row for deletion (red)                                                                      |
-| Dump SQL to editor (`Ctrl+S`) | Generates SQL for all drafts and opens it in the editor for review/edit/copy; running it commits the transaction |
-| Discard all (`D`)        | Discards all pending changes, restores original values (press twice to confirm)                   |
-| Multi-select (`space`)   | Toggles row selection for bulk operations                                                         |
-| FK navigate (`o`)        | Follow foreign key: loads referenced table with FK filter AND existing WHERE, syncs explorer     |
-| Go back (`H`)            | Return to previous table in navigation history, restores cursor and filter                       |
-| Find column (`f`)        | Fuzzy search to jump to a column by name                                                          |
-| Pagination               | `n`/`p` next/prev page, `N`/`P` first/last page, `F1`–`F9` jump, digit keys for multi-digit pages |
-| Preview                  | Right panel shows selected row as highlighted JSON, autoclosed when width < 100                   |
-| Preview FK cell          | If the cursor is on a FK cell, the preview shows the referenced row instead of the current one     |
-| JQ Filter (`/`)          | Filter/navigate JSON in preview with jq expressions, autocomplete, persistent history             |
+- **Draft editing** — Edits, inserts and deletes are staged before hitting the
+  database; drafts are color-coded (green insert, blue edit, red delete).
+  Dumping the SQL opens it in the editor; running it commits the transaction.
+  Discarding restores the original values.
+- **Yank** — Copy the selected row (SQL/JSON/CSV) to the clipboard, or export
+  multiple selected rows to a file next to `.dbx.toml`.
+- **Sort & filter** — Server-side `ORDER BY` cycling ASC → DESC → none, and an
+  inline WHERE clause with autocomplete for columns, operators and values.
+- **Pagination** — Next/previous page, jump to first/last page, and jump to a
+  specific page.
+- **Navigation** — Follow foreign keys (loads the referenced table with the FK
+  filter and existing WHERE), and go back through navigation history restoring
+  cursor and filter.
+- **Find column** — Fuzzy search to jump to a column by name.
+- **Preview** — A right panel shows the selected row as highlighted JSON (or the
+  referenced row when the cursor is on a FK cell), autoclosed on narrow
+  terminals. Filter/navigate the JSON with jq expressions, autocomplete and
+  persistent history.
 
 #### Grid Modes
 
-The grid has two modes displayed in the bottom-left corner:
+The grid displays its current mode in the bottom-left corner:
 
-- **NORMAL** — Default mode. Navigate with `hjkl`, `G`/`g`, `Ctrl+u`/`Ctrl+d`.
-- **EDIT** — Active when editing a cell. Type to modify, `enter`/`tab` to confirm cell and move, `Esc` to cancel edit.
+- **NORMAL** — navigate rows and columns.
+- **EDIT** — type to modify a cell, confirm to move on, `Esc` to cancel the
+  edit (without discarding any draft).
+- **FILTER** — column find.
+- **WHERE FILTER** — type a WHERE clause; applying it re-queries the database.
 
 #### Draft-based Editing
 
-All changes (edits, inserts, deletes) are staged locally before being committed to the database:
+All changes (edits, inserts, deletes) are staged locally before being committed
+to the database:
 
 | Color  | Meaning                     |
 | ------ | --------------------------- |
@@ -47,76 +56,40 @@ All changes (edits, inserts, deletes) are staged locally before being committed 
 | 🔵 Blue   | Modified cell (edit draft)  |
 | 🔴 Red    | Row marked for deletion     |
 
-- **`Ctrl+S`** — Generates SQL for all drafts (INSERTs + UPDATEs + DELETEs) and opens it in the editor. You can modify, review, and execute from there; executing it commits the transaction (the editor title shows `commit on run`).
-- **`D`** — Discard all pending changes. Press twice to confirm. Restores original values.
-- **`Esc`** — Exits edit mode but does **NOT** discard drafts. Drafts persist with their colors.
-
-No database changes occur until you execute the SQL from the editor with `Ctrl+Enter`.
-
+No database changes occur until you execute the generated SQL from the editor.
 Executing the SQL dumped from the grid commits its transaction when the
 execution finishes, so the draft edits become durable. DML typed manually in the
-editor stays inside an open transaction until you press `U` to roll it back or
-run the next statement (which commits it).
-See [DML Transactions](docs/KEYBINDS.md#dml-transactions).
+editor stays inside an open transaction until you roll it back or run the next
+statement (which commits it first). See
+[DML Transactions](docs/FEATURES.md#dml-transactions).
 
 ### Explorer
 
-| Action                   | Behavior                                             |
-| ------------------------ | ---------------------------------------------------- |
-| Open table (`enter`)     | Loads table data into grid                           |
-| Preview table (`Tab`)    | Opens explorer-preview with table details (full-screen) |
-| Toggle schema (`space`)   | Collapse schema (on table) or toggle schema (on schema) |
-| Filter (`/`)             | Fuzzy filter across all table names                  |
-| New table (`n`)          | Opens editor pre-filled with `CREATE TABLE` template |
-| Drop table (`d`)         | Opens editor pre-filled with `DROP TABLE`            |
-| View DDL (`v`)           | Opens editor with `pg_get_tabledef` query            |
+Schema tree with fuzzy table filtering, create/drop table templates, DDL view,
+and expand/collapse. Press `?` for the keys.
 
 ### Explorer Preview
 
-Full-screen table detail view with tabbed panels. Open with `Tab` from explorer on any table.
+Full-screen table detail view with tabbed panels: Overview (sizes, row stats,
+vacuum status, counts), Columns, Constraints, Foreign Keys, Indexes, and an
+Entity-Relationship diagram. Open it from any table in the explorer.
 
-| Action                   | Behavior                                             |
-| ------------------------ | ---------------------------------------------------- |
-| Overview (`1`)           | Dashboard: sizes, row stats, vacuum status, counts   |
-| Columns (`2`)            | Column names, types, nullable, defaults              |
-| Constraints (`3`)        | PKs, UNIQUEs, CHECKs with column list               |
-| Foreign Keys (`4`)       | FK references with column and target table           |
-| Indexes (`5`)            | Index names, uniqueness, definitions                 |
-| ERE Diagram (`6`)        | Entity-Relationship diagram (placeholder)            |
-| Back (`Tab`/`Esc`)       | Return to explorer                                   |
+### Query Browser
 
-### Query Browser (`Q`)
+Persistent query history and favorites, isolated per project. Browse, favorite,
+delete, filter, and load a query into the editor. Every executed query is saved
+automatically; duplicates are deduplicated and the list is capped at 500 entries
+per project.
 
-Persistent query history and favorites, isolated per project.
-
-| Action | Behavior |
-|--------|----------|
-| Open (`Q`) | Opens the query browser overlay |
-| Navigate (`j`/`k`) | Move up/down through the list |
-| Jump (`g`/`G`) | First/last entry |
-| Load (`Enter`) | Load selected query into the editor |
-| Favorite (`f`) | Toggle favorite on the selected entry |
-| Delete (`d`) | Delete the selected entry |
-| Filter (`/`) | Fuzzy search across all entries |
-| Switch tab (`Tab`) | Toggle between History and Favorites |
-| Close (`Esc`) | Close the browser |
-
-Every executed query is automatically saved. Duplicates are deduplicated (moved to top). Capped at 500 entries per project.
-
-Storage: `~/.local/state/dbx/projects/{project_name}/query_history.json`. Queries are fully isolated between projects — switching project shows only that project's history.
+Storage: `~/.local/state/dbx/projects/{project_name}/query_history.json`.
+Queries are fully isolated between projects.
 
 ### SQL Editor
 
-| Action                      | Behavior                                                         |
-| --------------------------- | ---------------------------------------------------------------- |
-| Execute (`ctrl+enter`)      | Runs SQL against database, results shown in grid                 |
-| Autocomplete (real-time)    | Context-aware popup as you type: keywords, schemas, tables, columns |
-| Navigate suggestions (`↑`/`↓`) | Move through completion list                               |
-| Accept suggestion (`Tab`/`Enter`) | Insert selected completion into editor                    |
-| Close suggestions (`Esc`)   | Dismiss autocomplete popup                                       |
-| History (`ctrl+p`/`ctrl+n`) | Navigate previous/next executed queries                          |
-| Syntax highlighting         | Keywords, strings, numbers, comments, functions, operators       |
-| Auto-refresh                | Schema reloads after DDL statements (CREATE/DROP/ALTER/TRUNCATE) |
+Run SQL against the database with results shown in the grid. Features include
+real-time, context-aware autocomplete (keywords, schemas, tables, columns),
+previous/next executed-query history, syntax highlighting, and automatic schema
+refresh after DDL.
 
 #### Autocomplete Context
 
@@ -134,8 +107,8 @@ the active clause and ignore text inside strings and comments:
 | Default (typing a keyword) | SQL keywords + functions |
 
 Prefix matches are ranked above fuzzy matches, a token you already typed is
-never offered back, and `Tab`/`Enter` replaces that token in place (accepting a
-keyword twice never duplicates it).
+never offered back, and accepting a completion replaces that token in place
+(accepting a keyword twice never duplicates it).
 
 ```toml
 [editor]
@@ -145,30 +118,27 @@ autocomplete_trigger = 1   # min characters before the popup opens on its own
 
 ### AI (NL → SQL)
 
-| Action         | Behavior                                                                        |
-| -------------- | ------------------------------------------------------------------------------- |
-| Ask (`a`)      | Type natural language, dbx generates SQL, shows for review, executes on confirm |
-| CLI `dbx ask`  | Same flow from terminal, with `--json`, `--sql-only` flags                      |
-| Multi-provider | Anthropic, OpenAI, DeepSeek, Qwen, OpenCode, and any OpenAI-compatible endpoint |
+Ask a question in natural language and dbx generates SQL for review before
+executing. The same flow is available from the terminal via `dbx ask`, with
+`--json` and `--sql-only` flags. Supports Anthropic, OpenAI, DeepSeek, Qwen,
+OpenCode, and any OpenAI-compatible endpoint.
+
+> The in-TUI Ask handler is not wired yet; the action is declared and reserved so
+> its binding will not be reassigned. Use `dbx ask` from the CLI meanwhile.
 
 ### Navigation & UI
 
-| Action                | Behavior                                                             |
-| --------------------- | -------------------------------------------------------------------- |
-| Top bar               | Shows active pane, `schema.table`, row count, WHERE filter, breadcrumbs |
-| Bottom bar            | Global keybinds (always visible) + contextual keybinds per pane      |
-| Focus cycling (`e`)  | Toggle Explorer ↔ Grid                                               |
-| Switch connection (`c`) | Open picker to switch between projects (toggle active/inactive)  |
-| Query Browser (`Q`) | Browse history & favorites, load into editor                         |
-| Grid Preview (`Tab`) | Focus row preview (from grid), Tab/Esc to return                     |
-| Explorer Preview (`Tab`) | Focus table details (from explorer), full-screen                  |
-| JQ Filter (`/`)     | Filter JSON in preview with jq expressions, autocomplete, history    |
-| Command palette (`:`) | Fuzzy search for any command (refresh, export, execute, focus, etc.) |
-| Help (`?`)            | Overlay showing all keybinds, scrollable                             |
-| DML rollback (`U`)    | DML runs in an open transaction; `U` rolls it back (the next statement commits it first) |
-| Mouse                 | Click, double-click, scroll wheel, header click to sort              |
-| Toast notifications   | Success/error/info feedback for all operations                       |
-| Themes                | System, dark, light, nord, gruvbox, catppuccin                       |
+- **Top bar** — active pane, `schema.table`, row count, WHERE filter, breadcrumbs.
+- **Bottom bar** — keybinds of the current view, derived from the registry.
+- **Connection picker** — switch between projects, toggling active/inactive.
+- **Grid Preview** — focus row preview from the grid.
+- **Explorer Preview** — focus table details from the explorer.
+- **Command palette** — fuzzy search for any command (refresh, export, execute,
+  focus, …).
+- **Help** — scrollable overlay with every keybind, including widget modes.
+- **Mouse** — click, double-click, scroll wheel, header click to sort.
+- **Toast notifications** — success/error/info feedback.
+- **Themes** — system, dark, light, nord, gruvbox, catppuccin.
 
 ## Dependencies
 
@@ -208,112 +178,13 @@ dbx ask "show me all active users"
 
 ## Keybinds
 
-### Global
+Press `?` inside dbx to open the help overlay. It lists every keybind, grouped
+by view, plus the widget modes (EDIT, FILTER, WHERE FILTER, query browser,
+connection picker) and mouse actions.
 
-| Key | Action                     |
-| --- | -------------------------- |
-| `q` | Quit                       |
-| `?` | Help                       |
-| `:` | Command palette            |
-| `e` | Toggle explorer            |
-| `E` | Toggle editor              |
-| `c` | Switch connection          |
-| `Q` | Query Browser              |
-| `a` | Ask AI (NL→SQL)            |
-| `x` | Export                     |
-| `U` | Rollback pending transaction |
-
-### Explorer
-
-| Key | Action                     |
-| --- | -------------------------- |
-| `j`/`k` | Navigate down/up      |
-| `g`/`G` | First/last node        |
-| `Enter`/`l` | Open table data   |
-| `Tab` | Open explorer-preview  |
-| `Backspace`/`h` | Collapse / parent |
-| `Space` | Collapse schema      |
-| `/` | Filter tables              |
-| `n` | New table                  |
-| `d` | Drop table                 |
-| `v` | View DDL                   |
-| `r` | Refresh schema             |
-
-### Grid — NORMAL mode
-
-| Key | Action                     |
-| --- | -------------------------- |
-| `j`/`k` | Row down/up           |
-| `h`/`l` | Column left/right     |
-| `g`/`G` | First/last row        |
-| `Ctrl+U`/`Ctrl+D` | Half page up/down |
-| `n`/`p` or `]`/`[` | Next/prev page |
-| `P`/`N` | First/last page       |
-| `F1`-`F9` | Go to page          |
-| `Tab` | Focus row preview         |
-| `enter` | Enter EDIT mode          |
-| `d` | Delete row                |
-| `i` | Insert row                |
-| `space` | Select row              |
-| `s` | Sort column               |
-| `/` | Filter (WHERE)            |
-| `f` | Find column               |
-| `y` | Export (SQL/JSON/CSV)     |
-| `o` | Open FK reference         |
-| `H` | Go back                   |
-| `r` | Refresh data              |
-| `Ctrl+S` | Dump drafts SQL to editor |
-| `D` | Discard drafts            |
-| `u` | Undo draft on selected row |
-
-### Grid — EDIT mode
-
-| Key | Action                     |
-| --- | -------------------------- |
-| `Esc` | Cancel edit              |
-| `Enter`/`Tab` | Commit cell, next col |
-| `Up`/`Down` | Prev/next row       |
-
-### Grid Preview
-
-| Key | Action                     |
-| --- | -------------------------- |
-| `Tab` | Focus row preview (from grid) |
-| `Esc` | Back to grid              |
-| `j`/`k` or `↑`/`↓` | Navigate down/up (cursor) |
-| `Enter` | Expand FK / Collapse     |
-| `g`/`G` | First/last line       |
-| `Ctrl+U`/`Ctrl+D` | Half page up/down |
-| `e` | Focus explorer             |
-| `/` | JQ filter (autocomplete)   |
-| `Ctrl+P`/`Ctrl+N` | JQ history prev/next |
-| `Ctrl+Space` | Toggle autocomplete  |
-
-### Explorer Preview
-
-| Key | Action                     |
-| --- | -------------------------- |
-| `Tab`/`Esc` | Back to explorer     |
-| `1` | Overview tab                |
-| `2` | Columns tab                 |
-| `3` | Constraints tab             |
-| `4` | Foreign Keys tab            |
-| `5` | Indexes tab                 |
-| `6` | ERE Diagram tab (placeholder) |
-
-### Editor
-
-| Key | Action                     |
-| --- | -------------------------- |
-| `Ctrl+Enter` | Execute query     |
-| `Ctrl+U` | Clear editor          |
-| `Ctrl+Y` | Copy SQL to clipboard |
-| `Tab`/`Enter` | Accept autocomplete suggestion |
-| `↑`/`↓` | Navigate suggestions  |
-| `Esc` | Close autocomplete / close editor |
-| `Ctrl+P`/`Ctrl+N` | History prev/next |
-
-Press `?` anywhere to see all keybinds.
+The same registry that renders that overlay also drives execution, so what you
+see is exactly what runs. Override any action under `[keybindings.custom]` in
+your config, keyed by action ID.
 
 ## Configuration
 
@@ -410,8 +281,8 @@ See [docs/CLI.md](docs/CLI.md) for full reference.
 
 ## Documentation
 
+- [Features](docs/FEATURES.md) — DML transactions, action naming, non-keybind prose
 - [Architecture](docs/ARCHITECTURE.md) — Design decisions and patterns
-- [Keybinds](docs/KEYBINDS.md) — Complete keybind reference
 - [Config](docs/CONFIG.md) — Configuration reference
 - [CLI](docs/CLI.md) — CLI command reference
 
