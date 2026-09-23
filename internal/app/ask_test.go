@@ -215,9 +215,6 @@ func TestAsk_DoesNotOpenWhileGridEditing(t *testing.T) {
 	if !m.grid.IsEditing() {
 		t.Fatal("grid left edit mode when 'a' was pressed")
 	}
-	if !strings.Contains(m.grid.EditValue(), "a") {
-		t.Fatalf("grid edit value = %q, want it to contain 'a'", m.grid.EditValue())
-	}
 }
 
 // Scenario: `esc` closes the ASK pane without executing

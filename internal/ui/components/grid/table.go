@@ -860,11 +860,6 @@ func (g *Grid) ContextHint() (schema, table, where string) {
 	return g.schema, g.tableName, g.whereClause
 }
 
-// EditValue returns the text currently held by the cell editor.
-func (g *Grid) EditValue() string {
-	return g.editValue
-}
-
 func (g *Grid) SortColumn() string {
 	return g.header.SortColumn()
 }
