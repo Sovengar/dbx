@@ -46,15 +46,22 @@ func hasKeywordPrefix(sql, keyword string) bool {
 type statementRunner struct {
 	conn  postgres.Querier
 	begin func(ctx context.Context) (pgx.Tx, error)
-	exec  func(ctx context.Context, q postgres.Querier, sql string) (*postgres.QueryResult, error)
-	tx    pgx.Tx
+	// beginReadOnly opens a server-enforced READ ONLY transaction. It backs
+	// the ASK path so the database itself rejects any mutation even if the
+	// statement passes the client-side validation.
+	beginReadOnly func(ctx context.Context) (pgx.Tx, error)
+	exec          func(ctx context.Context, q postgres.Querier, sql string) (*postgres.QueryResult, error)
+	tx            pgx.Tx
 }
 
 func newStatementRunner(conn *pgx.Conn) *statementRunner {
 	return &statementRunner{
 		conn:  conn,
 		begin: conn.Begin,
-		exec:  postgres.ExecuteQuery,
+		beginReadOnly: func(ctx context.Context) (pgx.Tx, error) {
+			return conn.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+		},
+		exec: postgres.ExecuteQuery,
 	}
 }
 
@@ -147,4 +154,145 @@ func (r *statementRunner) rollback(ctx context.Context) (bool, error) {
 		return true, fmt.Errorf("failed to roll back transaction: %w", err)
 	}
 	return true, nil
+}
+
+// executeReadOnly runs sql inside a server-enforced READ ONLY transaction and
+// discards it (nothing is ever committed). It refuses to run while a DML
+// transaction is pending because pgx cannot open a second transaction on the
+// same connection.
+func (r *statementRunner) executeReadOnly(ctx context.Context, sql string) (*postgres.QueryResult, error) {
+	if r.pending() {
+		return nil, fmt.Errorf("a DML transaction is pending: commit or roll back first")
+	}
+	if r.beginReadOnly == nil {
+		return nil, fmt.Errorf("read-only transactions are not available")
+	}
+	tx, err := r.beginReadOnly(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin read-only transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	result, err := r.exec(ctx, tx, sql)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// forbiddenStatementKeywords are mutation/DDL keywords that must never appear
+// in a statement run through the ASK read-only path. WITH is intentionally
+// absent: a data-modifying CTE is caught by its inner DELETE/INSERT/UPDATE.
+var forbiddenStatementKeywords = map[string]bool{
+	"INSERT":   true,
+	"UPDATE":   true,
+	"DELETE":   true,
+	"MERGE":    true,
+	"TRUNCATE": true,
+	"ALTER":    true,
+	"DROP":     true,
+	"CREATE":   true,
+	"GRANT":    true,
+	"REVOKE":   true,
+	"COPY":     true,
+	"CALL":     true,
+	"DO":       true,
+	"VACUUM":   true,
+	"REINDEX":  true,
+	"CLUSTER":  true,
+	"REFRESH":  true,
+	"IMPORT":   true,
+}
+
+// isSelectOnly reports whether sql is a single SELECT or WITH ... SELECT
+// statement. It is the client-side half of the SELECT-only defense; the
+// READ ONLY transaction is the authoritative one. It tolerates leading
+// comments and stray semicolons, and rejects data-modifying CTEs.
+func isSelectOnly(sql string) bool {
+	body := ""
+	count := 0
+	for _, stmt := range splitSQL(sql) {
+		if strings.TrimSpace(stmt) == "" {
+			continue
+		}
+		body = stmt
+		count++
+	}
+	if count != 1 {
+		return false
+	}
+
+	tokens := sqlKeywordTokens(strings.ToUpper(stripSQLLiterals(body)))
+	if len(tokens) == 0 {
+		return false
+	}
+	if tokens[0] != "SELECT" && tokens[0] != "WITH" {
+		return false
+	}
+	for _, tok := range tokens {
+		if forbiddenStatementKeywords[tok] {
+			return false
+		}
+	}
+	if tokens[0] == "WITH" {
+		for _, tok := range tokens {
+			if tok == "SELECT" {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
+// stripSQLLiterals removes string literals, quoted identifiers and comments so
+// keyword scanning cannot be fooled by their contents.
+func stripSQLLiterals(sql string) string {
+	var b strings.Builder
+	for i := 0; i < len(sql); i++ {
+		ch := sql[i]
+		switch {
+		case ch == '\'':
+			i++
+			for i < len(sql) {
+				if sql[i] == '\'' {
+					if i+1 < len(sql) && sql[i+1] == '\'' {
+						i += 2
+						continue
+					}
+					break
+				}
+				i++
+			}
+			b.WriteByte(' ')
+		case ch == '"':
+			i++
+			for i < len(sql) && sql[i] != '"' {
+				i++
+			}
+			b.WriteByte(' ')
+		case ch == '-' && i+1 < len(sql) && sql[i+1] == '-':
+			for i < len(sql) && sql[i] != '\n' {
+				i++
+			}
+			b.WriteByte(' ')
+		case ch == '/' && i+1 < len(sql) && sql[i+1] == '*':
+			i += 2
+			for i+1 < len(sql) && !(sql[i] == '*' && sql[i+1] == '/') {
+				i++
+			}
+			i++
+			b.WriteByte(' ')
+		default:
+			b.WriteByte(ch)
+		}
+	}
+	return b.String()
+}
+
+// sqlKeywordTokens splits cleaned SQL into upper-case keyword-ish tokens.
+func sqlKeywordTokens(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return !(r >= 'A' && r <= 'Z') && r != '_'
+	})
 }
