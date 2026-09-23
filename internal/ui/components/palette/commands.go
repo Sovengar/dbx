@@ -48,7 +48,6 @@ func DefaultCommands() []command {
 		{Name: "Preview Cursor Up", Alias: "preview-up", Action: "preview_cursor_up", Section: SectionNav},
 		{Name: "Preview Cursor Down", Alias: "preview-down", Action: "preview_cursor_down", Section: SectionNav},
 		{Name: "Preview → Explorer", Alias: "preview-explorer", Action: "toggle_explorer_focus", Section: SectionNav},
-		{Name: "Preview JQ Filter", Alias: "preview-jq", Action: "jq_filter", Section: SectionNav},
 	}
 }
 
