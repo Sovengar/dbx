@@ -29,21 +29,12 @@ func NewScanner(rootDir string) *Scanner {
 func (s *Scanner) Scan() []FoundProject {
 	state, _ := LoadProjectState()
 
-	find := s.findFiles
-	if find == nil {
-		find = s.defaultFindFiles
-	}
+	projects := s.discoverProjects()
 
-	var projects []FoundProject
-	for _, path := range find(s.RootDir) {
-		if p, err := s.loadProject(path); err == nil {
-			projects = append(projects, *p)
-		}
-	}
-
-	// Collapse copies of the same (git repo, connection name, resolved DSN)
-	// before applying state, so the state always lands on the surviving path.
-	projects = dedupeProjects(projects)
+	// Collapse copies of the same (git repo, connection name, driver, resolved
+	// DSN, ssh tunnel) before applying state, so the state always lands on the
+	// surviving path.
+	projects = dedupeProjects(projects, s.RootDir)
 
 	for i := range projects {
 		projects[i].Active = state.IsActive(projects[i].Path)
@@ -61,13 +52,30 @@ func (s *Scanner) Scan() []FoundProject {
 	return projects
 }
 
-// defaultFindFiles returns .dbx.toml paths using fd --hidden, falling back to a
-// hidden-dir-skipping WalkDir when fd is unavailable or returns nothing.
-func (s *Scanner) defaultFindFiles(root string) []string {
-	if paths := s.scanWithFD(root); len(paths) > 0 {
-		return paths
+// discoverProjects returns the loaded projects. A test seam (findFiles) takes
+// precedence; otherwise fd is tried first and, when it yields no loadable
+// project, the WalkDir fallback runs. The fallback triggers on loaded results,
+// not on raw paths, so fd returning only unparseable files still falls back.
+func (s *Scanner) discoverProjects() []FoundProject {
+	if s.findFiles != nil {
+		return s.loadPaths(s.findFiles(s.RootDir))
 	}
-	return s.scanWithWalkDir(root)
+
+	projects := s.loadPaths(s.scanWithFD(s.RootDir))
+	if len(projects) == 0 {
+		projects = s.loadPaths(s.scanWithWalkDir(s.RootDir))
+	}
+	return projects
+}
+
+func (s *Scanner) loadPaths(paths []string) []FoundProject {
+	var projects []FoundProject
+	for _, path := range paths {
+		if p, err := s.loadProject(path); err == nil {
+			projects = append(projects, *p)
+		}
+	}
+	return projects
 }
 
 func (s *Scanner) scanWithFD(root string) []string {
@@ -134,46 +142,71 @@ func (s *Scanner) loadProject(path string) (*FoundProject, error) {
 }
 
 // dedupeProjects collapses entries that share a (git repo identity, connection
-// name, resolved DSN) key, keeping the stable survivor chosen by shortestPath.
-// Non-git directories use their own path as identity, so they never collapse.
-func dedupeProjects(projects []FoundProject) []FoundProject {
-	groups := make(map[projectKey][]FoundProject, len(projects))
+// name, driver, resolved DSN, ssh tunnel) key, keeping the survivor chosen by
+// survivor. Non-git directories use their own path as identity, so they never
+// collapse. root bounds the git search so an enclosing repo does not absorb
+// non-git projects.
+func dedupeProjects(projects []FoundProject, root string) []FoundProject {
+	groups := make(map[projectKey][]dedupCandidate, len(projects))
 	order := make([]projectKey, 0, len(projects))
 
 	for _, p := range projects {
+		repo := gitRepoIdentity(p.Path, root)
 		key := projectKey{
-			repo: gitRepoIdentity(p.Path),
-			name: p.Name,
-			dsn:  p.Connection.GetDSN(),
+			repo:      repo.id,
+			name:      p.Name,
+			driver:    p.Connection.Driver,
+			dsn:       p.Connection.GetDSN(),
+			sshTunnel: p.Connection.SSHTunnel,
 		}
 		if _, ok := groups[key]; !ok {
 			order = append(order, key)
 		}
-		groups[key] = append(groups[key], p)
+		groups[key] = append(groups[key], dedupCandidate{project: p, isMain: repo.isMain})
 	}
 
 	out := make([]FoundProject, 0, len(order))
 	for _, key := range order {
-		out = append(out, shortestPath(groups[key]))
+		out = append(out, survivor(groups[key]))
 	}
 	return out
 }
 
 type projectKey struct {
-	repo string
-	name string
-	dsn  string
+	repo      string
+	name      string
+	driver    string
+	dsn       string
+	sshTunnel string
 }
 
-// shortestPath picks the survivor: shortest path first, then lexicographic.
-// It is independent of session state, so the result is stable.
-func shortestPath(candidates []FoundProject) FoundProject {
+// dedupCandidate pairs a project with whether its directory is the main git
+// checkout (as opposed to a linked worktree or a non-git directory).
+type dedupCandidate struct {
+	project FoundProject
+	isMain  bool
+}
+
+// survivor picks the entry that represents the real connection: the main
+// checkout wins over linked worktrees regardless of path length; otherwise the
+// shortest path, then lexicographic. It is independent of session state, so the
+// result is stable.
+func survivor(candidates []dedupCandidate) FoundProject {
 	best := candidates[0]
 	for _, c := range candidates[1:] {
-		if len(c.Path) < len(best.Path) ||
-			(len(c.Path) == len(best.Path) && c.Path < best.Path) {
+		if isBetterSurvivor(c, best) {
 			best = c
 		}
 	}
-	return best
+	return best.project
+}
+
+func isBetterSurvivor(a, b dedupCandidate) bool {
+	if a.isMain != b.isMain {
+		return a.isMain
+	}
+	if len(a.project.Path) != len(b.project.Path) {
+		return len(a.project.Path) < len(b.project.Path)
+	}
+	return a.project.Path < b.project.Path
 }

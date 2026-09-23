@@ -225,6 +225,61 @@ func TestScanner_WorktreeCollapsesToMainRepo(t *testing.T) {
 	}
 }
 
+func TestScanner_MainRepoSurvivesEvenWhenWorktreePathIsShorter(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := filepath.Join(root, "a-very-long-main-repository-directory-name")
+	mkGitRepo(t, mainRepo)
+	wt := filepath.Join(root, "wt") // shorter path than the main repo
+	mkGitWorktree(t, mainRepo, wt, "wt1")
+
+	writeConnections(t, mainRepo, map[string]string{"main": "postgres://localhost/db"})
+	writeConnections(t, wt, map[string]string{"main": "postgres://localhost/db"})
+
+	got := scannerFor(root, dbxPath(wt), dbxPath(mainRepo)).Scan()
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1 (%+v)", len(got), got)
+	}
+	if got[0].Path != mainRepo {
+		t.Fatalf("survivor = %q, want main repo %q despite longer path", got[0].Path, mainRepo)
+	}
+}
+
+func TestScanner_DifferentReposDoNotDeduplicate(t *testing.T) {
+	root := t.TempDir()
+	repoA := filepath.Join(root, "repo-a")
+	repoB := filepath.Join(root, "repo-b")
+	mkGitRepo(t, repoA)
+	mkGitRepo(t, repoB)
+
+	a := filepath.Join(repoA, "proj")
+	b := filepath.Join(repoB, "proj")
+	writeConnections(t, a, map[string]string{"main": "postgres://localhost/db"})
+	writeConnections(t, b, map[string]string{"main": "postgres://localhost/db"})
+
+	got := scannerFor(root, dbxPath(a), dbxPath(b)).Scan()
+	if len(got) != 2 {
+		t.Fatalf("distinct repos must not collapse: len = %d, want 2 (%+v)", len(got), got)
+	}
+}
+
+func TestScanner_WalkDoesNotEscapeRoot(t *testing.T) {
+	// A git repo enclosing the scan root must not give non-git projects inside
+	// the root a shared identity.
+	parent := t.TempDir()
+	mkGitRepo(t, parent)
+	root := filepath.Join(parent, "root")
+
+	a := filepath.Join(root, "a")
+	b := filepath.Join(root, "b")
+	writeConnections(t, a, map[string]string{"main": "postgres://localhost/db"})
+	writeConnections(t, b, map[string]string{"main": "postgres://localhost/db"})
+
+	got := scannerFor(root, dbxPath(a), dbxPath(b)).Scan()
+	if len(got) != 2 {
+		t.Fatalf("bounded walk leaked the parent repo: len = %d, want 2 (%+v)", len(got), got)
+	}
+}
+
 func TestScanner_NonGitDoesNotDeduplicate(t *testing.T) {
 	root := t.TempDir()
 	a := filepath.Join(root, "a")
@@ -267,24 +322,24 @@ func TestScanner_OutputOrderIsStable(t *testing.T) {
 		dirs = append(dirs, dir)
 	}
 
-	// Two scans with discovery in different orders must agree.
-	first := scannerFor(root, dbxPath(dirs[0]), dbxPath(dirs[1]), dbxPath(dirs[2])).Scan()
-	second := scannerFor(root, dbxPath(dirs[2]), dbxPath(dirs[0]), dbxPath(dirs[1])).Scan()
+	// Two scans with discovery in opposite orders must agree.
+	forward := scannerFor(root, dbxPath(dirs[0]), dbxPath(dirs[1]), dbxPath(dirs[2])).Scan()
+	reverse := scannerFor(root, dbxPath(dirs[2]), dbxPath(dirs[1]), dbxPath(dirs[0])).Scan()
 
-	if len(first) != 3 || len(second) != 3 {
-		t.Fatalf("lens = %d,%d want 3,3", len(first), len(second))
+	if len(forward) != 3 || len(reverse) != 3 {
+		t.Fatalf("lens = %d,%d want 3,3", len(forward), len(reverse))
 	}
-	for i := range first {
-		if first[i].Path != second[i].Path {
-			t.Fatalf("order differs at %d: %q vs %q", i, first[i].Path, second[i].Path)
+	for i := range forward {
+		if forward[i].Path != reverse[i].Path {
+			t.Fatalf("order differs at %d: %q vs %q", i, forward[i].Path, reverse[i].Path)
 		}
 	}
 
 	want := append([]string(nil), dirs...)
 	sort.Strings(want)
 	for i, dir := range want {
-		if first[i].Path != dir {
-			t.Fatalf("position %d = %q, want %q (sorted)", i, first[i].Path, dir)
+		if forward[i].Path != dir {
+			t.Fatalf("position %d = %q, want %q (sorted)", i, forward[i].Path, dir)
 		}
 	}
 }

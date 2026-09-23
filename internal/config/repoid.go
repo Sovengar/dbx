@@ -6,47 +6,64 @@ import (
 	"strings"
 )
 
-// gitRepoIdentity returns a stable identity shared by a git repository and all
-// of its worktrees, without spawning `git`. It is derived from the common git
-// directory so that the main checkout and its worktrees collapse together.
+// repoIdentity describes the git repository a project directory belongs to.
+type repoIdentity struct {
+	// id is canonical and shared by a repo and all of its linked worktrees.
+	id string
+	// isMain is true when the directory is the main checkout, i.e. its resolved
+	// `.git` is a directory. Linked worktrees (`.git` file) and non-git
+	// directories report false.
+	isMain bool
+}
+
+// gitRepoIdentity derives the identity of the repository containing dir, without
+// spawning `git`. The upward search for `.git` is bounded by root: the walk never
+// inspects ancestors of root, so a git repo that merely contains root (e.g. a
+// dotfiles $HOME, or ~/dev) does not absorb non-git projects.
 //
-// When dir (or an ancestor) is not inside a git repository, the identity is the
-// canonical path of dir itself: unique per directory, so nothing collapses.
-func gitRepoIdentity(dir string) string {
+// When dir (or an ancestor up to root) is not inside a git repository, the
+// identity is the canonical path of dir itself: unique per directory, so nothing
+// collapses.
+func gitRepoIdentity(dir, root string) repoIdentity {
 	canonical := canonicalPath(dir)
 
-	gitPath, ok := findDotGit(canonical)
+	gitPath, ok := findDotGit(canonical, canonicalPath(root))
 	if !ok {
-		return canonical
+		return repoIdentity{id: canonical}
 	}
 
-	// `.git` directory: the repo itself, so the common dir is that directory.
+	// `.git` directory: the main checkout, so the common dir is that directory.
 	if info, err := os.Stat(gitPath); err == nil && info.IsDir() {
-		return canonicalPath(gitPath)
+		return repoIdentity{id: canonicalPath(gitPath), isMain: true}
 	}
 
 	// `.git` file (worktree/submodule): "gitdir: <path>".
 	gitdir, ok := readGitdirFile(gitPath)
 	if !ok {
-		return canonicalPath(gitPath)
+		return repoIdentity{id: canonicalPath(gitPath)}
 	}
 
 	// A linked worktree's gitdir holds a `commondir` file with the path to the
 	// shared git dir, relative to the gitdir itself.
 	if common, ok := readCommonDir(gitdir); ok {
-		return canonicalPath(common)
+		return repoIdentity{id: canonicalPath(common)}
 	}
 
-	return canonicalPath(gitdir)
+	return repoIdentity{id: canonicalPath(gitdir)}
 }
 
-// findDotGit walks up from dir looking for a `.git` entry (file or directory).
-func findDotGit(dir string) (string, bool) {
+// findDotGit walks up from dir looking for a `.git` entry (file or directory),
+// stopping at root (inclusive) or the filesystem root, whichever comes first.
+func findDotGit(dir, root string) (string, bool) {
 	cur := dir
 	for {
 		candidate := filepath.Join(cur, ".git")
 		if _, err := os.Lstat(candidate); err == nil {
 			return candidate, true
+		}
+
+		if cur == root {
+			return "", false
 		}
 
 		parent := filepath.Dir(cur)
