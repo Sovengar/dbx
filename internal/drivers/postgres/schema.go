@@ -33,6 +33,27 @@ type SchemaDetail struct {
 	Tables []TableDetail
 }
 
+// SchemaText renders schema details in the compact text format used to build
+// LLM prompts. It is shared by the CLI (`dbx ask`) and the TUI ASK pane.
+func SchemaText(schemas []SchemaDetail) string {
+	var b strings.Builder
+	for _, sd := range schemas {
+		b.WriteString(fmt.Sprintf("Schema: %s\n", sd.Name))
+		for _, table := range sd.Tables {
+			b.WriteString(fmt.Sprintf("  Table: %s (%d rows)\n", table.Name, table.RowCount))
+			for _, col := range table.Columns {
+				nullable := ""
+				if col.IsNullable == "YES" {
+					nullable = " NULL"
+				}
+				b.WriteString(fmt.Sprintf("    %s %s%s\n", col.Name, col.DataType, nullable))
+			}
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 type LoadDatabaseResult struct {
 	Root    *explorer.Node
 	Schemas []SchemaDetail

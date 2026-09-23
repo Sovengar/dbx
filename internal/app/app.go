@@ -132,7 +132,7 @@ func NewModel(cfg *config.Config) Model {
 	aiProvider, _ := nl2sql.Resolve(nl2sql.Config{
 		Provider:  cfg.AI.Provider,
 		Model:     cfg.AI.Model,
-		Providers: nl2sqlProviderConfigs(cfg.AI.Providers),
+		Providers: cfg.AI.Nl2sqlProviders(),
 	})
 	return Model{
 		config:             cfg,
@@ -157,18 +157,6 @@ func NewModel(cfg *config.Config) Model {
 		ask:                ask.New(t.Styles()),
 		aiProvider:         aiProvider,
 	}
-}
-
-// nl2sqlProviderConfigs maps the config provider table to the nl2sql contract.
-func nl2sqlProviderConfigs(m map[string]config.AIProviderConf) map[string]nl2sql.ProviderConfig {
-	result := make(map[string]nl2sql.ProviderConfig, len(m))
-	for k, v := range m {
-		result[k] = nl2sql.ProviderConfig{
-			APIKeyEnv: v.APIKeyEnv,
-			Model:     v.Model,
-		}
-	}
-	return result
 }
 
 // initQueryStore initializes the QueryStore for the given project.
@@ -998,7 +986,7 @@ func (m Model) generateAskSQL(question string) tea.Cmd {
 	provider := m.aiProvider
 	schema := m.askSchemaText
 	if schema == "" {
-		schema = buildSchemaTextForLLM(m.schemaDetail)
+		schema = postgres.SchemaText(m.schemaDetail)
 	}
 	contextHint := m.askContextHint
 	return func() tea.Msg {
@@ -1040,27 +1028,6 @@ func (m Model) executeAskSQL(sql string) tea.Cmd {
 		result, err := runner.executeReadOnly(context.Background(), sql)
 		return askQueryExecutedMsg{result: result, sql: sql, err: err}
 	}
-}
-
-// buildSchemaTextForLLM renders the in-memory schema in the same text format
-// the CLI uses for the LLM, so no round-trip to the database is needed.
-func buildSchemaTextForLLM(schemas []postgres.SchemaDetail) string {
-	var result strings.Builder
-	for _, sd := range schemas {
-		result.WriteString(fmt.Sprintf("Schema: %s\n", sd.Name))
-		for _, table := range sd.Tables {
-			result.WriteString(fmt.Sprintf("  Table: %s (%d rows)\n", table.Name, table.RowCount))
-			for _, col := range table.Columns {
-				nullable := ""
-				if col.IsNullable == "YES" {
-					nullable = " NULL"
-				}
-				result.WriteString(fmt.Sprintf("    %s %s%s\n", col.Name, col.DataType, nullable))
-			}
-		}
-		result.WriteString("\n")
-	}
-	return result.String()
 }
 
 // splitSQL splits a SQL string by top-level semicolons, ignoring semicolons inside strings.
@@ -1216,7 +1183,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.grid.SetHeight(m.height - 4)
 		m.schemaDetail = msg.schemaDetail
 		m.dbName = msg.dbName
-		m.askSchemaText = buildSchemaTextForLLM(msg.schemaDetail)
+		m.askSchemaText = postgres.SchemaText(msg.schemaDetail)
 		// Initialize per-project query store after project selection
 		if m.project != nil {
 			m.initQueryStore(m.project.Name, "")
