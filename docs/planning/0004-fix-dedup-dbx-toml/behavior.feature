@@ -61,6 +61,7 @@ Feature: Robust scan of .dbx.toml — no crash, deterministic pick, deduplicatio
     When the scanner scans the root
     Then exactly one project should be returned
     And the surviving project should be the main repository directory
+    And the worktree should not survive even if its path is shorter
 
   Scenario: Directories that are not a git repository do not deduplicate
     Given two directories outside any git repository

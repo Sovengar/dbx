@@ -40,21 +40,28 @@ orden de salida es estable.
 
 4. **Dedup dentro de `Scanner.Scan()`** (así lo consume la TUI; el CLI no usa el
    scanner). Clave de identidad por entrada:
-   `(identidad de repo git) + nombre de conexión + DSN resuelto`.
+   `(identidad de repo git) + nombre de conexión + driver + DSN resuelto + ssh tunnel`.
    - **DSN resuelto**: `ProjectConnection.GetDSN()` (expande `${env:...}`). Se
      deduplica por el valor resuelto, no por el crudo.
    - **Identidad de repo git sin `git` en PATH**: resolver por parseo. Dado el
-     directorio del `.dbx.toml`, buscar hacia arriba un `.git`:
-     - `.git` **directorio** → ese es el common dir.
-     - `.git` **archivo** (`gitdir: <X>`) → leer `<X>/commondir` (relativo a X)
-       para obtener el common dir; si no existe, usar X. Esto cubre worktrees
-       (el worktree comparte el common dir del repo principal).
-     - Canonicalizar (abs + clean + symlinks) para que main y worktree coincidan.
-     - **Sin `.git` hacia arriba (no-git)** → la identidad es el propio path del
-       proyecto; como es único, no deduplica con nada (ni con otro no-git).
-   - **Superviviente estable**: ordenar candidatos por path más corto, luego
-     lexicográfico, y conservar el primero. El path del repo principal es más
-     corto que el del worktree, así que sobrevive el principal.
+     directorio del `.dbx.toml`, buscar hacia arriba un `.git`, **acotando el walk
+     a `Scanner.RootDir` (inclusive)**: nunca se inspeccionan ancestros del root.
+     Esto evita que un repo que sólo *contiene* el root (p.ej. `$HOME` con
+     yadm/dotfiles, o `~/dev`) absorba proyectos no-git y rompa "no-git no
+     deduplica".
+      - `.git` **directorio** → ese es el common dir (checkout principal).
+      - `.git` **archivo** (`gitdir: <X>`) → leer `<X>/commondir` (relativo a X)
+        para obtener el common dir; si no existe, usar X. Esto cubre worktrees
+        (el worktree comparte el common dir del repo principal).
+      - Canonicalizar (abs + clean + symlinks) para que main y worktree coincidan.
+      - **Sin `.git` hacia arriba (hasta el root, no-git)** → la identidad es el
+        propio path del proyecto; como es único, no deduplica con nada (ni con
+        otro no-git).
+   - **Superviviente estable**: **primero el checkout principal** (aquel cuyo
+     `.git` resuelto es un **directorio**; las linked worktrees tienen `.git`
+     archivo). Empate, o ninguna principal → path más corto, luego lexicográfico.
+     Así sobrevive el repo main aunque el worktree tenga un path más corto. No
+     depende del estado activo, así que el resultado es reproducible.
 
 5. **Orden de salida estable**. Al final de `Scan()`, ordenar los resultados por
    `(Path, Name)`. Así el picker es reproducible aunque `fd` devuelva paths en
@@ -75,10 +82,15 @@ orden de salida es estable.
 - **Identidad de repo = common git dir**, no el worktree gitdir: es lo que
   comparten main y sus worktrees.
 - **No-git no deduplica**: clave = path único. Evita colapsar proyectos
-  homónimos legítimos fuera de git.
-- **Superviviente por path (corto→lexicográfico)**, no por estado activo:
-  mantiene el resultado independiente de la sesión/estado del usuario. El estado
-  activo del descartado se sacrifica (documentado).
+  homónimos legítimos fuera de git. La búsqueda de `.git` se acota a
+  `Scanner.RootDir` para que un repo que sólo contiene el root no los absorba.
+- **Superviviente por checkout principal (`.git` directorio), luego path
+  (corto→lexicográfico)**, no por estado activo: sobrevive el repo main aunque el
+  worktree tenga un path más corto, y el resultado es independiente de la
+  sesión/estado del usuario. El estado activo del descartado se sacrifica
+  (documentado).
+- **Clave de dedup completa**: `(repo, nombre, driver, DSN resuelto, ssh_tunnel)`,
+  para no colapsar conexiones que difieren en driver o tunnel.
 - **Dedup en `Scanner.Scan()`**: punto único de consumo de la TUI; el CLI queda
   fuera de alcance.
 - **Sin dependencias nuevas**: todo con stdlib (`os`, `path/filepath`, `sort`,
@@ -86,9 +98,13 @@ orden de salida es estable.
 
 ## Riesgos
 
-- **Detección de repo en subdirectorios**: buscar `.git` hacia arriba hace que un
-  `.dbx.toml` en un subdir del repo comparta identidad con la raíz. Es lo
-  esperable; se documenta.
+- **Detección de repo en subdirectorios**: buscar `.git` hacia arriba (acotado al
+  root) hace que un `.dbx.toml` en un subdir del repo comparta identidad con la
+  raíz. Es lo esperable; se documenta. El acotamiento evita además falsos
+  positivos por repos que sólo contienen el root.
+- **Fallback fd→WalkDir**: el fallback se dispara por *proyectos cargados*, no
+  por paths crudos, para preservar el comportamiento previo cuando `fd` devuelve
+  sólo archivos inválidos.
 - **Symlinks/permisos**: canonicalizar puede fallar; fallback al path limpio sin
   resolver symlinks (mejor un dedup conservador que un panic).
 - **Estado activo del descartado**: ver arriba (aceptado).
@@ -114,9 +130,11 @@ Los escenarios de `behavior.feature` se traducen a tests Go en
   worktrees.
 - (a) archivo sin conexiones no paniquea y se saltea; (b) archivo multi-conexión
   elige el nombre lexicográficamente primero, repetido N veces; (c) dedup colapsa
-  main+worktree; (d) mismo nombre, DSN distinto → 2 entradas; (e) dirs no-git no
-  deduplican; (f) orden de salida estable; (g) DSN con `${env:...}` se compara
-  resuelto.
+  main+worktree y sobrevive el main aunque su path sea más largo; (d) mismo
+  nombre, DSN distinto → 2 entradas; (e) dirs no-git no deduplican y el walk
+  acotado no escapa el root; (f) orden de salida estable; (g) DSN con `${env:...}`
+  se compara resuelto; (h) dos repos git distintos con mismo nombre+DSN no
+  colapsan; (i) toggle del superviviente persiste.
 
 ## Verificación final
 
