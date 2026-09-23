@@ -13,7 +13,8 @@ import (
 )
 
 // maxKeybindsPerLine caps how many keybind segments the pane packs into a
-// single line. Extra entries flow onto a new line below.
+// single line. A group (e.g. "hjkl Navigate") counts as one segment. Extra
+// segments flow onto a new line below.
 const maxKeybindsPerLine = 7
 
 // KeybindsPane renders the keybinds of the currently focused view, derived
@@ -100,7 +101,10 @@ func (s *KeybindsPane) renderLines() []string {
 	}
 
 	ctx := s.Context()
-	var segments []string
+
+	// Conditional skips are applied BEFORE grouping so a hidden member never
+	// keeps a group alive on its own.
+	var active []config.Action
 	for _, a := range s.keybinds.ActionsFor(ctx) {
 		if a.ID == "rollback" && !s.txPending {
 			continue
@@ -108,11 +112,17 @@ func (s *KeybindsPane) renderLines() []string {
 		if a.ID == "autocomplete" && s.editorOpen && !s.autocompleteReady {
 			continue
 		}
-		key := s.keybinds.PrimaryKey(a.ID)
-		if key == "" {
+		active = append(active, a)
+	}
+
+	// One segment per display group; the pane shows primary keys only (the help
+	// modal is where aliases live).
+	var segments []string
+	for _, g := range config.GroupActions(active, s.keybinds.PrimaryKey) {
+		if g.KeyText == "" {
 			continue
 		}
-		segments = append(segments, key+" "+a.Description)
+		segments = append(segments, g.KeyText+" "+g.Label)
 	}
 	if s.txPending {
 		segments = append(segments, "tx pending")

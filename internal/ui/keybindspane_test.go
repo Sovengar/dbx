@@ -148,3 +148,48 @@ func TestKeybindsPane_NoTxHidesRollback(t *testing.T) {
 		t.Fatalf("pane shows rollback without a pending transaction: %v", p.renderLines())
 	}
 }
+
+// Scenario: Sibling actions of a group render as one segment with combined keys.
+func TestKeybindsPane_GridRendersGroups(t *testing.T) {
+	lines := paneWith(config.ContextGrid).renderLines()
+	for _, want := range []string{
+		"hjkl Navigate",
+		"g/G First/Last",
+		"ctrl+u/ctrl+d Half Page",
+		"f1-f9 Go to Page",
+	} {
+		if !linesContain(lines, want) {
+			t.Errorf("grid pane does not show group segment %q: %v", want, lines)
+		}
+	}
+}
+
+// Scenario: The pane shows only the primary key of an action.
+func TestKeybindsPane_ShowsPrimaryKeysOnly(t *testing.T) {
+	lines := paneWith(config.ContextGrid).renderLines()
+	if !linesContain(lines, "n Next Page") {
+		t.Fatalf("grid pane does not show 'n Next Page': %v", lines)
+	}
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "ctrl+right") {
+		t.Errorf("pane leaked the next_page alias 'ctrl+right': %q", joined)
+	}
+	if strings.Contains(joined, "n/]/ctrl+right") {
+		t.Errorf("pane leaked the raw alias list for next_page: %q", joined)
+	}
+}
+
+// Scenario: A partially active group shows only the members of the current context.
+func TestKeybindsPane_ExplorerPartialGroup(t *testing.T) {
+	lines := paneWith(config.ContextExplorer).renderLines()
+	joined := strings.Join(lines, "\n")
+	if !linesContain(lines, "j/k Navigate") {
+		t.Fatalf("explorer pane does not show the partial nav group 'j/k Navigate': %v", lines)
+	}
+	if strings.Contains(joined, "Half Page") {
+		t.Errorf("explorer pane rendered the half-page group: %q", joined)
+	}
+	if strings.Contains(joined, "Go to Page") {
+		t.Errorf("explorer pane rendered the goto-page group: %q", joined)
+	}
+}
