@@ -81,7 +81,7 @@ func getConnection(cmd *cobra.Command) (*pgx.Conn, error) {
 			return nil, fmt.Errorf("failed to connect: %w", err)
 		}
 		if err := conn.Ping(ctx); err != nil {
-			conn.Close(ctx)
+			_ = conn.Close(ctx)
 			return nil, fmt.Errorf("failed to ping: %w", err)
 		}
 		return conn, nil
@@ -124,7 +124,7 @@ func getConnection(cmd *cobra.Command) (*pgx.Conn, error) {
 	}
 
 	if err := conn.Ping(ctx); err != nil {
-		conn.Close(ctx)
+		_ = conn.Close(ctx)
 		return nil, fmt.Errorf("failed to ping: %w", err)
 	}
 
@@ -154,7 +154,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close(context.Background())
+	defer func() { _ = conn.Close(context.Background()) }()
 
 	sql := args[0]
 	ctx := context.Background()
@@ -198,7 +198,7 @@ func runListTables(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close(context.Background())
+	defer func() { _ = conn.Close(context.Background()) }()
 
 	ctx := context.Background()
 	loader := postgres.NewSchemaLoader(conn)
@@ -245,7 +245,7 @@ func runListColumns(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close(context.Background())
+	defer func() { _ = conn.Close(context.Background()) }()
 
 	table := args[0]
 	ctx := context.Background()
@@ -279,17 +279,17 @@ func runListColumns(cmd *cobra.Command, args []string) error {
 			}
 
 			fmt.Printf("Table: %s.%s\n", schema, table)
-		for _, col := range columns {
-			Nullable := ""
-			if col.IsNullable == "YES" {
-				Nullable = " NULL"
+			for _, col := range columns {
+				Nullable := ""
+				if col.IsNullable == "YES" {
+					Nullable = " NULL"
+				}
+				Default := ""
+				if col.Default != nil {
+					Default = fmt.Sprintf(" DEFAULT %s", *col.Default)
+				}
+				fmt.Printf("  %-30s %s%s%s\n", col.Name, col.DataType, Nullable, Default)
 			}
-			Default := ""
-			if col.Default != nil {
-				Default = fmt.Sprintf(" DEFAULT %s", *col.Default)
-			}
-			fmt.Printf("  %-30s %s%s%s\n", col.Name, col.DataType, Nullable, Default)
-		}
 			break
 		}
 	}
@@ -306,7 +306,7 @@ func runSchema(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close(context.Background())
+	defer func() { _ = conn.Close(context.Background()) }()
 
 	table := args[0]
 	ctx := context.Background()

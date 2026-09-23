@@ -31,7 +31,7 @@ func runContext(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close(context.Background())
+	defer func() { _ = conn.Close(context.Background()) }()
 
 	ctx := context.Background()
 

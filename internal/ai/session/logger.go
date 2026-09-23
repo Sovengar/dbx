@@ -12,28 +12,28 @@ import (
 type LogLevel string
 
 const (
-	LogQuery    LogLevel = "query"
-	LogError    LogLevel = "error"
-	LogConnect  LogLevel = "connect"
-	LogSchema   LogLevel = "schema"
+	LogQuery   LogLevel = "query"
+	LogError   LogLevel = "error"
+	LogConnect LogLevel = "connect"
+	LogSchema  LogLevel = "schema"
 )
 
 type LogEntry struct {
-	Timestamp time.Time `json:"timestamp"`
-	Level     LogLevel  `json:"level"`
-	Action    string    `json:"action"`
-	SQL       string    `json:"sql,omitempty"`
-	Duration  int64     `json:"duration_ms,omitempty"`
-	Rows      int       `json:"rows,omitempty"`
-	Error     string    `json:"error,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
+	Level     LogLevel               `json:"level"`
+	Action    string                 `json:"action"`
+	SQL       string                 `json:"sql,omitempty"`
+	Duration  int64                  `json:"duration_ms,omitempty"`
+	Rows      int                    `json:"rows,omitempty"`
+	Error     string                 `json:"error,omitempty"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
 type Logger struct {
-	dir        string
-	file       *os.File
-	encoder    *json.Encoder
-	retention  int // days
+	dir       string
+	file      *os.File
+	encoder   *json.Encoder
+	retention int // days
 }
 
 func NewLogger(dir string, retentionDays int) (*Logger, error) {
@@ -124,7 +124,9 @@ func (l *Logger) Cleanup() error {
 		}
 
 		if info.ModTime().Before(cutoff) {
-			os.Remove(filepath.Join(l.dir, entry.Name()))
+			// Best-effort cleanup: skip files that cannot be removed and
+			// keep removing the rest.
+			_ = os.Remove(filepath.Join(l.dir, entry.Name()))
 		}
 	}
 

@@ -262,38 +262,6 @@ func (p *GridPreview) isExpandableFK(path string) *postgres.ForeignKeyInfo {
 	return nil
 }
 
-// lookupFK returns the FK info for a path (whether expandable or already expanded).
-func (p *GridPreview) lookupFK(path string) *postgres.ForeignKeyInfo {
-	parts := strings.Split(path, ".")
-	if len(parts) == 0 {
-		return nil
-	}
-
-	if len(parts) == 1 {
-		key := parts[0]
-		for i := range p.foreignKeys {
-			if p.foreignKeys[i].Column == key {
-				return &p.foreignKeys[i]
-			}
-		}
-		return nil
-	}
-
-	parentPath := strings.Join(parts[:len(parts)-1], ".")
-	childKey := parts[len(parts)-1]
-
-	fks, ok := p.nestedFKs[parentPath]
-	if !ok {
-		return nil
-	}
-	for i := range fks {
-		if fks[i].Column == childKey {
-			return &fks[i]
-		}
-	}
-	return nil
-}
-
 // resolveValue gets the value at a dotted path from rowData/displayData.
 func (p *GridPreview) resolveValue(path string) interface{} {
 	data := p.displayData()
@@ -307,16 +275,6 @@ func (p *GridPreview) resolveValue(path string) interface{} {
 		current = m[part]
 	}
 	return current
-}
-
-// resolvePathForLine builds the dotted path for the cursor line using the pathTracker.
-func (p *GridPreview) resolvePathForLine(line string, tracker *fkPathTracker) string {
-	key := p.parseKeyFromLine(line)
-	if key == "" {
-		return ""
-	}
-	indent := countIndent(line)
-	return tracker.onKey(key, indent)
 }
 
 func (p *GridPreview) handleExpand() (tea.Cmd, bool) {
@@ -762,7 +720,7 @@ func (p *GridPreview) navigateJSON(input interface{}, path string) interface{} {
 						}
 					} else {
 						idx := 0
-						fmt.Sscanf(idxStr, "%d", &idx)
+						_, _ = fmt.Sscanf(idxStr, "%d", &idx)
 						if idx >= 0 && idx < len(arr) {
 							current = arr[idx]
 						} else {
@@ -778,7 +736,7 @@ func (p *GridPreview) navigateJSON(input interface{}, path string) interface{} {
 				current = m[part]
 			} else if arr, ok := current.([]interface{}); ok {
 				idx := 0
-				fmt.Sscanf(part, "%d", &idx)
+				_, _ = fmt.Sscanf(part, "%d", &idx)
 				if idx >= 0 && idx < len(arr) {
 					current = arr[idx]
 				} else {
@@ -903,26 +861,11 @@ func (p *GridPreview) saveJQHistory() {
 		return
 	}
 
-	os.WriteFile(path, data, 0o644)
+	// Best-effort persistence: the in-memory history is already updated.
+	_ = os.WriteFile(path, data, 0o644)
 }
 
 // ── Scrolling ──────────────────────────────────────────
-
-func (p *GridPreview) scrollUp() {
-	if p.scrollY > 0 {
-		p.scrollY--
-	}
-}
-
-func (p *GridPreview) scrollDown() {
-	maxScroll := len(p.lines) - p.height + 6
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	if p.scrollY < maxScroll {
-		p.scrollY++
-	}
-}
 
 func (p *GridPreview) halfPageUp() {
 	p.scrollY -= p.height / 2
@@ -940,18 +883,6 @@ func (p *GridPreview) halfPageDown() {
 	if p.scrollY > maxScroll {
 		p.scrollY = maxScroll
 	}
-}
-
-func (p *GridPreview) firstLine() {
-	p.scrollY = 0
-}
-
-func (p *GridPreview) lastLine() {
-	maxScroll := len(p.lines) - p.height + 6
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	p.scrollY = maxScroll
 }
 
 // ── Update ──────────────────────────────────────────

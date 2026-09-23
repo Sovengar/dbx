@@ -56,7 +56,9 @@ func (s *Scanner) scanWithFD() []FoundProject {
 func (s *Scanner) scanWithWalkDir() []FoundProject {
 	var projects []FoundProject
 
-	filepath.WalkDir(s.RootDir, func(path string, d os.DirEntry, err error) error {
+	// Walk errors are handled inside the callback, which never propagates
+	// them, so the returned error is always nil.
+	_ = filepath.WalkDir(s.RootDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}

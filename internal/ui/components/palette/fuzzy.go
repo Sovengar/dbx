@@ -2,11 +2,6 @@ package palette
 
 import "strings"
 
-type match struct {
-	score   int
-	indices []int
-}
-
 func fuzzyMatch(query, target string) (int, bool) {
 	if query == "" {
 		return 0, true

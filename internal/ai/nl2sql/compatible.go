@@ -62,7 +62,7 @@ func (o *OpenAICompatible) Generate(ctx context.Context, prompt string, schema s
 	if err != nil {
 		return "", fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -228,7 +228,7 @@ func stripJSONC(src []byte) []byte {
 			}
 		case c == '/' && i+1 < len(src) && src[i+1] == '*':
 			i += 2
-			for i < len(src) && !(src[i] == '*' && i+1 < len(src) && src[i+1] == '/') {
+			for i < len(src) && (src[i] != '*' || i+1 >= len(src) || src[i+1] != '/') {
 				i++
 			}
 			i += 2
@@ -260,7 +260,7 @@ func skipJSONCNoise(src []byte, i int) int {
 			}
 		case src[i] == '/' && i+1 < len(src) && src[i+1] == '*':
 			i += 2
-			for i < len(src) && !(src[i] == '*' && i+1 < len(src) && src[i+1] == '/') {
+			for i < len(src) && (src[i] != '*' || i+1 >= len(src) || src[i+1] != '/') {
 				i++
 			}
 			i += 2
@@ -326,9 +326,9 @@ func NewPi(apiKey, model string) *PiProvider {
 func (p *PiProvider) Name() string { return "pi" }
 
 type piRequest struct {
-	Model   string    `json:"model,omitempty"`
-	Config  string    `json:"config,omitempty"`
-	Context []piMsg   `json:"context"`
+	Model   string  `json:"model,omitempty"`
+	Config  string  `json:"config,omitempty"`
+	Context []piMsg `json:"context"`
 }
 
 type piMsg struct {
@@ -368,7 +368,7 @@ func (p *PiProvider) Generate(ctx context.Context, prompt string, schema string)
 	if err != nil {
 		return "", fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -411,7 +411,7 @@ func DetectJCodeConfig() (provider, apiKey, model, baseURL string, found bool) {
 
 	var cfg struct {
 		Providers map[string]struct {
-			APIKey string `json:"api_key"`
+			APIKey  string `json:"api_key"`
 			BaseURL string `json:"base_url"`
 		} `json:"providers"`
 		Model string `json:"model"`

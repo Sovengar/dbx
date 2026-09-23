@@ -265,7 +265,7 @@ func parseAnsiSegments(s string) []ansiSegment {
 		}
 		// Collect plain text until next escape
 		j := i
-		for j < len(runes) && !(runes[j] == '\033' && j+1 < len(runes) && runes[j+1] == '[') {
+		for j < len(runes) && (runes[j] != '\033' || j+1 >= len(runes) || runes[j+1] != '[') {
 			j++
 		}
 		segments = append(segments, ansiSegment{style: "", text: string(runes[i:j])})

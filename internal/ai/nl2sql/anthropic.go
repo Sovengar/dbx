@@ -25,10 +25,10 @@ func NewAnthropic(apiKey, model string) *Anthropic {
 func (a *Anthropic) Name() string { return "anthropic" }
 
 type anthropicRequest struct {
-	Model     string            `json:"model"`
-	MaxTokens int               `json:"max_tokens"`
-	System    string            `json:"system"`
-	Messages  []anthropicMsg    `json:"messages"`
+	Model     string         `json:"model"`
+	MaxTokens int            `json:"max_tokens"`
+	System    string         `json:"system"`
+	Messages  []anthropicMsg `json:"messages"`
 }
 
 type anthropicMsg struct {
@@ -70,7 +70,7 @@ func (a *Anthropic) Generate(ctx context.Context, prompt string, schema string) 
 	if err != nil {
 		return "", fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -76,7 +76,8 @@ func (s *QueryStore) Add(sql string) {
 	if len(s.entries) > 500 {
 		s.entries = s.entries[len(s.entries)-500:]
 	}
-	s.Save()
+	// Best-effort persistence: the in-memory state is already updated.
+	_ = s.Save()
 }
 
 func (s *QueryStore) All() []QueryEntry {
@@ -115,7 +116,8 @@ func (s *QueryStore) ToggleFavorite(idx int) {
 			break
 		}
 	}
-	s.Save()
+	// Best-effort persistence: the in-memory state is already updated.
+	_ = s.Save()
 }
 
 func (s *QueryStore) SetName(idx int, name string) {
@@ -130,7 +132,8 @@ func (s *QueryStore) SetName(idx int, name string) {
 			break
 		}
 	}
-	s.Save()
+	// Best-effort persistence: the in-memory state is already updated.
+	_ = s.Save()
 }
 
 func (s *QueryStore) Delete(idx int) {
@@ -145,7 +148,8 @@ func (s *QueryStore) Delete(idx int) {
 			break
 		}
 	}
-	s.Save()
+	// Best-effort persistence: the in-memory state is already updated.
+	_ = s.Save()
 }
 
 func (s *QueryStore) Len() int {

@@ -452,12 +452,13 @@ func formatTime(t *time.Time) string {
 	return t.Format("2006-01-02 15:04:05")
 }
 
+//nolint:unused // debug helper kept per AGENTS.md
 func debugLogERE(diagram *ERDiagram, selectedIdx int) {
 	f, err := os.OpenFile("/tmp/dbx_ere_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	centerColsPKFK := 0
 	for _, col := range diagram.Center.Columns {
@@ -466,7 +467,7 @@ func debugLogERE(diagram *ERDiagram, selectedIdx int) {
 		}
 	}
 
-	fmt.Fprintf(f, "ERE: center=%s centerCols=%d(out of all) pkfkCols=%d outgoing=%d incoming=%d selectedIdx=%d\n",
+	_, _ = fmt.Fprintf(f, "ERE: center=%s centerCols=%d(out of all) pkfkCols=%d outgoing=%d incoming=%d selectedIdx=%d\n",
 		diagram.Center.Name,
 		len(diagram.Center.Columns),
 		centerColsPKFK,

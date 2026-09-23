@@ -34,7 +34,7 @@ func runReplay(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close(context.Background())
+	defer func() { _ = conn.Close(context.Background()) }()
 
 	filename := args[0]
 	jsonOutput, _ := cmd.Flags().GetBool("json")
@@ -95,10 +95,10 @@ func runReplay(cmd *cobra.Command, args []string) error {
 
 	if jsonOutput {
 		output := map[string]interface{}{
-			"session":     filename,
-			"total":       queryCount,
-			"errors":      errorCount,
-			"queries":     results,
+			"session": filename,
+			"total":   queryCount,
+			"errors":  errorCount,
+			"queries": results,
 		}
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
@@ -127,7 +127,7 @@ func runPipe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close(context.Background())
+	defer func() { _ = conn.Close(context.Background()) }()
 
 	data, err := os.Stdin.Stat()
 	if err != nil {

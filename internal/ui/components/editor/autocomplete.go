@@ -846,8 +846,8 @@ func autocompleteDebugLog(format string, args ...interface{}) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	fmt.Fprintf(f, "Autocomplete: "+format+"\n", args...)
+	defer func() { _ = f.Close() }()
+	_, _ = fmt.Fprintf(f, "Autocomplete: "+format+"\n", args...)
 }
 
 func (a *AutocompleteState) Render(styles *theme.Styles, width int) string {

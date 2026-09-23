@@ -341,10 +341,10 @@ func (e *Explorer) ToggleExpand() tea.Cmd {
 		// DEBUG
 		f, _ := os.Create("/tmp/dbx_explorer_debug.log")
 		if f != nil {
-			fmt.Fprintf(f, "ToggleExpand Table: name=%q schema=%q\n", node.Name, schema)
-			fmt.Fprintf(f, "  node.Expanded=%v\n", node.Expanded)
-			fmt.Fprintf(f, "  children count: %d\n", len(node.Children))
-			f.Close()
+			_, _ = fmt.Fprintf(f, "ToggleExpand Table: name=%q schema=%q\n", node.Name, schema)
+			_, _ = fmt.Fprintf(f, "  node.Expanded=%v\n", node.Expanded)
+			_, _ = fmt.Fprintf(f, "  children count: %d\n", len(node.Children))
+			_ = f.Close()
 		}
 
 		return func() tea.Msg {

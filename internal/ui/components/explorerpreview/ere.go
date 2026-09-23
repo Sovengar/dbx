@@ -11,12 +11,12 @@ import (
 )
 
 const (
-	MinBoxWidth    = 20
-	MaxBoxWidth    = 50
-	MaxTableName   = 40
-	MaxColumnName  = 30
-	MaxNeighbors   = 10
-	boxHPad        = 2 // padding inside box borders
+	MinBoxWidth   = 20
+	MaxBoxWidth   = 50
+	MaxTableName  = 40
+	MaxColumnName = 30
+	MaxNeighbors  = 10
+	boxHPad       = 2 // padding inside box borders
 )
 
 type ColumnBadge struct {
@@ -34,11 +34,11 @@ type TableBox struct {
 }
 
 type Relationship struct {
-	FromColumn   string
-	ToTable      string
-	ToColumn     string
-	Cardinality  string // "N:1" or "1:N"
-	IsJunction   bool
+	FromColumn  string
+	ToTable     string
+	ToColumn    string
+	Cardinality string // "N:1" or "1:N"
+	IsJunction  bool
 }
 
 type ERDiagram struct {
@@ -215,10 +215,10 @@ func BuildERDiagram(
 
 	// Debug log
 	if f, err := os.OpenFile("/tmp/dbx_ere_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-		fmt.Fprintf(f, "BuildERE: table=%s totalCols=%d centerCols=%d(out of %d) outgoing=%d incoming=%d\n",
+		_, _ = fmt.Fprintf(f, "BuildERE: table=%s totalCols=%d centerCols=%d(out of %d) outgoing=%d incoming=%d\n",
 			table, len(columns), len(diagram.Center.Columns), len(allCols),
 			len(diagram.Outgoing), len(diagram.Incoming))
-		f.Close()
+		_ = f.Close()
 	}
 
 	return diagram
@@ -227,8 +227,8 @@ func BuildERDiagram(
 // --- Navigation ---
 
 type ERDiagramNav struct {
-	activeColumn int  // 0=1:N, 1=N:1
-	activeRow    int  // row within column, -1 = no selection
+	activeColumn int // 0=1:N, 1=N:1
+	activeRow    int // row within column, -1 = no selection
 	columnCounts [2]int
 }
 
@@ -313,14 +313,14 @@ func (n *ERDiagramNav) GetSelectedRelationship(diagram *ERDiagram) *Relationship
 // --- Viewport ---
 
 type ERDiagramViewport struct {
-	PaneHeight   int
+	PaneHeight    int
 	ContentHeight int
 	ScrollOffset  int
 }
 
 func NewERDiagramViewport(paneHeight, contentHeight int) *ERDiagramViewport {
 	return &ERDiagramViewport{
-		PaneHeight:   paneHeight,
+		PaneHeight:    paneHeight,
 		ContentHeight: contentHeight,
 	}
 }
@@ -549,9 +549,10 @@ func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int, nav *ERDiagra
 	col1 := renderColumn("1:N", diagram.Incoming, diagram.IncomingOverflow, colWidth, -1)
 	col2 := renderColumn("N:1", diagram.Outgoing, diagram.OutgoingOverflow, colWidth, -1)
 
-	if selCol == 0 {
+	switch selCol {
+	case 0:
 		col1 = renderColumn("1:N", diagram.Incoming, diagram.IncomingOverflow, colWidth, selRow)
-	} else if selCol == 1 {
+	case 1:
 		col2 = renderColumn("N:1", diagram.Outgoing, diagram.OutgoingOverflow, colWidth, selRow)
 	}
 

@@ -222,21 +222,21 @@ func (g *Grid) SetData(result *postgres.QueryResult, schema, table string) {
 
 	// DEBUG
 	f, _ := os.Create("/tmp/dbx_grid_debug.log")
-	defer f.Close()
-	fmt.Fprintf(f, "SetData: schema=%q table=%q\n", schema, table)
-	fmt.Fprintf(f, "  Columns count: %d\n", len(result.Columns))
+	defer func() { _ = f.Close() }()
+	_, _ = fmt.Fprintf(f, "SetData: schema=%q table=%q\n", schema, table)
+	_, _ = fmt.Fprintf(f, "  Columns count: %d\n", len(result.Columns))
 	for i, col := range result.Columns {
-		fmt.Fprintf(f, "  Column[%d]: %s\n", i, col.Name)
+		_, _ = fmt.Fprintf(f, "  Column[%d]: %s\n", i, col.Name)
 	}
-	fmt.Fprintf(f, "  Rows count: %d\n", len(result.Rows))
+	_, _ = fmt.Fprintf(f, "  Rows count: %d\n", len(result.Rows))
 	if len(result.Rows) > 0 {
-		fmt.Fprintf(f, "  First row values count: %d\n", len(result.Rows[0]))
+		_, _ = fmt.Fprintf(f, "  First row values count: %d\n", len(result.Rows[0]))
 		for i, v := range result.Rows[0] {
-			fmt.Fprintf(f, "  Row[0][%d]: %v (type: %T)\n", i, v, v)
+			_, _ = fmt.Fprintf(f, "  Row[0][%d]: %v (type: %T)\n", i, v, v)
 		}
 	}
-	fmt.Fprintf(f, "  g.widths count: %d\n", len(g.widths))
-	fmt.Fprintf(f, "  g.width: %d\n", g.width)
+	_, _ = fmt.Fprintf(f, "  g.widths count: %d\n", len(g.widths))
+	_, _ = fmt.Fprintf(f, "  g.width: %d\n", g.width)
 }
 
 func (g *Grid) SetMetadata(constraints []postgres.ConstraintInfo, foreignKeys []postgres.ForeignKeyInfo, indexes []postgres.IndexInfo) {
@@ -921,8 +921,8 @@ func (g *Grid) startInsertRow() (tea.Cmd, bool) {
 	// DEBUG
 	f, _ := os.OpenFile("/tmp/dbx_mode_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if f != nil {
-		fmt.Fprintf(f, "startInsertRow: inserting=true pendingRows=%d editRow=%d\n", len(g.pendingRows), g.editRow)
-		f.Close()
+		_, _ = fmt.Fprintf(f, "startInsertRow: inserting=true pendingRows=%d editRow=%d\n", len(g.pendingRows), g.editRow)
+		_ = f.Close()
 	}
 
 	return func() tea.Msg { return nil }, true
@@ -1259,10 +1259,6 @@ func (g *Grid) isCellModified(rowIdx, colIdx int) bool {
 		}
 	}
 	return false
-}
-
-func (g *Grid) isRowPendingInsert(rowIdx int) bool {
-	return rowIdx >= len(g.data.Rows)
 }
 
 func (g *Grid) PrimaryKeyColumns() []string {
@@ -1747,9 +1743,9 @@ func (g *Grid) CommitAllDrafts() tea.Cmd {
 	f, _ := os.OpenFile("/tmp/dbx_grid_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if f != nil {
 		for i, query := range q {
-			fmt.Fprintf(f, "CommitAll[%d]: %s args=%v\n", i, query, a[i])
+			_, _ = fmt.Fprintf(f, "CommitAll[%d]: %s args=%v\n", i, query, a[i])
 		}
-		f.Close()
+		_ = f.Close()
 	}
 
 	return func() tea.Msg {
@@ -1761,11 +1757,11 @@ func (g *Grid) parseEditValue(s string, original interface{}) interface{} {
 	switch original.(type) {
 	case int64:
 		var v int64
-		fmt.Sscanf(s, "%d", &v)
+		_, _ = fmt.Sscanf(s, "%d", &v)
 		return v
 	case float64:
 		var v float64
-		fmt.Sscanf(s, "%g", &v)
+		_, _ = fmt.Sscanf(s, "%g", &v)
 		return v
 	case bool:
 		return s == "true" || s == "t" || s == "1"
@@ -1876,13 +1872,6 @@ func (g *Grid) halfPageDown() {
 			g.cursorRow = 0
 		}
 	}
-}
-
-func (g *Grid) setActiveTab(tab int) {
-	g.cursorRow = 0
-	g.cursorCol = 0
-	g.scrollRow = 0
-	g.scrollCol = 0
 }
 
 func (g *Grid) cursorMovedCmd() tea.Cmd {
@@ -2169,8 +2158,8 @@ func (g *Grid) renderRecordsView() string {
 	// DEBUG
 	f, _ := os.OpenFile("/tmp/dbx_mode_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if f != nil {
-		fmt.Fprintf(f, "renderRecordsView: inserting=%v pendingRows=%d editing=%v\n", g.inserting, len(g.pendingRows), g.editing)
-		f.Close()
+		_, _ = fmt.Fprintf(f, "renderRecordsView: inserting=%v pendingRows=%d editing=%v\n", g.inserting, len(g.pendingRows), g.editing)
+		_ = f.Close()
 	}
 
 	var prefix string

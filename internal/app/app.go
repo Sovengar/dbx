@@ -341,56 +341,6 @@ type autocompleteDataLoadedMsg struct {
 	schemaForeignKeys map[string][]postgres.ForeignKeyInfo
 }
 
-func buildSchemaExport(dbName string, schemas []postgres.SchemaDetail) *aiContext.SchemaExport {
-	export := &aiContext.SchemaExport{Database: dbName}
-
-	for _, sd := range schemas {
-		si := aiContext.SchemaInfo{Name: sd.Name}
-
-		for _, td := range sd.Tables {
-			ti := aiContext.TableInfo{
-				Name:     td.Name,
-				Type:     td.Type,
-				RowCount: int64(td.RowCount),
-			}
-
-			for _, c := range td.Columns {
-				ti.Columns = append(ti.Columns, aiContext.ColumnInfo{
-					Name:         c.Name,
-					DataType:     c.DataType,
-					IsNullable:   c.IsNullable == "YES",
-					DefaultValue: c.Default,
-				})
-			}
-
-			for _, idx := range td.Indexes {
-				ti.Indexes = append(ti.Indexes, aiContext.IndexInfo{
-					Name:      idx.Name,
-					Columns:   idx.Columns,
-					IsUnique:  idx.IsUnique,
-					IsPrimary: idx.IsPrimary,
-				})
-			}
-
-			for _, fk := range td.FKs {
-				ti.FKs = append(ti.FKs, aiContext.FKInfo{
-					Name:       fk.Name,
-					Columns:    fk.Column,
-					RefSchema:  fk.RefSchema,
-					RefTable:   fk.RefTable,
-					RefColumns: fk.RefColumn,
-				})
-			}
-
-			si.Tables = append(si.Tables, ti)
-		}
-
-		export.Schemas = append(export.Schemas, si)
-	}
-
-	return export
-}
-
 func buildSchemaExportFull(
 	dbName string,
 	schemas []postgres.SchemaDetail,
@@ -1714,9 +1664,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		mm := msg.Mouse()
 		direction := 0 // -1 = up, +1 = down
-		if mm.Button == tea.MouseWheelUp {
+		switch mm.Button {
+		case tea.MouseWheelUp:
 			direction = -1
-		} else if mm.Button == tea.MouseWheelDown {
+		case tea.MouseWheelDown:
 			direction = 1
 		}
 		if direction == 0 {
@@ -2234,7 +2185,9 @@ func (m Model) rollbackOnExit() {
 		}
 	}
 	if m.conn != nil {
-		m.conn.Close(context.Background())
+		if err := m.conn.Close(context.Background()); err != nil {
+			appDebugLog("Exit: connection close failed: %v", err)
+		}
 	}
 }
 
@@ -2319,15 +2272,15 @@ func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
 
 func exportAsSQL(schema, table string, result *postgres.QueryResult) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("INSERT INTO %q.%q (%s) VALUES\n", schema, table,
-		strings.Join(quoteColumns(result.Columns), ", ")))
+	_, _ = fmt.Fprintf(&sb, "INSERT INTO %q.%q (%s) VALUES\n", schema, table,
+		strings.Join(quoteColumns(result.Columns), ", "))
 
 	for i, row := range result.Rows {
 		values := make([]string, len(row))
 		for j, val := range row {
 			values[j] = formatSQLValue(val)
 		}
-		sb.WriteString(fmt.Sprintf("  (%s)", strings.Join(values, ", ")))
+		_, _ = fmt.Fprintf(&sb, "  (%s)", strings.Join(values, ", "))
 		if i < len(result.Rows)-1 {
 			sb.WriteString(",")
 		}
@@ -2388,7 +2341,8 @@ func exportAsCSV(result *postgres.QueryResult) string {
 	for i, col := range result.Columns {
 		headers[i] = col.Name
 	}
-	writer.Write(headers)
+	// Writes to a strings.Builder never fail, so the errors are ignored.
+	_ = writer.Write(headers)
 
 	// Rows
 	for _, row := range result.Rows {
@@ -2396,7 +2350,7 @@ func exportAsCSV(result *postgres.QueryResult) string {
 		for i, val := range row {
 			record[i] = fmt.Sprintf("%v", val)
 		}
-		writer.Write(record)
+		_ = writer.Write(record)
 	}
 
 	writer.Flush()
@@ -2405,14 +2359,14 @@ func exportAsCSV(result *postgres.QueryResult) string {
 
 func exportRowAsSQL(schema, table string, columns []string, row []interface{}) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("INSERT INTO %q.%q (%s) VALUES\n", schema, table,
-		strings.Join(quoteColumnNames(columns), ", ")))
+	_, _ = fmt.Fprintf(&sb, "INSERT INTO %q.%q (%s) VALUES\n", schema, table,
+		strings.Join(quoteColumnNames(columns), ", "))
 
 	values := make([]string, len(row))
 	for i, val := range row {
 		values[i] = formatSQLValue(val)
 	}
-	sb.WriteString(fmt.Sprintf("  (%s)\n", strings.Join(values, ", ")))
+	_, _ = fmt.Fprintf(&sb, "  (%s)\n", strings.Join(values, ", "))
 	return sb.String()
 }
 
@@ -2437,13 +2391,14 @@ func exportRowAsCSV(columns []string, row []interface{}) string {
 	var sb strings.Builder
 	writer := csv.NewWriter(&sb)
 
-	writer.Write(columns)
+	// Writes to a strings.Builder never fail, so the errors are ignored.
+	_ = writer.Write(columns)
 
 	record := make([]string, len(row))
 	for i, val := range row {
 		record[i] = fmt.Sprintf("%v", val)
 	}
-	writer.Write(record)
+	_ = writer.Write(record)
 
 	writer.Flush()
 	return sb.String()
@@ -2856,6 +2811,6 @@ func appDebugLog(format string, args ...interface{}) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	fmt.Fprintf(f, "App: "+format+"\n", args...)
+	defer func() { _ = f.Close() }()
+	_, _ = fmt.Fprintf(f, "App: "+format+"\n", args...)
 }

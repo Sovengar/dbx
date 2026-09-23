@@ -25,8 +25,8 @@ func NewQwen(apiKey, model string) *Qwen {
 func (q *Qwen) Name() string { return "qwen" }
 
 type qwenRequest struct {
-	Model    string       `json:"model"`
-	Messages []qwenMsg    `json:"messages"`
+	Model    string    `json:"model"`
+	Messages []qwenMsg `json:"messages"`
 }
 
 type qwenMsg struct {
@@ -68,7 +68,7 @@ func (q *Qwen) Generate(ctx context.Context, prompt string, schema string) (stri
 	if err != nil {
 		return "", fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

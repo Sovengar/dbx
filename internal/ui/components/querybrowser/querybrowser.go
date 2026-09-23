@@ -22,16 +22,16 @@ type QuerySelectedMsg struct {
 type QueryBrowserClosedMsg struct{}
 
 type QueryBrowser struct {
-	styles      *theme.Styles
-	store       *store.QueryStore
-	entries     []store.QueryEntry
-	cursor      int
-	scroll      int
-	tab         int // 0=History, 1=Favorites
-	visible     bool
-	width       int
-	height      int
-	filter      string
+	styles       *theme.Styles
+	store        *store.QueryStore
+	entries      []store.QueryEntry
+	cursor       int
+	scroll       int
+	tab          int // 0=History, 1=Favorites
+	visible      bool
+	width        int
+	height       int
+	filter       string
 	filterActive bool
 }
 
@@ -264,8 +264,7 @@ func (b *QueryBrowser) View() string {
 	var lines []string
 
 	// Tabs
-	historyTab := "History"
-	favoritesTab := "Favorites"
+	var historyTab, favoritesTab string
 	if b.tab == 0 {
 		historyTab = b.styles.Primary.Render("► History")
 		favoritesTab = b.styles.TextMuted.Render("  Favorites")
@@ -333,15 +332,15 @@ func qbDebugLog(format string, args ...interface{}) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	fmt.Fprintf(f, "QueryBrowser: "+format+"\n", args...)
+	defer func() { _ = f.Close() }()
+	_, _ = fmt.Fprintf(f, "QueryBrowser: "+format+"\n", args...)
 }
 
 func (b *QueryBrowser) renderEntry(idx int, e store.QueryEntry, maxW int) string {
 	isSelected := idx == b.cursor
 
 	// Timestamp
-	ts := e.Timestamp.Format("Jan 02 15:04")
+	var ts string
 	age := time.Since(e.Timestamp)
 	if age < time.Minute {
 		ts = "just now"

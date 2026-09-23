@@ -25,9 +25,9 @@ func NewOpenAI(apiKey, model string) *OpenAI {
 func (o *OpenAI) Name() string { return "openai" }
 
 type openAIRequest struct {
-	Model    string          `json:"model"`
-	Messages []openAIMsg     `json:"messages"`
-	MaxTokens int            `json:"max_tokens"`
+	Model     string      `json:"model"`
+	Messages  []openAIMsg `json:"messages"`
+	MaxTokens int         `json:"max_tokens"`
 }
 
 type openAIMsg struct {
@@ -70,7 +70,7 @@ func (o *OpenAI) Generate(ctx context.Context, prompt string, schema string) (st
 	if err != nil {
 		return "", fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -157,7 +157,7 @@ func resolveOpenCode(configModel string) (Provider, error) {
 func resolvePi() (Provider, error) {
 	apiKey, model, _, found := DetectPiConfig()
 	if !found {
-		return nil, fmt.Errorf("Pi not detected: set INFLECTION_API_KEY")
+		return nil, fmt.Errorf("pi not detected: set INFLECTION_API_KEY")
 	}
 	return NewPi(apiKey, model), nil
 }
@@ -165,7 +165,7 @@ func resolvePi() (Provider, error) {
 func resolveHermes() (Provider, error) {
 	apiKey, model, baseURL, found := DetectHermesConfig()
 	if !found {
-		return nil, fmt.Errorf("Hermes not detected: set NOUS_API_KEY or HERMES_API_KEY")
+		return nil, fmt.Errorf("hermes not detected: set NOUS_API_KEY or HERMES_API_KEY")
 	}
 	return NewOpenAICompatible("hermes", apiKey, model, baseURL), nil
 }

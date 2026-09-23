@@ -25,9 +25,9 @@ func NewDeepSeek(apiKey, model string) *DeepSeek {
 func (d *DeepSeek) Name() string { return "deepseek" }
 
 type deepSeekRequest struct {
-	Model    string          `json:"model"`
-	Messages []deepSeekMsg   `json:"messages"`
-	MaxTokens int            `json:"max_tokens"`
+	Model     string        `json:"model"`
+	Messages  []deepSeekMsg `json:"messages"`
+	MaxTokens int           `json:"max_tokens"`
 }
 
 type deepSeekMsg struct {
@@ -70,7 +70,7 @@ func (d *DeepSeek) Generate(ctx context.Context, prompt string, schema string) (
 	if err != nil {
 		return "", fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
