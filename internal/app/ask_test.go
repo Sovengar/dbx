@@ -173,6 +173,28 @@ func TestAsk_OpensRegardlessOfFocus(t *testing.T) {
 }
 
 // Scenario: `a` does not open ASK while the grid is editing or filtering
+func TestAsk_DoesNotOpenWhileGridFiltering(t *testing.T) {
+	m := newAskTestModel(t, &fakeProvider{name: "fake"})
+	m.grid.SetData(queryResult([]interface{}{"alpha"}), "public", "users")
+	m.router.FocusPane(FocusGrid)
+	m.grid.Focus()
+	if _, handled := m.grid.Update(tea.KeyPressMsg{Code: 'f', Text: "f"}); !handled {
+		t.Fatal("grid did not enter column-filter mode")
+	}
+	if !m.grid.IsFiltering() {
+		t.Fatal("grid is not filtering")
+	}
+
+	m, _ = press(t, m, tea.KeyPressMsg{Code: 'a', Text: "a"})
+
+	if m.askOpen || m.ask.IsVisible() {
+		t.Fatal("ASK opened while the grid was filtering")
+	}
+	if !strings.Contains(m.grid.FilterText(), "a") {
+		t.Fatalf("grid filter text = %q, want it to contain 'a'", m.grid.FilterText())
+	}
+}
+
 func TestAsk_DoesNotOpenWhileGridEditing(t *testing.T) {
 	m := newAskTestModel(t, &fakeProvider{name: "fake"})
 	m.grid.SetData(queryResult([]interface{}{"1"}), "public", "users")
