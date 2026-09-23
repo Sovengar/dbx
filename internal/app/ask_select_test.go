@@ -48,6 +48,14 @@ func TestIsSelectOnly(t *testing.T) {
 		{"for share", "SELECT * FROM users FOR SHARE", false},
 		{"nextval", "SELECT nextval('s')", false},
 		{"for in string", "SELECT 'for' AS x", true},
+		// FOR is legal in expressions; only row locks must be rejected.
+		{"substring for", "SELECT substring(name FROM 1 FOR 2) FROM users", true},
+		{"overlay for", "SELECT overlay(name placing 'x' from 1 for 2) FROM users", true},
+		{"for key share", "SELECT * FROM users FOR KEY SHARE", false},
+		{"for no key update", "SELECT * FROM users FOR NO KEY UPDATE", false},
+		// E-string detection must not be fooled by '$' or non-ASCII identifiers.
+		{"dollar ident before e-string", `SELECT foo$E'a\'; DELETE FROM users`, false},
+		{"unicode ident before e-string", `SELECT caféE'a\'; DELETE FROM users`, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -102,7 +110,7 @@ func TestSelectOnlyViolation_Message(t *testing.T) {
 		sql  string
 		want string
 	}{
-		{"SELECT * FROM users FOR SHARE", "FOR is not allowed"},
+		{"SELECT * FROM users FOR SHARE", "row locking is not allowed"},
 		{"SELECT * INTO t FROM users", "INTO is not allowed"},
 		{"SELECT nextval('s')", "NEXTVAL is not allowed"},
 		{"DELETE FROM users", "DELETE statements are not allowed"},
@@ -116,5 +124,42 @@ func TestSelectOnlyViolation_Message(t *testing.T) {
 	}
 	if got := selectOnlyViolation("SELECT 1"); got != "" {
 		t.Fatalf("selectOnlyViolation(SELECT 1) = %q, want empty", got)
+	}
+	if got := selectOnlyViolation("SELECT substring(name FROM 1 FOR 2) FROM users"); got != "" {
+		t.Fatalf("selectOnlyViolation(substring FOR) = %q, want empty", got)
+	}
+}
+
+func TestExecute_RefusedWhileReadOnlyActive(t *testing.T) {
+	f := newFakeRunner()
+	f.runner.readOnlyActive = true
+
+	if _, _, err := f.runner.execute(context.Background(), "UPDATE users SET a = 1"); err == nil {
+		t.Fatal("execute ran while a read-only query was active")
+	}
+	if len(f.execs) != 0 {
+		t.Fatalf("executed %d statements, want 0", len(f.execs))
+	}
+}
+
+func TestExecuteReadOnly_RefusesWhenAlreadyActive(t *testing.T) {
+	f := newFakeRunner()
+	f.runner.beginReadOnly = func(context.Context) (pgx.Tx, error) { return &fakeTx{}, nil }
+	f.runner.readOnlyActive = true
+
+	if _, err := f.runner.executeReadOnly(context.Background(), "SELECT 1"); err == nil {
+		t.Fatal("executeReadOnly started while one was already active")
+	}
+}
+
+func TestExecuteReadOnly_ClearsActiveFlag(t *testing.T) {
+	f := newFakeRunner()
+	f.runner.beginReadOnly = func(context.Context) (pgx.Tx, error) { return &fakeTx{}, nil }
+
+	if _, err := f.runner.executeReadOnly(context.Background(), "SELECT 1"); err != nil {
+		t.Fatalf("executeReadOnly: %v", err)
+	}
+	if f.runner.readOnlyActive {
+		t.Fatal("readOnlyActive was not cleared after executeReadOnly returned")
 	}
 }

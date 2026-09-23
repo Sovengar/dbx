@@ -52,6 +52,10 @@ type statementRunner struct {
 	beginReadOnly func(ctx context.Context) (pgx.Tx, error)
 	exec          func(ctx context.Context, q postgres.Querier, sql string) (*postgres.QueryResult, error)
 	tx            pgx.Tx
+	// readOnlyActive reports that an ASK read-only transaction is open on the
+	// shared connection. Other DB commands must not run while it is set, or
+	// they would either fail read-only or be rolled back with it.
+	readOnlyActive bool
 }
 
 func newStatementRunner(conn *pgx.Conn) *statementRunner {
@@ -74,6 +78,9 @@ func (r *statementRunner) pending() bool { return r.tx != nil }
 // A new execution closes the transaction opened by the previous one: the
 // user's rollback window is the statement (or batch) currently being run.
 func (r *statementRunner) execute(ctx context.Context, sql string) (*postgres.QueryResult, bool, error) {
+	if r.readOnlyActive {
+		return nil, false, fmt.Errorf("a read-only ASK query is still running")
+	}
 	committed, err := r.commitPending(ctx)
 	if err != nil {
 		return nil, false, err
@@ -164,6 +171,9 @@ func (r *statementRunner) executeReadOnly(ctx context.Context, sql string) (*pos
 	if r.pending() {
 		return nil, fmt.Errorf("a DML transaction is pending: commit or roll back first")
 	}
+	if r.readOnlyActive {
+		return nil, fmt.Errorf("a read-only query is already running")
+	}
 	if r.beginReadOnly == nil {
 		return nil, fmt.Errorf("read-only transactions are not available")
 	}
@@ -171,7 +181,11 @@ func (r *statementRunner) executeReadOnly(ctx context.Context, sql string) (*pos
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin read-only transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	r.readOnlyActive = true
+	defer func() {
+		r.readOnlyActive = false
+		_ = tx.Rollback(ctx)
+	}()
 
 	result, err := r.exec(ctx, tx, sql)
 	if err != nil {
@@ -180,12 +194,13 @@ func (r *statementRunner) executeReadOnly(ctx context.Context, sql string) (*pos
 	return result, nil
 }
 
-// forbiddenStatementKeywords are mutation/DDL/locking keywords that must never
-// appear in a statement run through the ASK read-only path. WITH is
-// intentionally absent: a data-modifying CTE is caught by its inner
-// DELETE/INSERT/UPDATE. INTO and FOR catch SELECT-based writes and row locks
-// (SELECT ... INTO, SELECT ... FOR UPDATE/SHARE); NEXTVAL catches sequence
-// advancement, which the READ ONLY transaction would also reject.
+// forbiddenStatementKeywords are mutation/DDL keywords that must never appear
+// in a statement run through the ASK read-only path. WITH is intentionally
+// absent: a data-modifying CTE is caught by its inner DELETE/INSERT/UPDATE.
+// INTO catches SELECT ... INTO; NEXTVAL catches sequence advancement, which
+// the READ ONLY transaction would also reject. FOR is handled separately
+// because it is also a legal clause in expressions such as
+// substring(x FROM 1 FOR 2).
 var forbiddenStatementKeywords = map[string]bool{
 	"INSERT":   true,
 	"UPDATE":   true,
@@ -206,8 +221,16 @@ var forbiddenStatementKeywords = map[string]bool{
 	"REFRESH":  true,
 	"IMPORT":   true,
 	"INTO":     true,
-	"FOR":      true,
 	"NEXTVAL":  true,
+}
+
+// lockingForKeywords are the tokens that turn a FOR clause into a row lock
+// (FOR UPDATE / FOR SHARE / FOR NO KEY UPDATE / FOR KEY SHARE / FOR UPDATE OF).
+var lockingForKeywords = map[string]bool{
+	"UPDATE": true,
+	"SHARE":  true,
+	"KEY":    true,
+	"NO":     true,
 }
 
 // isSelectOnly reports whether sql is a single SELECT or WITH ... SELECT
@@ -244,9 +267,12 @@ func selectOnlyViolation(sql string) string {
 	if tokens[0] != "SELECT" && tokens[0] != "WITH" {
 		return fmt.Sprintf("%s statements are not allowed", tokens[0])
 	}
-	for _, tok := range tokens {
+	for i, tok := range tokens {
 		if forbiddenStatementKeywords[tok] {
 			return fmt.Sprintf("%s is not allowed in an ASK query", tok)
+		}
+		if tok == "FOR" && i+1 < len(tokens) && lockingForKeywords[tokens[i+1]] {
+			return "FOR UPDATE/SHARE row locking is not allowed in an ASK query"
 		}
 	}
 	if tokens[0] == "WITH" {
@@ -298,7 +324,7 @@ func maskNonCode(sql string) string {
 			}
 			blank(start, i)
 		case (sql[i] == 'e' || sql[i] == 'E') && i+1 < len(sql) && sql[i+1] == '\'' &&
-			(i == 0 || !isSQLIdentChar(sql[i-1])):
+			(i == 0 || !isIdentifierByte(sql[i-1])):
 			// E-string: backslash escapes are honored.
 			start := i
 			i += 2
@@ -386,13 +412,23 @@ func matchDollarQuote(sql string, i int) (int, bool) {
 	return j + 1 + idx + len(tag), true
 }
 
-// isSQLIdentChar reports whether b can appear in an identifier or dollar-quote
-// tag.
+// isSQLIdentChar reports whether b can appear in an unquoted identifier or a
+// dollar-quote tag. Dollar-quote tags cannot contain '$', so callers that need
+// the identifier rule (which allows '$') should use isIdentifierByte.
 func isSQLIdentChar(b byte) bool {
 	return b == '_' ||
 		(b >= 'a' && b <= 'z') ||
 		(b >= 'A' && b <= 'Z') ||
-		(b >= '0' && b <= '9')
+		(b >= '0' && b <= '9') ||
+		b >= 0x80
+}
+
+// isIdentifierByte reports whether b can appear inside a PostgreSQL identifier.
+// Unlike a dollar-quote tag, identifiers may contain '$', and non-ASCII bytes
+// are legal, so an E'...' immediately preceded by either is part of a longer
+// identifier rather than an E-string.
+func isIdentifierByte(b byte) bool {
+	return isSQLIdentChar(b) || b == '$'
 }
 
 // sqlKeywordTokens splits cleaned SQL into upper-case keyword-ish tokens.
