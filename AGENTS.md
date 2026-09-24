@@ -28,6 +28,35 @@ la verificación (`go build ./... && go vet ./... && go test ./...`).
 mientras el proceso sigue corriendo con la copia en memoria. La próxima vez que
 abra dbx usará la nueva versión.
 
+## CI y protección de `main`
+
+CI vive en `.github/workflows/ci.yml` y corre en **todo PR** y en **todo push
+a `main`** (sin filtros `paths`: un workflow skipeado deja los required checks
+en pending para siempre y bloquea todos los PRs). Tres jobs:
+
+- **`Build`**: `go build ./...` y `go vet ./...`.
+- **`Lint`**: `make lint` → golangci-lint **v2.13.2** (versión pineada en el
+  `Makefile`; no hay `.golangci.yml`, corre el set por defecto).
+- **`Test`**: `go test -race -covermode=atomic -coverprofile=… ./...` (suite
+  completo, sin `-short`). Los tests de integración de `internal/app` levantan
+  PostgreSQL vía **testcontainers** usando el Docker que ya trae el runner
+  `ubuntu-24.04`; no hace falta bloque `services:`. Los tests del scanner
+  (`internal/config`) usan un seam de discovery, así que **no** requieren `fd`.
+
+Reglas de la rama por defecto (ruleset **`protect-main`**, reproducible con
+`scripts/setup-repo-protection.sh`; la rama se deriva del default branch real,
+no se hardcodea):
+
+- Merge **solo vía PR**, con los tres checks en verde; force-push y borrado de
+  la rama por defecto bloqueados.
+- Existe **bypass de admin** y es **deliberado** (aprobado por el usuario): un
+  admin *podría* pushear directo, pero la intención de trabajo es siempre el
+  camino PR. Ningún actor no-admin puede hacerlo.
+- `delete_branch_on_merge=true`: GitHub borra la rama remota al mergear.
+
+Ante un merge: verificar que el workflow `push` de `main` quedó verde y que el
+badge del README reporta `passing` (el badge cachea unos segundos).
+
 ## Stack
 
 - **Go 1.22+** with Bubbletea v2 (TUI)
