@@ -1,4 +1,4 @@
-.PHONY: build install test lint run clean
+.PHONY: build install test lint run clean check
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.Version=$(VERSION)"
@@ -19,6 +19,11 @@ test:
 
 lint:
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run
+
+# One-shot local gate. `build` compiles into the repo-local .local/bin/dbx and
+# never touches the system; `install` (which copies to ~/.local/bin) is
+# deliberately excluded.
+check: build lint test
 
 clean:
 	rm -rf .local/bin/

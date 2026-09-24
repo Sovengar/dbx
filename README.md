@@ -1,5 +1,7 @@
 # dbx
 
+[![CI](https://github.com/Sovengar/dbx/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sovengar/dbx/actions/workflows/ci.yml)
+
 > **Database x** — A modern TUI database client with native AI integration.
 
 dbx is a terminal UI for databases designed for both humans and AI agents.
