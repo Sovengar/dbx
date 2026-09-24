@@ -17,16 +17,23 @@ const (
 )
 
 // keyPattern matches whole-word Enter/Escape tokens case-insensitively. The
-// longer "escape" alternative precedes "esc" so it wins; the word boundaries
-// keep substrings such as "Editor", "entered" or "escalate" untouched.
+// trailing word boundary is what disambiguates "esc" from "escape" (after
+// "esc" comes "a", which is a word character, so \b fails); "escape" is listed
+// first only for readability. The boundaries keep substrings such as "Editor",
+// "entered" or "escalate" untouched.
 var keyPattern = regexp.MustCompile(`(?i)\b(escape|esc|enter)\b`)
 
 // nerdFont is the process-wide glyph switch, defaulting to on. The app sets it
 // from ui.nerd_font before any view renders.
 var nerdFont = true
 
-// SetNerdFont toggles glyph substitution for Enter/Escape key hints.
-func SetNerdFont(on bool) { nerdFont = on }
+// SetNerdFont toggles glyph substitution for Enter/Escape key hints and returns
+// the previous value, so callers (notably tests) can restore the prior state.
+func SetNerdFont(on bool) bool {
+	prev := nerdFont
+	nerdFont = on
+	return prev
+}
 
 // NerdFont reports whether glyph substitution is enabled.
 func NerdFont() bool { return nerdFont }

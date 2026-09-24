@@ -116,8 +116,8 @@ func TestKeybindsPane_TxPendingShowsRollback(t *testing.T) {
 
 // Scenario: The editor announces its Esc binding (close editor).
 func TestKeybindsPane_EditorShowsCloseKey(t *testing.T) {
-	keydisplay.SetNerdFont(false)
-	defer keydisplay.SetNerdFont(true)
+	prev := keydisplay.SetNerdFont(false)
+	defer keydisplay.SetNerdFont(prev)
 
 	p := paneWith(config.ContextEditor)
 	p.SetEditorOpen(true)
@@ -128,8 +128,8 @@ func TestKeybindsPane_EditorShowsCloseKey(t *testing.T) {
 
 // Scenario: With Nerd Font hints on, the Esc binding renders as a glyph.
 func TestKeybindsPane_EditorShowsEscGlyphWhenNerdFontOn(t *testing.T) {
-	keydisplay.SetNerdFont(true)
-	defer keydisplay.SetNerdFont(true)
+	prev := keydisplay.SetNerdFont(true)
+	defer keydisplay.SetNerdFont(prev)
 
 	p := paneWith(config.ContextEditor)
 	p.SetEditorOpen(true)

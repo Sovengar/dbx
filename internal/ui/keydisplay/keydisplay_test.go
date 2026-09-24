@@ -3,8 +3,8 @@ package keydisplay
 import "testing"
 
 func TestKey_OffIsIdentity(t *testing.T) {
-	SetNerdFont(false)
-	defer SetNerdFont(true)
+	prev := SetNerdFont(false)
+	defer SetNerdFont(prev)
 
 	for _, s := range []string{
 		"",
@@ -21,7 +21,8 @@ func TestKey_OffIsIdentity(t *testing.T) {
 }
 
 func TestKey_OnMapsEnterAndEsc(t *testing.T) {
-	SetNerdFont(true)
+	prev := SetNerdFont(true)
+	defer SetNerdFont(prev)
 
 	cases := map[string]string{
 		"enter":  glyphEnter,
@@ -41,7 +42,8 @@ func TestKey_OnMapsEnterAndEsc(t *testing.T) {
 }
 
 func TestKey_NoFalsePositives(t *testing.T) {
-	SetNerdFont(true)
+	prev := SetNerdFont(true)
+	defer SetNerdFont(prev)
 
 	for _, s := range []string{"Editor", "entered", "escalate", "selection", "ESCALATE"} {
 		if got := Key(s); got != s {
@@ -51,7 +53,8 @@ func TestKey_NoFalsePositives(t *testing.T) {
 }
 
 func TestKey_CombinedTokens(t *testing.T) {
-	SetNerdFont(true)
+	prev := SetNerdFont(true)
+	defer SetNerdFont(prev)
 
 	cases := map[string]string{
 		"Enter/Tab": glyphEnter + "/Tab",
@@ -68,13 +71,16 @@ func TestKey_CombinedTokens(t *testing.T) {
 }
 
 func TestNerdFont_DefaultAndToggle(t *testing.T) {
-	SetNerdFont(true)
+	prev := SetNerdFont(true)
+	defer SetNerdFont(prev)
+
 	if !NerdFont() {
 		t.Fatal("NerdFont() = false after SetNerdFont(true)")
 	}
-	SetNerdFont(false)
+	if got := SetNerdFont(false); !got {
+		t.Fatal("SetNerdFont(false) returned false, want the previous value true")
+	}
 	if NerdFont() {
 		t.Fatal("NerdFont() = true after SetNerdFont(false)")
 	}
-	SetNerdFont(true)
 }

@@ -284,7 +284,7 @@ func (a *Ask) View() string {
 	case stateExecuting:
 		lines = append(lines, a.styles.Info.Render("Executing..."))
 	case stateReview:
-		lines = append(lines, a.styles.Primary.Render("> ")+a.styles.Text.Render(keydisplay.Key("review the SQL above, Enter to run, Esc to cancel")))
+		lines = append(lines, a.styles.Primary.Render("> ")+a.styles.Text.Render("review the SQL above, "+keydisplay.Key("Enter")+" to run, "+keydisplay.Key("Esc")+" to cancel"))
 	default:
 		lines = append(lines, a.styles.Primary.Render("> ")+a.styles.Text.Render(a.input)+"_")
 	}
