@@ -101,12 +101,23 @@ Defaults: `enabled = true`, `dir = $TMPDIR/dbx/sessions`, `retention_days = 30`.
 [ui]
 page_size = 100        # rows per grid page
 yank_max_rows = 10     # clipboard if the selection is <= this, else a file
-nerd_font = true       # Nerd Font glyphs for Enter/Esc key hints
+nerd_font = true       # Nerd Font glyphs for key hints
 ```
 
 Defaults: `page_size = 100`, `yank_max_rows = 10`, `nerd_font = true`. Set
-`nerd_font = false` to render Enter/Esc key hints as plain text (`enter`/`esc`)
-for terminals without a Nerd Font.
+`nerd_font = false` to render key hints as plain text (`enter`/`esc`/`tab`/
+`ctrl+d`) for terminals without a Nerd Font.
+
+With `nerd_font = true`, key hints render as glyphs in the keybinds pane, the
+`?` help modal and the inline footers: `enter` `esc` `tab` `space` `backspace`
+`delete` `up` `down` `left` `right` `home` `end` `pgup` `pgdn`, and modifier
+combinations collapse to a symbol (`ctrl+enter` renders as `⌃`). F-keys
+(`f1`–`f9`) stay as text because the pane compresses the run into one token.
+
+The glyphs come from the Material Design set, so they require a Nerd Font that
+ships the newer `nf-md-*` codepoints. Nerd Fonts v3+ builds do; older
+"Complete" variants (for example `Caskaydia Cove Nerd Font Complete`) do not,
+and the terminal will fall back to another installed Nerd Font for those cells.
 
 The following keys are accepted but **inert** (kept for backward compatibility;
 nothing reads them):
