@@ -9,6 +9,7 @@ import (
 
 	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/theme"
+	"github.com/buble/dbx/internal/ui/keydisplay"
 )
 
 type ConnectionSelectedMsg struct {
@@ -186,7 +187,7 @@ func (p *Picker) View() string {
 	s.WriteString("\n")
 	footer := lipgloss.NewStyle().
 		Foreground(p.styles.TextMuted.GetForeground()).
-		Render("j/k ↑↓   space toggle   enter select   q quit")
+		Render(keydisplay.Key("j/k ↑↓   space toggle   enter select   q quit"))
 	s.WriteString(p.centerText(footer))
 
 	return s.String()

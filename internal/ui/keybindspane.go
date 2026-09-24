@@ -10,6 +10,7 @@ import (
 	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/theme"
 	"github.com/buble/dbx/internal/ui/bordered"
+	"github.com/buble/dbx/internal/ui/keydisplay"
 )
 
 // maxKeybindsPerLine caps how many keybind segments the pane packs into a
@@ -127,7 +128,7 @@ func (s *KeybindsPane) renderLines() []string {
 		if g.KeyText == "" {
 			continue
 		}
-		segments = append(segments, g.KeyText+" "+g.Label)
+		segments = append(segments, keydisplay.Key(g.KeyText)+" "+g.Label)
 	}
 	if s.txPending {
 		segments = append(segments, "tx pending")

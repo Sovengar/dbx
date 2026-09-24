@@ -89,6 +89,7 @@ type UIConfig struct {
 	PageSize         int    `mapstructure:"page_size"`
 	YankMaxRows      int    `mapstructure:"yank_max_rows"`
 	QueryHistoryPath string `mapstructure:"query_history_path"`
+	NerdFont         bool   `mapstructure:"nerd_font"`
 }
 
 type EditorConfig struct {
@@ -143,6 +144,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("ui.page_size", 100)
 	v.SetDefault("ui.yank_max_rows", 10)
 	v.SetDefault("ui.query_history_path", filepath.Join(StateDir(), "query_history.json"))
+	v.SetDefault("ui.nerd_font", true)
 
 	v.SetDefault("editor.autocomplete", true)
 	v.SetDefault("editor.autocomplete_trigger", 1)

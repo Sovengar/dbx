@@ -101,9 +101,12 @@ Defaults: `enabled = true`, `dir = $TMPDIR/dbx/sessions`, `retention_days = 30`.
 [ui]
 page_size = 100        # rows per grid page
 yank_max_rows = 10     # clipboard if the selection is <= this, else a file
+nerd_font = true       # Nerd Font glyphs for Enter/Esc key hints
 ```
 
-Defaults: `page_size = 100`, `yank_max_rows = 10`.
+Defaults: `page_size = 100`, `yank_max_rows = 10`, `nerd_font = true`. Set
+`nerd_font = false` to render Enter/Esc key hints as plain text (`enter`/`esc`)
+for terminals without a Nerd Font.
 
 The following keys are accepted but **inert** (kept for backward compatibility;
 nothing reads them):

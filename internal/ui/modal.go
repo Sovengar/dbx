@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/theme"
+	"github.com/buble/dbx/internal/ui/keydisplay"
 )
 
 type HelpModal struct {
@@ -187,7 +188,7 @@ func (m *HelpModal) View() string {
 	lines = append(lines, m.staticLine("Wheel", "Scroll the focused pane"))
 	lines = append(lines, "")
 
-	lines = append(lines, m.styles.Help.Render("  j/k scroll · Esc close"))
+	lines = append(lines, m.styles.Help.Render(keydisplay.Key("  j/k scroll · Esc close")))
 
 	maxVisible := m.height - 10
 	if maxVisible < 5 {
@@ -230,7 +231,7 @@ func (m *HelpModal) groupLabelLine(label string) string {
 }
 
 func (m *HelpModal) staticLine(key, description string) string {
-	keyStyled := m.styles.Primary.Render(fmt.Sprintf("%-14s", key))
+	keyStyled := m.styles.Primary.Render(fmt.Sprintf("%-14s", keydisplay.Key(key)))
 	descStyled := m.styles.Text.Render(description)
 	return "  " + keyStyled + descStyled
 }

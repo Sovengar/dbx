@@ -6,6 +6,7 @@ import (
 
 	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/theme"
+	"github.com/buble/dbx/internal/ui/keydisplay"
 )
 
 func testRegistry() *config.KeybindRegistry {
@@ -115,10 +116,29 @@ func TestKeybindsPane_TxPendingShowsRollback(t *testing.T) {
 
 // Scenario: The editor announces its Esc binding (close editor).
 func TestKeybindsPane_EditorShowsCloseKey(t *testing.T) {
+	prev := keydisplay.SetNerdFont(false)
+	defer keydisplay.SetNerdFont(prev)
+
 	p := paneWith(config.ContextEditor)
 	p.SetEditorOpen(true)
 	if !linesContain(p.renderLines(), "esc Close Editor") {
 		t.Fatalf("editor pane does not show 'esc Close Editor': %v", p.renderLines())
+	}
+}
+
+// Scenario: With Nerd Font hints on, the Esc binding renders as a glyph.
+func TestKeybindsPane_EditorShowsEscGlyphWhenNerdFontOn(t *testing.T) {
+	prev := keydisplay.SetNerdFont(true)
+	defer keydisplay.SetNerdFont(prev)
+
+	p := paneWith(config.ContextEditor)
+	p.SetEditorOpen(true)
+	lines := p.renderLines()
+	if linesContain(lines, "esc Close Editor") {
+		t.Fatalf("editor pane still shows plain 'esc' with nerd font on: %v", lines)
+	}
+	if !linesContain(lines, "\U000F12B7 Close Editor") {
+		t.Fatalf("editor pane does not show the Esc glyph: %v", lines)
 	}
 }
 
