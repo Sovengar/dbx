@@ -10,6 +10,7 @@ import (
 
 	"github.com/buble/dbx/internal/theme"
 	"github.com/buble/dbx/internal/ui/bordered"
+	"github.com/buble/dbx/internal/ui/keydisplay"
 )
 
 // AskSubmittedMsg is emitted when the user submits a question while typing.
@@ -283,7 +284,7 @@ func (a *Ask) View() string {
 	case stateExecuting:
 		lines = append(lines, a.styles.Info.Render("Executing..."))
 	case stateReview:
-		lines = append(lines, a.styles.Primary.Render("> ")+a.styles.Text.Render("review the SQL above, Enter to run, Esc to cancel"))
+		lines = append(lines, a.styles.Primary.Render("> ")+a.styles.Text.Render(keydisplay.Key("review the SQL above, Enter to run, Esc to cancel")))
 	default:
 		lines = append(lines, a.styles.Primary.Render("> ")+a.styles.Text.Render(a.input)+"_")
 	}
@@ -296,7 +297,7 @@ func (a *Ask) View() string {
 		lines = append(lines, "")
 	}
 
-	footer := " Enter send · Esc close"
+	footer := keydisplay.Key(" Enter send · Esc close")
 	lines = append(lines, a.styles.Help.Render(footer))
 
 	content := strings.Join(lines, "\n")

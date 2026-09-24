@@ -35,6 +35,7 @@ import (
 	"github.com/buble/dbx/internal/ui/components/palette"
 	"github.com/buble/dbx/internal/ui/components/picker"
 	"github.com/buble/dbx/internal/ui/components/querybrowser"
+	"github.com/buble/dbx/internal/ui/keydisplay"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -113,6 +114,7 @@ type Model struct {
 var spinnerChars = [9]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"}
 
 func NewModel(cfg *config.Config) Model {
+	keydisplay.SetNerdFont(cfg.UI.NerdFont)
 	t := theme.Resolve(cfg.Theme.Mode)
 	kbr := config.NewKeybindRegistry(cfg.Keybindings)
 	pageSize := 100
@@ -2471,10 +2473,10 @@ func (m Model) View() tea.View {
 		content = m.picker.View()
 	case StateLoading:
 		content = m.styles.Text.Render("Connecting to database...") + "\n\n" +
-			m.styles.Text.Render("  esc cancel")
+			m.styles.Text.Render(keydisplay.Key("  esc cancel"))
 	case StateError:
 		content = m.styles.Error.Render(fmt.Sprintf("Error: %v", m.err)) + "\n\n" +
-			m.styles.Text.Render("  r retry  ·  esc connections  ·  q quit")
+			m.styles.Text.Render(keydisplay.Key("  r retry  ·  esc connections  ·  q quit"))
 	case StateMain:
 		content = m.renderMainView()
 	}

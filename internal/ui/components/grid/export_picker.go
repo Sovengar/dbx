@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/buble/dbx/internal/theme"
+	"github.com/buble/dbx/internal/ui/keydisplay"
 )
 
 type ExportFormat int
@@ -219,7 +220,7 @@ func (ep *ExportPicker) View() string {
 
 	// Footer
 	lines = append(lines, "")
-	footer := ep.styles.Help.Render("j/k ↑↓   enter copy   esc cancel")
+	footer := ep.styles.Help.Render(keydisplay.Key("j/k ↑↓   enter copy   esc cancel"))
 	lines = append(lines, footer)
 
 	content := strings.Join(lines, "\n")

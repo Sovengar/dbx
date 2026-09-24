@@ -13,6 +13,7 @@ import (
 	"github.com/buble/dbx/internal/store"
 	"github.com/buble/dbx/internal/theme"
 	"github.com/buble/dbx/internal/ui/bordered"
+	"github.com/buble/dbx/internal/ui/keydisplay"
 )
 
 type QuerySelectedMsg struct {
@@ -312,7 +313,7 @@ func (b *QueryBrowser) View() string {
 	}
 
 	// Footer
-	footer := " j/k navigate · Enter load · f favorite · d delete · / filter · Tab switch · Esc close"
+	footer := keydisplay.Key(" j/k navigate · Enter load · f favorite · d delete · / filter · Tab switch · Esc close")
 	lines = append(lines, b.styles.Help.Render(footer))
 
 	content := strings.Join(lines, "\n")
