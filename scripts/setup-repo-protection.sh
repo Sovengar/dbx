@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# setup-repo-protection.sh — idempotently configure the `protect-main` branch
-# ruleset, the repo merge setting, and the labels dependabot.yml references.
+# setup-repo-protection.sh — idempotently configure the `protect-<branch>` branch
+# ruleset (name derived from the default branch), the repo merge setting, and the
+# labels dependabot.yml references.
 #
 # Policy (see the plan / PR description for the rationale):
 #   - block branch deletion            (`deletion`)
@@ -37,11 +38,10 @@
 #   scripts/setup-repo-protection.sh [--dry-run] [--contexts Build,Lint,Test] [--sha <commit>]
 #
 # Env overrides:
-#   RULESET_NAME=protect-main   BRANCH=<default branch>   GH_ACTIONS_APP_ID=15368
+#   RULESET_NAME=protect-<branch>   BRANCH=<default branch>   GH_ACTIONS_APP_ID=15368
 
 set -euo pipefail
 
-RULESET_NAME="${RULESET_NAME:-protect-main}"
 # GitHub Actions is the integration that reports our CI check runs.
 GH_ACTIONS_APP_ID="${GH_ACTIONS_APP_ID:-15368}"
 REQUIRED_DEFAULT=(Build Lint Test)
@@ -83,6 +83,10 @@ REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 # overrides it explicitly. `/` in a branch name is legal, so parse as JSON.
 BRANCH="${BRANCH:-$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)}"
 [ -n "$BRANCH" ] && [ "$BRANCH" != "null" ] || { echo "ERROR: could not resolve the default branch for ${REPO}." >&2; exit 1; }
+
+# The ruleset name follows the protected branch (`protect-<branch>`), so renaming
+# the default branch renames the ruleset instead of leaving a stale `protect-main`.
+RULESET_NAME="${RULESET_NAME:-protect-${BRANCH}}"
 
 # find_ruleset_id prints the id of the ruleset named RULESET_NAME, or nothing.
 # The list is paginated (per_page=100) so a large collection cannot make us miss
