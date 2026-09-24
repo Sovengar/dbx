@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/theme"
+	"github.com/buble/dbx/internal/ui/keydisplay"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -56,7 +57,7 @@ func TestHelpModal_EditorSection_IncludesCopySQL(t *testing.T) {
 	if !strings.Contains(view, "Copy SQL") {
 		t.Fatal("Help modal does not contain 'Copy SQL' in Editor section")
 	}
-	if !strings.Contains(view, "ctrl+y") {
+	if !strings.Contains(view, keydisplay.Key("ctrl+y")) {
 		t.Fatal("Help modal does not show 'ctrl+y' keybind for Copy SQL")
 	}
 }
@@ -98,7 +99,7 @@ func TestHelpModal_ClosesOnEscOrQuestion(t *testing.T) {
 func TestHelpModal_CustomKeyOverride(t *testing.T) {
 	kb := config.NewKeybindRegistry(config.KeybindingsConfig{Custom: map[string]string{"rollback": "ctrl+z"}})
 	view := modalWith(kb).View()
-	if !strings.Contains(view, "ctrl+z") {
+	if !strings.Contains(view, keydisplay.Key("ctrl+z")) {
 		t.Fatalf("modal does not show the custom rollback key: %q", view)
 	}
 	if strings.Contains(view, "U Rollback Last Transaction") {
@@ -112,7 +113,7 @@ func TestHelpModal_GridShowsAliasesAndGroups(t *testing.T) {
 	view := ansi.Strip(modalWith(config.NewKeybindRegistry(config.KeybindingsConfig{})).View())
 
 	// next_page is ungrouped, so every alias must be listed on its line.
-	wantLine := "  " + fmt.Sprintf("%-14s", "n, ], ctrl+right") + "Next Page"
+	wantLine := "  " + fmt.Sprintf("%-14s", keydisplay.Key("n, ], ctrl+right")) + "Next Page"
 	if !strings.Contains(view, wantLine) {
 		t.Errorf("Grid section is missing the full next_page alias line; want %q", wantLine)
 	}

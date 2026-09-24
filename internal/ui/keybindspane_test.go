@@ -189,7 +189,7 @@ func TestKeybindsPane_GridRendersGroups(t *testing.T) {
 	for _, want := range []string{
 		"hjkl Navigate",
 		"g/G First/Last",
-		"ctrl+u/ctrl+d Half Page",
+		keydisplay.Key("ctrl+u/ctrl+d") + " Half Page",
 		"n/p/P/N Page",
 		"f1-f9 Go to Page",
 	} {
