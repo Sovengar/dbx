@@ -164,7 +164,7 @@ func (m *HelpModal) View() string {
 	lines = append(lines, m.staticLine("Esc", "Cancel edit (revert value)"))
 	lines = append(lines, m.staticLine("Enter/Tab", "Commit cell, move to next column"))
 	lines = append(lines, m.staticLine("Up/Down", "Move to prev/next row"))
-	lines = append(lines, m.staticLine("←/→", "Move cursor within the cell"))
+	lines = append(lines, m.staticLine("Left/Right", "Move cursor within the cell"))
 	lines = append(lines, m.staticLine("Home/End", "Jump to start/end of value"))
 	lines = append(lines, m.staticLine("Backspace/Delete", "Delete character"))
 	lines = append(lines, m.staticLine("Any char", "Type into cell"))
