@@ -75,14 +75,15 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
       # Same test set as `make test` (`go test -race`, no `-short`, so the
-      # integration tests run) plus an atomic coverage profile. The integration
-      # tests in internal/app start PostgreSQL through testcontainers, which uses
-      # the Docker daemon the ubuntu-24.04 runner ships with; the package-level
+      # integration tests run) plus an atomic coverage profile, with `-count=1`
+      # so a cached PASS can never stand in for a real run. The integration tests
+      # in internal/app start PostgreSQL through testcontainers, which uses the
+      # Docker daemon the ubuntu-24.04 runner ships with; the package-level
       # testdb_test.go handles provisioning, so no `services:` block is needed.
       # (internal/config's scanner tests use a discovery seam, so `fd` is not
       # required on the runner — unlike the documented local environment.)
       - name: Test
-        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+        run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
       - name: Coverage summary
         if: always()
         run: |
