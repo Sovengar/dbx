@@ -1,4 +1,4 @@
-.PHONY: build install test lint run clean check
+.PHONY: build install test lint run clean check mutate mutate-diff
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.Version=$(VERSION)"
@@ -24,6 +24,12 @@ lint:
 # never touches the system; `install` (which copies to ~/.local/bin) is
 # deliberately excluded.
 check: build lint test
+
+mutate:
+	go tool gremlins unleash --workers 4 --timeout-coefficient 3 --output report.json
+
+mutate-diff:
+	go tool gremlins unleash --diff main --workers 4 --timeout-coefficient 3 --output report.json
 
 clean:
 	rm -rf .local/bin/
