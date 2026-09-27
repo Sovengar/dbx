@@ -1,0 +1,38 @@
+# .mutation-allowlist - surviving (LIVED) mutants accepted as already known.
+#
+# SCOPE: this allowlist covers ONLY the packages inside the mutation gate scope
+# (see MUTATE_EXCLUDE in the Makefile): internal/config and internal/store.
+# Mutations outside that scope are not run at all, so they can never appear here.
+#
+# Format:  <MUTATOR> <file>:<line>
+#
+# Add an entry ONLY when the mutant is provably equivalent (no test can ever kill
+# it, because the mutation does not change observable behaviour) or the gap is a
+# conscious, accepted risk. Adding a real test gap here hides a real risk, and
+# mutation testing exists precisely to surface those.
+#
+# Seeded from a full-module `go tool gremlins unleash` run. Entries are keyed by
+# LINE NUMBER, so inserting code above an entry shifts it and will surface a new
+# red on purpose: re-verify the gap and update this file, do not regenerate it
+# wholesale (that would silently re-hide real gaps).
+ARITHMETIC_BASE internal/config/keybindings_groups.go:146
+ARITHMETIC_BASE internal/store/query_history.go:101
+CONDITIONALS_BOUNDARY internal/config/keybindings.go:115
+CONDITIONALS_BOUNDARY internal/config/keybindings.go:123
+CONDITIONALS_BOUNDARY internal/config/keybindings.go:67
+CONDITIONALS_BOUNDARY internal/config/keybindings_groups.go:100
+CONDITIONALS_BOUNDARY internal/config/keybindings_groups.go:123
+CONDITIONALS_BOUNDARY internal/config/keybindings_groups.go:126
+CONDITIONALS_BOUNDARY internal/config/keybindings_groups.go:138
+CONDITIONALS_BOUNDARY internal/config/keybindings_groups.go:90
+CONDITIONALS_BOUNDARY internal/config/scanner.go:214
+CONDITIONALS_BOUNDARY internal/config/scanner.go:47
+CONDITIONALS_BOUNDARY internal/store/query_history.go:101
+CONDITIONALS_BOUNDARY internal/store/query_history.go:109
+CONDITIONALS_BOUNDARY internal/store/query_history.go:76
+CONDITIONALS_BOUNDARY internal/store/query_history.go:87
+CONDITIONALS_NEGATION internal/config/project_state.go:35
+CONDITIONALS_NEGATION internal/config/repoid.go:139
+CONDITIONALS_NEGATION internal/config/repoid.go:144
+CONDITIONALS_NEGATION internal/store/query_history.go:193
+INVERT_NEGATIVES internal/store/query_history.go:101
