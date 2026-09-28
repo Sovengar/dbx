@@ -143,10 +143,21 @@ func TestJoinPrimaryKeys(t *testing.T) {
 	}{
 		{"single", []string{"n"}, "n"},
 		{"four lowercase letters", []string{"h", "j", "k", "l"}, "hjkl"},
+		// Three is the smallest run that collapses, and the letter run has to
+		// survive both ends of the a-z window.
+		{"three lowercase letters", []string{"j", "k", "l"}, "jkl"},
+		{"letter run at the start of the alphabet", []string{"a", "b", "c"}, "abc"},
+		{"letter run at the end of the alphabet", []string{"x", "y", "z"}, "xyz"},
 		{"pair keeps slash", []string{"j", "k"}, "j/k"},
 		{"case pair keeps slash", []string{"g", "G"}, "g/G"},
 		{"modifier pair keeps slash", []string{"ctrl+u", "ctrl+d"}, "ctrl+u/ctrl+d"},
 		{"digit range compresses", []string{"f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9"}, "f1-f9"},
+		// 0 is a digit like any other: a range may start on it.
+		{"digit range starting at zero", []string{"f0", "f1", "f2"}, "f0-f2"},
+		// Keys with two trailing digits must be parsed as 10, not as 11.
+		{"two-digit range compresses", []string{"g10", "g11", "g12"}, "g10-g12"},
+		// Keys with no prefix at all: the whole key is the digit run.
+		{"bare digits compress", []string{"1", "2", "3"}, "1-3"},
 		{"empty", nil, ""},
 	}
 	for _, tt := range tests {

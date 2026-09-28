@@ -75,6 +75,54 @@ func TestKeybindRegistry_CustomOverrideReplacesAllKeys(t *testing.T) {
 	}
 }
 
+// Scenario: The first declared action is reachable by every lookup helper.
+// The registry indexes actions by position, and index 0 is the boundary the
+// "did I find it?" guards have to keep inclusive.
+func TestKeybindRegistry_FirstActionIsReachable(t *testing.T) {
+	r := NewKeybindRegistry(KeybindingsConfig{})
+	first := r.All()[0]
+	if len(first.Keys) == 0 {
+		t.Fatalf("fixture action %q has no keys to look up", first.ID)
+	}
+
+	if got := r.PrimaryKey(first.ID); got != first.Keys[0] {
+		t.Errorf("PrimaryKey(%q) = %q, want %q", first.ID, got, first.Keys[0])
+	}
+	got := r.KeysFor(first.ID)
+	if len(got) != len(first.Keys) {
+		t.Fatalf("KeysFor(%q) = %v, want %v", first.ID, got, first.Keys)
+	}
+	for i := range got {
+		if got[i] != first.Keys[i] {
+			t.Errorf("KeysFor(%q)[%d] = %q, want %q", first.ID, i, got[i], first.Keys[i])
+		}
+	}
+}
+
+// Scenario: A custom binding for the first declared action overrides it in
+// place instead of appending a second copy of the same action id.
+func TestKeybindRegistry_CustomOverrideOfFirstActionReplacesIt(t *testing.T) {
+	base := NewKeybindRegistry(KeybindingsConfig{}).All()
+	first := base[0]
+
+	r := NewKeybindRegistry(KeybindingsConfig{Custom: map[string]string{string(first.ID): "Z"}})
+
+	if all := r.All(); len(all) != len(base) {
+		t.Fatalf("registry has %d actions, want %d (override must not append a duplicate)", len(all), len(base))
+	}
+	if got := r.KeysFor(first.ID); len(got) != 1 || got[0] != "Z" {
+		t.Errorf("KeysFor(%q) = %v, want [Z]", first.ID, got)
+	}
+	// Resolve in a context the action actually declares, so reordering the
+	// registry cannot make this fail for an unrelated reason.
+	if len(first.Contexts) == 0 {
+		t.Fatalf("fixture action %q declares no contexts", first.ID)
+	}
+	if id, ok := r.Resolve("Z", first.Contexts[0]); !ok || id != first.ID {
+		t.Errorf("Resolve('Z',%q) = %q,%v want %s,true", first.Contexts[0], id, ok, first.ID)
+	}
+}
+
 // Scenario: Toda acción declarada tiene sección y descripción.
 func TestRegistry_EveryActionHasSectionAndDescription(t *testing.T) {
 	for _, a := range NewKeybindRegistry(KeybindingsConfig{}).All() {

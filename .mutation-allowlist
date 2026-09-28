@@ -15,24 +15,51 @@
 # LINE NUMBER, so inserting code above an entry shifts it and will surface a new
 # red on purpose: re-verify the gap and update this file, do not regenerate it
 # wholesale (that would silently re-hide real gaps).
-ARITHMETIC_BASE internal/config/keybindings_groups.go:146
-ARITHMETIC_BASE internal/store/query_history.go:101
-CONDITIONALS_BOUNDARY internal/config/keybindings.go:115
-CONDITIONALS_BOUNDARY internal/config/keybindings.go:123
-CONDITIONALS_BOUNDARY internal/config/keybindings.go:67
-CONDITIONALS_BOUNDARY internal/config/keybindings_groups.go:100
+#
+# ---------------------------------------------------------------------------
+# Every entry below is a PROVABLY EQUIVALENT MUTANT: the replacement is
+# observationally identical to the original for every possible input, so no test
+# can kill it. Each one states why. Do not add real test gaps here.
+#
+# Negated guards deserve extra care: CONDITIONALS_NEGATION flips WHICH BRANCH
+# RUNS, so "equivalent" means the newly-taken branch is a proven no-op, not that
+# the removed branch was the last statement. query_history.go:193 was briefly
+# parked here on exactly that mistake; the mutant swallowed a failed rename.
+# ---------------------------------------------------------------------------
+
+# keybindings_groups.go:123 - `if n < lo` -> `if n <= lo` (digitRange min).
+# The mutation only fires when n == lo, and the body is `lo = n`, which is a
+# no-op at equality. Same input, same lo, forever.
 CONDITIONALS_BOUNDARY internal/config/keybindings_groups.go:123
+
+# keybindings_groups.go:126 - `if n > hi` -> `if n >= hi` (digitRange max).
+# Mirror of the entry above: fires only at n == hi, where `hi = n` is a no-op.
 CONDITIONALS_BOUNDARY internal/config/keybindings_groups.go:126
-CONDITIONALS_BOUNDARY internal/config/keybindings_groups.go:138
-CONDITIONALS_BOUNDARY internal/config/keybindings_groups.go:90
-CONDITIONALS_BOUNDARY internal/config/scanner.go:214
+
+# scanner.go:47 - `projects[i].Path < projects[j].Path` -> `<=`, inside the
+# `projects[i].Path != projects[j].Path` guard. `a < b` and `a <= b` can only
+# differ when a == b, but the guard already sent equal paths to the Name
+# comparison. Both operands are therefore always distinct here.
 CONDITIONALS_BOUNDARY internal/config/scanner.go:47
-CONDITIONALS_BOUNDARY internal/store/query_history.go:101
-CONDITIONALS_BOUNDARY internal/store/query_history.go:109
+
+# scanner.go:214 - `a.project.Path < b.project.Path` -> `<=`, the lexicographic
+# tiebreak after the equal-length guard. Only equal strings could distinguish
+# them, and isBetterSurvivor is never called with the same candidate twice;
+# two candidates in a group that shared a path would be the same FoundProject,
+# so the winner is unobservable either way.
+CONDITIONALS_BOUNDARY internal/config/scanner.go:214
+
+# query_history.go:76 - `len(s.entries) > 500` -> `>= 500` (history cap).
+# At exactly 500 entries the mutant slices entries[0:], which is the same 500
+# entries the original keeps. The cap is only observable above 500, where both
+# versions take the last 500.
 CONDITIONALS_BOUNDARY internal/store/query_history.go:76
+
+# query_history.go:87 - `i < j` -> `i <= j` in the All() reversal loop.
+# The extra iteration only runs once the pointers meet, and it swaps the middle
+# element with itself. Reversal is unchanged for even and odd lengths alike.
 CONDITIONALS_BOUNDARY internal/store/query_history.go:87
-CONDITIONALS_NEGATION internal/config/project_state.go:35
-CONDITIONALS_NEGATION internal/config/repoid.go:139
-CONDITIONALS_NEGATION internal/config/repoid.go:144
-CONDITIONALS_NEGATION internal/store/query_history.go:193
-INVERT_NEGATIVES internal/store/query_history.go:101
+
+# query_history.go:101 - `i < j` -> `i <= j` in the Favorites() reversal loop.
+# Same self-swap of the middle element as the All() loop above.
+CONDITIONALS_BOUNDARY internal/store/query_history.go:101

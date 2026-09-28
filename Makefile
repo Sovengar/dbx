@@ -12,6 +12,11 @@ MUTATE_BASE ?= main
 # uncovered). Uncovered code produces no mutants at all, so gating it would be a green
 # check that cannot fail. Those packages are excluded until they have tests; today the
 # gate protects internal/config and internal/store only.
+#
+# The value is a regexp alternation, so it MUST stay quoted where it is expanded:
+# unquoted, sh reads each '|' as a pipe, `make mutate` dies with "broken pipe",
+# no report.json is produced, and the CI Gate treats that as "no result, gate
+# passes" - a permanently green gate.
 MUTATE_EXCLUDE ?= internal/ui/|internal/app/|internal/ai/|internal/cli/|internal/drivers/|cmd/
 
 build:
@@ -35,13 +40,13 @@ lint:
 check: build lint test
 
 mutate:
-	go tool gremlins unleash --workers 4 --timeout-coefficient 3 --exclude-files $(MUTATE_EXCLUDE) --output report.json
+	go tool gremlins unleash --workers 4 --timeout-coefficient 3 --exclude-files '$(MUTATE_EXCLUDE)' --output report.json
 
 # gremlins silently falls back to the whole module when the diff is empty (base == HEAD),
 # so fail fast instead of running a full-module run that looks diff-scoped.
 mutate-diff:
 	@if git diff --name-only $(MUTATE_BASE)...HEAD | grep -q '\.go$$'; then \
-		go tool gremlins unleash --diff $(MUTATE_BASE) --workers 4 --timeout-coefficient 3 --exclude-files $(MUTATE_EXCLUDE) --output report.json; \
+		go tool gremlins unleash --diff $(MUTATE_BASE) --workers 4 --timeout-coefficient 3 --exclude-files '$(MUTATE_EXCLUDE)' --output report.json; \
 	else \
 		echo "no .go changes vs $(MUTATE_BASE) - nothing to mutate"; \
 	fi

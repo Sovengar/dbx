@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -184,7 +185,7 @@ func TestQueryStore_GlobalMigration(t *testing.T) {
 	}
 
 	// Write global file
-	data := mustMarshal(entries)
+	data := mustMarshal(t, entries)
 	if err := os.WriteFile(globalPath, data, 0o644); err != nil {
 		t.Fatalf("Failed to write global file: %v", err)
 	}
@@ -253,7 +254,106 @@ func TestQueryStore_ProjectNameAsDirectory(t *testing.T) {
 	}
 }
 
-func mustMarshal(entries []QueryEntry) []byte {
-	data, _ := json.MarshalIndent(entries, "", "  ")
+// Scenario: El historial y los favoritos se muestran del más reciente al más
+// antiguo. Reversal is only observable with an odd number of entries, and the
+// favorites list is the only one the browser can reorder.
+func TestQueryStore_FavoritesAreNewestFirst(t *testing.T) {
+	// Scenario: 5 queries, all marked favorite
+	// When consulto Favorites()
+	// Then veo la última insertada primero
+
+	tmpDir := t.TempDir()
+	store := NewQueryStore(tmpDir)
+
+	want := make([]string, 0, 5)
+	for i := 1; i <= 5; i++ {
+		sql := "SELECT " + strconv.Itoa(i)
+		store.Add(sql)
+		want = append([]string{sql}, want...) // newest first
+	}
+	for i := 0; i < 5; i++ {
+		store.ToggleFavorite(i)
+	}
+
+	favs := store.Favorites()
+	if len(favs) != 5 {
+		t.Fatalf("len(Favorites) = %d, want 5", len(favs))
+	}
+	for i, f := range favs {
+		if f.SQL != want[i] {
+			t.Errorf("Favorites[%d] = %q, want %q (newest first)", i, f.SQL, want[i])
+		}
+	}
+
+	// The same contract for the unfiltered history.
+	all := store.All()
+	for i, e := range all {
+		if e.SQL != want[i] {
+			t.Errorf("All()[%d] = %q, want %q (newest first)", i, e.SQL, want[i])
+		}
+	}
+}
+
+// Scenario: Un índice fuera de rango no marca nada como favorito. The index
+// arrives from the rendered list, so an off-by-one must be a no-op, not a crash.
+func TestQueryStore_ToggleFavoriteOutOfRangeIsNoOp(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewQueryStore(tmpDir)
+	store.Add("SELECT 1")
+
+	store.ToggleFavorite(-1)              // before the start
+	store.ToggleFavorite(store.Len())     // one past the end
+	store.ToggleFavorite(store.Len() + 7) // far out of range
+
+	if favs := store.Favorites(); len(favs) != 0 {
+		t.Fatalf("Favorites = %+v, want none (out-of-range index must be a no-op)", favs)
+	}
+	if store.Len() != 1 {
+		t.Fatalf("Len = %d, want 1 (the history must be untouched)", store.Len())
+	}
+
+	// A rejected index must not leave the store in a state that breaks the
+	// next valid one.
+	store.ToggleFavorite(0)
+	favs := store.Favorites()
+	if len(favs) != 1 || favs[0].SQL != "SELECT 1" {
+		t.Fatalf("Favorites = %+v, want [SELECT 1] after a valid index following rejected ones", favs)
+	}
+}
+
+// Scenario: Si el rename del historial global falla, la migración debe
+// reportarlo. The caller decides what to do about a half-migrated project, and
+// a silent nil here means a lost history with no signal.
+func TestMigrateGlobalHistory_FailedRenameIsReported(t *testing.T) {
+	tmpDir := t.TempDir()
+	globalPath := filepath.Join(tmpDir, "query_history.json")
+	projectDir := filepath.Join(tmpDir, "projects", "mydb")
+
+	if err := os.WriteFile(globalPath, mustMarshal(t, []QueryEntry{{SQL: "SELECT 1"}}), 0o644); err != nil {
+		t.Fatalf("WriteFile(global): %v", err)
+	}
+	// Make os.Rename fail: the destination already exists as a non-empty dir.
+	bakPath := globalPath + ".bak"
+	if err := os.MkdirAll(bakPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", bakPath, err)
+	}
+	if err := os.WriteFile(filepath.Join(bakPath, "blocker"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile(blocker): %v", err)
+	}
+
+	if err := MigrateGlobalHistory(tmpDir, projectDir); err == nil {
+		t.Fatal("MigrateGlobalHistory returned nil after a failed rename, swallowing the error")
+	}
+}
+
+// mustMarshal encodes a history fixture, failing the test rather than returning
+// an empty buffer: a silent marshal error would surface as a confusing
+// assertion failure in the caller.
+func mustMarshal(t *testing.T, entries []QueryEntry) []byte {
+	t.Helper()
+	data, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent: %v", err)
+	}
 	return data
 }
