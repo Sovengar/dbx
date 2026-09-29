@@ -10,9 +10,9 @@ MUTATE_BASE ?= main
 # uncovered code emits no mutants at all, so including it would give a green
 # check that cannot fail.
 #
-# Gated today: internal/config, internal/store, and the internal/ui ROOT files
-# (keybindspane, modal, toast, zones). internal/ui's subpackages stay excluded
-# because they are 67% uncovered.
+# Gated today: internal/config, internal/store, internal/ui/bordered, and the
+# internal/ui ROOT files (keybindspane, modal, toast, zones). internal/ui's
+# component subpackages stay excluded because they are 67% uncovered.
 #
 # Still excluded, with what it would take to admit them: internal/app (62%
 # uncovered), internal/ai, internal/cli and internal/drivers (100%), cmd.
@@ -26,7 +26,9 @@ MUTATE_BASE ?= main
 # unquoted, sh reads each '|' as a pipe, `make mutate` dies with "broken pipe",
 # no report.json is produced, and the CI Gate treats that as "no result, gate
 # passes" - a permanently green gate.
-MUTATE_EXCLUDE ?= internal/ui/(components|keydisplay|bordered)/|internal/app/|internal/ai/|internal/cli/|internal/drivers/|cmd/
+# internal/ui/keydisplay is excluded on purpose: at 100% statement coverage it
+# yields no mutants at all, so gating it would add a check that cannot fail.
+MUTATE_EXCLUDE ?= internal/ui/(components|keydisplay)/|internal/app/|internal/ai/|internal/cli/|internal/drivers/|cmd/
 
 build:
 	go build $(LDFLAGS) -o .local/bin/dbx .

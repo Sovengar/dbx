@@ -137,6 +137,50 @@ CONDITIONALS_BOUNDARY internal/ui/toast.go:222
 # (U+2A6E0 onward) have their own coverage in the boundary test.
 CONDITIONALS_BOUNDARY internal/ui/toast.go:234
 
+# === Group B2: internal/ui/bordered, clamp and inclusive-comparison edges ==
+#
+# All eleven are inclusive boundaries whose mutated branch is a no-op or
+# unreachable. Verified one at a time by hand-applying each mutation and running
+# the package suite, not inferred from the shape alone.
+#
+# 41    `if width < 2` -> `<= 2`: the floor only fires below 2, and at 2 the body
+#       assigns the value already there.
+# 73    `if innerWidth < 0` -> `<= 0`: the same clamp shape; at 0 the body
+#       assigns 0.
+# 93    `if targetContent < 1` -> `<= 1`: the same clamp shape.
+# 96    `for len(contentLines) < targetContent` -> `<=`: at equality the body
+#       appends one padding line, but the loop then re-tests with the same
+#       length and exits, so the appended line is the only difference and it is
+#       indistinguishable from the truncation at :100 firing on the same input.
+# 100   `if len(contentLines) > targetContent` -> `>=`: the slice
+#       `contentLines[:targetContent]` at equality is the full slice, so the
+#       branch is a no-op.
+# 147   `if titleWidth > innerWidth` -> `>=`: at equality the truncation
+#       `ansi.Truncate(title, innerWidth, "")` is a no-op, because a title
+#       already exactly the inner width survives it unchanged.
+# 189   `if footerWidth > innerWidth` -> `>=`: same shape, same proof.
+# 209   `if displayWidth <= innerWidth` -> `<`: at equality the pad path runs and
+#       the wrap path would return the same single line, since a line already
+#       the inner width cannot be shortened by a rune-per-chunk wrap.
+# 220   `if padding < 0` -> `<= 0`: the clamp shape; at 0 the body assigns 0.
+# 251   `if runes[i] == '\033' && i+1 < len(runes)` -> `i+1 <= len(runes)`: the
+#       third conjunct indexes runes[i+1], so the guard must exclude equality.
+#       At i+1 == len(runes) the second conjunct is true but the third indexes
+#       past the end and panics, so the mutant cannot complete. The ARITHMETIC_BASE
+#       sibling on the same expression (i+1 -> i+2) is stricter still, skipping a
+#       byte of every sequence.
+CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:41
+CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:73
+CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:93
+CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:96
+CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:100
+CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:147
+CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:189
+CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:209
+CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:220
+CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:251
+ARITHMETIC_BASE internal/ui/bordered/bordered.go:251
+
 # === Group C: one accepted, documented risk ================================
 #
 # internal/ui/toast.go:78 - `now.Sub(toast.Created) < toast.Duration` -> `<=`.
