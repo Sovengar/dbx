@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/theme"
 	"github.com/buble/dbx/internal/ui/keydisplay"
@@ -172,6 +174,164 @@ func TestKeybindsPane_GoBackHiddenWithoutHistory(t *testing.T) {
 	p.SetCanGoBack(true)
 	if !linesContain(p.renderLines(), "H Go Back") {
 		t.Fatalf("grid pane hides Go Back with navigation history: %v", p.renderLines())
+	}
+}
+
+// fakeResolver serves a hand-built action list, so a test can control the exact
+// rendered width of every segment instead of inheriting the registry's wording.
+type fakeResolver struct{ actions []config.Action }
+
+func (f fakeResolver) Resolve(key, context string) (config.ActionID, bool) {
+	return "", false
+}
+func (f fakeResolver) PrimaryKey(id config.ActionID) string {
+	for _, a := range f.actions {
+		if a.ID == id {
+			return a.Keys[0]
+		}
+	}
+	return ""
+}
+func (f fakeResolver) KeysFor(id config.ActionID) []string { return nil }
+func (f fakeResolver) ActionsFor(context string) []config.Action {
+	return f.actions
+}
+func (f fakeResolver) All() []config.Action { return f.actions }
+
+// paneWithActions builds a pane over a fixed action list, bypassing the registry
+// so segment widths are deterministic.
+func paneWithActions(t *testing.T, width int, actions ...config.Action) *KeybindsPane {
+	t.Helper()
+	p := NewKeybindsPane(theme.Resolve("dark").Styles(), fakeResolver{actions: actions})
+	p.SetWidth(width)
+	p.SetFocus(config.ContextGrid)
+	return p
+}
+
+// ungrouped is an action that renders as its own single segment: "<key> <label>".
+func ungrouped(id, key, label string) config.Action {
+	return config.Action{ID: config.ActionID(id), Keys: []string{key}, Section: config.SectionUI, Description: label}
+}
+
+// Scenario: Con ancho 0 no hay donde envolver, así que todo va en una sola línea.
+// The pane has no width budget to honour, so wrapping would fragment the list
+// into one segment per line for no reason.
+func TestKeybindsPane_ZeroWidthRendersOneJoinedLine(t *testing.T) {
+	p := paneWith(config.ContextGrid)
+	p.SetWidth(0)
+
+	lines := p.renderLines()
+	if len(lines) != 1 {
+		t.Fatalf("width 0 produced %d lines, want exactly 1 (no width to wrap against): %v", len(lines), lines)
+	}
+	// A wrapped pane emits one segment per line, with no separators left.
+	if !strings.Contains(lines[0], " · ") {
+		t.Fatalf("width 0 line is not a joined list: %q", lines[0])
+	}
+	// It must be the same content the wide pane shows, just on one line.
+	wide := paneWith(config.ContextGrid)
+	wide.SetWidth(4000)
+	want := strings.Join(wide.renderLines(), " · ")
+	if lines[0] != want {
+		t.Errorf("width 0 line = %q, want the same segments joined: %q", lines[0], want)
+	}
+}
+
+// Scenario: Una línea nunca excede el presupuesto de ancho (ancho - 2), porque el
+// borde del panel se come 2 columnas.
+//
+// The fixture is tuned so the second segment would land at exactly 48 columns
+// against a 47-column budget: one column of slack, so any change to the reserved
+// border width shows up as a different wrap decision.
+func TestKeybindsPane_LineNeverExceedsWidthMinusBorder(t *testing.T) {
+	const (
+		width    = 49
+		budget   = width - 2 // 47
+		wideKey  = "a"
+		wideTail = "0123456789012345678901234567890123456789"
+		narrowKy = "b"
+	)
+	first := ungrouped("first", wideKey, wideTail) // "a " + 40 chars = 42
+	second := ungrouped("second", narrowKy, "Y")   // "b Y" = 3
+	if got := lipgloss.Width(keydisplay.Key(first.Keys[0]) + " " + first.Description); got != 42 {
+		t.Fatalf("fixture drifted: first segment is %d wide, want 42", got)
+	}
+
+	// 42 + 3 (separator) + 3 = 48 > 47, so the pair must NOT share a line.
+	lines := paneWithActions(t, width, first, second).renderLines()
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2: the 48-column pair must not fit a 47-column budget: %q", len(lines), lines)
+	}
+	for i, l := range lines {
+		if n := strings.Count(l, " · ") + 1; n < 2 {
+			continue
+		}
+		if w := lipgloss.Width(l); w > budget {
+			t.Errorf("line %d is %d wide, over the %d budget: %q", i, w, budget, l)
+		}
+	}
+}
+
+// Scenario: Un segmento que llena el presupuesto exacto se queda en la línea.
+//
+// The wrap test is strict: a line breaks only when the candidate is WIDER than
+// the budget, so content landing exactly on the budget stays put. One column of
+// slack either way and the pair must still share a single line.
+func TestKeybindsPane_ContentExactlyOnBudgetStaysOnOneLine(t *testing.T) {
+	// 42 + len(" · ") + 3 = 48, and the budget is width-2, so width 50 gives 48.
+	const (
+		width    = 50
+		budget   = width - 2 // 48
+		wideTail = "0123456789012345678901234567890123456789"
+	)
+	first := ungrouped("first", "a", wideTail) // 42
+	second := ungrouped("second", "b", "Y")    // 3
+
+	if got := lipgloss.Width(keydisplay.Key("a") + " " + first.Description); got != 42 {
+		t.Fatalf("fixture drifted: first segment is %d wide, want 42", got)
+	}
+	// " · " is 3 display cells, not its 5 UTF-8 bytes.
+	sep := lipgloss.Width(" · ")
+	if cand := 42 + sep + 3; cand != budget {
+		t.Fatalf("fixture drifted: the pair is %d wide, want exactly the %d budget", cand, budget)
+	}
+
+	lines := paneWithActions(t, width, first, second).renderLines()
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1: content that exactly fills the %d budget must not wrap: %q",
+			len(lines), budget, lines)
+	}
+}
+
+// Scenario: Ninguna línea renderizada puede exceder el presupuesto, en un barrido
+// de anchos. The wrap point is width-dependent, so a single width can miss a
+// boundary that a different one hits.
+func TestKeybindsPane_NoLineExceedsBudgetAcrossWidths(t *testing.T) {
+	actions := []config.Action{
+		ungrouped("a", "a", "Navigate Rows"),
+		ungrouped("b", "b", "Filter"),
+		ungrouped("c", "c", "Sort Column Descending"),
+		ungrouped("d", "d", "Refresh"),
+		ungrouped("e", "e", "Export As CSV"),
+		ungrouped("f", "f", "Yank"),
+		ungrouped("g", "g", "Go To Page"),
+		ungrouped("h", "h", "Toggle Editor"),
+	}
+	for width := 10; width <= 120; width++ {
+		budget := width - 2
+		for i, l := range paneWithActions(t, width, actions...).renderLines() {
+			// A single segment is never split, so a lone segment may be wider
+			// than the budget. The budget only governs whether a NEXT segment
+			// is appended, so it binds on every line that holds two or more.
+			n := strings.Count(l, " · ") + 1
+			if n < 2 {
+				continue
+			}
+			if w := lipgloss.Width(l); w > budget {
+				t.Fatalf("width %d: line %d is %d wide with %d segments, over the %d budget: %q",
+					width, i, w, n, budget, l)
+			}
+		}
 	}
 }
 
