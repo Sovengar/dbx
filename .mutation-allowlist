@@ -1,7 +1,7 @@
 # .mutation-allowlist - surviving (LIVED) mutants accepted as already known.
 #
-# SCOPE: this allowlist covers ONLY the packages inside the mutation gate scope
-# (see MUTATE_EXCLUDE in the Makefile): internal/config and internal/store.
+# SCOPE: the packages inside the mutation gate scope (see MUTATE_EXCLUDE in the
+# Makefile): internal/config, internal/store, and the internal/ui root files.
 # Mutations outside that scope are not run at all, so they can never appear here.
 #
 # Format:  <MUTATOR> <file>:<line>
@@ -11,10 +11,9 @@
 # conscious, accepted risk. Adding a real test gap here hides a real risk, and
 # mutation testing exists precisely to surface those.
 #
-# Seeded from a full-module `go tool gremlins unleash` run. Entries are keyed by
-# LINE NUMBER, so inserting code above an entry shifts it and will surface a new
-# red on purpose: re-verify the gap and update this file, do not regenerate it
-# wholesale (that would silently re-hide real gaps).
+# Entries are keyed by LINE NUMBER, so inserting code above an entry shifts it
+# and will surface a new red on purpose: re-verify the gap and update this file,
+# do not regenerate it wholesale (that would silently re-hide real gaps).
 #
 # ---------------------------------------------------------------------------
 # Every entry below is a PROVABLY EQUIVALENT MUTANT: the replacement is
@@ -25,41 +24,133 @@
 # RUNS, so "equivalent" means the newly-taken branch is a proven no-op, not that
 # the removed branch was the last statement. query_history.go:193 was briefly
 # parked here on exactly that mistake; the mutant swallowed a failed rename.
+#
+# The clamp family (if x > N { x = N }, if x < N { x = N }) has one recurring
+# shape here: the boundary mutant fires at equality and the body assigns the
+# value already present, so it is a no-op. That accounts for every entry in
+# group A below.
 # ---------------------------------------------------------------------------
 
-# keybindings_groups.go:123 - `if n < lo` -> `if n <= lo` (digitRange min).
-# The mutation only fires when n == lo, and the body is `lo = n`, which is a
-# no-op at equality. Same input, same lo, forever.
+# === Group A: clamp boundaries, body assigns the value already present =====
+
+# internal/config/keybindings_groups.go:123 - `if n < lo` -> `if n <= lo` (digitRange min).
+# Fires only at n == lo, where the body `lo = n` is a no-op.
 CONDITIONALS_BOUNDARY internal/config/keybindings_groups.go:123
 
-# keybindings_groups.go:126 - `if n > hi` -> `if n >= hi` (digitRange max).
+# internal/config/keybindings_groups.go:126 - `if n > hi` -> `if n >= hi` (digitRange max).
 # Mirror of the entry above: fires only at n == hi, where `hi = n` is a no-op.
 CONDITIONALS_BOUNDARY internal/config/keybindings_groups.go:126
 
-# scanner.go:47 - `projects[i].Path < projects[j].Path` -> `<=`, inside the
-# `projects[i].Path != projects[j].Path` guard. `a < b` and `a <= b` can only
-# differ when a == b, but the guard already sent equal paths to the Name
-# comparison. Both operands are therefore always distinct here.
+# internal/config/scanner.go:47 - `projects[i].Path < projects[j].Path` -> `<=`, inside
+# the `!=` guard. The two forms differ only on equal strings, and the guard sends
+# equal paths to the Name comparison instead.
 CONDITIONALS_BOUNDARY internal/config/scanner.go:47
 
-# scanner.go:214 - `a.project.Path < b.project.Path` -> `<=`, the lexicographic
-# tiebreak after the equal-length guard. Only equal strings could distinguish
-# them, and isBetterSurvivor is never called with the same candidate twice;
-# two candidates in a group that shared a path would be the same FoundProject,
-# so the winner is unobservable either way.
+# internal/config/scanner.go:214 - `a.project.Path < b.project.Path` -> `<=`, the
+# lexicographic tiebreak after the equal-length guard. Only equal strings could
+# distinguish them, and two candidates in a group that shared a path would be
+# the same FoundProject, so the winner is unobservable either way.
 CONDITIONALS_BOUNDARY internal/config/scanner.go:214
 
-# query_history.go:76 - `len(s.entries) > 500` -> `>= 500` (history cap).
-# At exactly 500 entries the mutant slices entries[0:], which is the same 500
-# entries the original keeps. The cap is only observable above 500, where both
-# versions take the last 500.
+# internal/store/query_history.go:76 - `len(s.entries) > 500` -> `>= 500`. At exactly
+# 500 the mutant slices entries[0:], which is the same 500 entries.
 CONDITIONALS_BOUNDARY internal/store/query_history.go:76
 
-# query_history.go:87 - `i < j` -> `i <= j` in the All() reversal loop.
-# The extra iteration only runs once the pointers meet, and it swaps the middle
-# element with itself. Reversal is unchanged for even and odd lengths alike.
+# internal/store/query_history.go:87 and :101 - `i < j` -> `i <= j` in the All() and
+# Favorites() reversal loops. The extra iteration runs only once the pointers
+# meet, and it swaps the middle element with itself.
 CONDITIONALS_BOUNDARY internal/store/query_history.go:87
-
-# query_history.go:101 - `i < j` -> `i <= j` in the Favorites() reversal loop.
-# Same self-swap of the middle element as the All() loop above.
 CONDITIONALS_BOUNDARY internal/store/query_history.go:101
+
+# internal/ui/modal.go:119 and :122 - the modal width clamps.
+#   119: `if modalW < 50` -> `<= 50`, fires only at modalW == 50, body sets 50.
+#   122: `if modalW > 90` -> `>= 90`, fires only at modalW == 90, body sets 90.
+CONDITIONALS_BOUNDARY internal/ui/modal.go:119
+CONDITIONALS_BOUNDARY internal/ui/modal.go:122
+
+# internal/ui/modal.go:194 - `if maxVisible < 5` -> `<= 5`. Fires only at
+# maxVisible == 5, where the body sets 5.
+CONDITIONALS_BOUNDARY internal/ui/modal.go:194
+
+# internal/ui/modal.go:198 - `if m.scroll > len(lines)-maxVisible` -> `>=`. Fires only
+# at exact equality, where the body re-assigns the same value. NOTE: this line's
+# INVERT_NEGATIVES and ARITHMETIC_BASE mutants are NOT listed: they are real gaps
+# and are killed by TestHelpModal_ScrollInsideTheGapStillShowsFullWindow. Only the
+# boundary form is equivalent.
+CONDITIONALS_BOUNDARY internal/ui/modal.go:198
+
+# internal/ui/modal.go:201 and :206 - `end` and `scroll` clamps. `scroll < 0` -> `<= 0`
+# and `end > len(lines)` -> `>= len(lines)`, both firing only at equality.
+CONDITIONALS_BOUNDARY internal/ui/modal.go:201
+CONDITIONALS_BOUNDARY internal/ui/modal.go:206
+
+# internal/ui/modal.go:71 and :88 - the scroll-above-zero guards in the ctrl+u
+# handler and the wheel-up branch. `m.scroll < 0` -> `<= 0`, a no-op at 0.
+CONDITIONALS_BOUNDARY internal/ui/modal.go:71
+CONDITIONALS_BOUNDARY internal/ui/modal.go:88
+
+# internal/ui/modal.go:86 - `if msg.Y < 0` -> `if msg.Y <= 0` in the wheel branch.
+# A wheel event with Y == 0 is not a scroll, and the mutant routes it to the
+# scroll-up branch where `m.scroll--` then clamps back to 0, so the observable
+# scroll value is unchanged. Every other wheel value is unaffected.
+CONDITIONALS_BOUNDARY internal/ui/modal.go:86
+
+# internal/ui/toast.go:130 and :133 - the toast width clamps.
+#   130: `if needed < toastMinWidth` -> `<=`, a no-op at the minimum.
+#   133: `if needed > toastMaxWidth` -> `>=`, a no-op at the maximum.
+CONDITIONALS_BOUNDARY internal/ui/toast.go:130
+CONDITIONALS_BOUNDARY internal/ui/toast.go:133
+
+# === Group B: boundaries already answered by a unicode script table =========
+#
+# isWideRune checks the four script tables (Han, Hangul, Katakana, Hiragana)
+# and then nine hardcoded ranges. For these lines, the code point at the mutated
+# boundary is ALREADY reported wide by a table, so whether the hardcoded check
+# includes it or not cannot change the result. Measured, not assumed: the
+# boundary code points below are all inside the table ranges.
+#
+# The tails that the tables do NOT cover are killed by
+# TestToastManager_EveryWideRuneBoundaryIsExact, which is why only the
+# table-covered ones remain here.
+
+# internal/ui/toast.go:210 - `r >= 0x1100 && r <= 0x115F` (Hangul Jamo). The whole
+# range is inside unicode.Hangul, so both boundary mutants are no-ops. This is
+# the one range in the function that is genuinely redundant.
+CONDITIONALS_BOUNDARY internal/ui/toast.go:210
+
+# internal/ui/toast.go:213 and :216 - the head of CJK Radicals Supplement
+# (0x2E80) and the tail of 0x3040-0x9FFF. U+2E80 and U+9FFF are both covered by
+# a table, so widening or narrowing the check leaves the result unchanged. The
+# tails these ranges exist for (U+2E9A, U+3040) are covered separately and their
+# boundary mutants are killed.
+CONDITIONALS_BOUNDARY internal/ui/toast.go:213
+CONDITIONALS_BOUNDARY internal/ui/toast.go:216
+
+# internal/ui/toast.go:219 and :222 - the head of Hangul Syllables (0xAC00) and the
+# head of CJK Compatibility Ideographs (0xF900). Both heads are already reported
+# wide by unicode.Hangul and unicode.Han respectively.
+CONDITIONALS_BOUNDARY internal/ui/toast.go:219
+CONDITIONALS_BOUNDARY internal/ui/toast.go:222
+
+# internal/ui/toast.go:234 - the head of CJK Ext B (0x20000). U+20000 falls inside
+# the table-covered part of the range; the code points only this check reaches
+# (U+2A6E0 onward) have their own coverage in the boundary test.
+CONDITIONALS_BOUNDARY internal/ui/toast.go:234
+
+# === Group C: one accepted, documented risk ================================
+#
+# internal/ui/toast.go:78 - `now.Sub(toast.Created) < toast.Duration` -> `<=`.
+#
+# This is NOT provably equivalent: at exactly toast.Duration elapsed, the mutant
+# keeps a toast the original expires. It is accepted rather than equivalent
+# because the boundary is unreachable without controlling the clock: the test
+# would have to make elapsed time exactly equal the duration, which means
+# sleeping for a precisely-known duration and racing the scheduler. Every
+# measurable duration is either clearly under or clearly over.
+#
+# Accepted because the real-world effect is nil: Duration is set to 3s by Show()
+# and the risk window is a single instant at the 3.000s mark, where keeping a
+# toast for one more frame is not a defect. The clock-dependent behaviour itself
+# IS covered by TestToastManager_ExpiryComparisonIsStrict, which kills the
+# negation variant.
+CONDITIONALS_BOUNDARY internal/ui/toast.go:78

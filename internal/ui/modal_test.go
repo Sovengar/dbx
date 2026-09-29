@@ -283,6 +283,133 @@ func TestHelpModal_ScrollUpFromTopStaysAtZero(t *testing.T) {
 	}
 }
 
+// Scenario: La rueda del ratón desplaza el modal, y llegar arriba frena en 0.
+// The wheel is the one scroll path that clamps inside the handler rather than
+// in View(), so both branches are exercised here.
+func TestHelpModal_MouseWheelScrollsAndStopsAtTop(t *testing.T) {
+	m := modalWith(config.NewKeybindRegistry(config.KeybindingsConfig{}))
+
+	// Wheel down three times.
+	for i := 0; i < 3; i++ {
+		if _, handled := m.Update(tea.MouseWheelMsg{X: 0, Y: 1, Button: tea.MouseWheelDown}); !handled {
+			t.Fatal("wheel down was not handled by the help modal")
+		}
+	}
+	if m.scroll != 3 {
+		t.Errorf("after 3 wheel-downs scroll = %d, want 3", m.scroll)
+	}
+
+	// Wheel up far past the top: must stop at 0, not go negative.
+	for i := 0; i < 10; i++ {
+		m.Update(tea.MouseWheelMsg{X: 0, Y: -1, Button: tea.MouseWheelUp})
+	}
+	if m.scroll != 0 {
+		t.Errorf("after wheeling up past the top, scroll = %d, want 0", m.scroll)
+	}
+	m.View() // must not panic on a negative scroll
+	if m.scroll != 0 {
+		t.Errorf("View() moved the scroll to %d, want 0", m.scroll)
+	}
+}
+
+// Scenario: Las teclas de flecha y sus equivalentes vi desplazan una línea.
+// up/k and down/j are aliases, and each must move the same single line, with
+// up stopping at 0 rather than going negative.
+func TestHelpModal_ArrowKeysScrollOneLineAtATime(t *testing.T) {
+	for _, down := range []string{"down", "j"} {
+		for _, up := range []string{"up", "k"} {
+			m := modalWith(config.NewKeybindRegistry(config.KeybindingsConfig{}))
+
+			if _, handled := m.Update(teaKey(down)); !handled {
+				t.Fatalf("%q was not handled", down)
+			}
+			if m.scroll != 1 {
+				t.Errorf("%q moved the scroll to %d, want 1", down, m.scroll)
+			}
+
+			if _, handled := m.Update(teaKey(up)); !handled {
+				t.Fatalf("%q was not handled", up)
+			}
+			if m.scroll != 0 {
+				t.Errorf("%q left the scroll at %d, want 0", up, m.scroll)
+			}
+			// A second step up must not go negative.
+			m.Update(teaKey(up))
+			if m.scroll != 0 {
+				t.Errorf("%q at the top moved the scroll to %d, want 0", up, m.scroll)
+			}
+		}
+	}
+}
+
+// Scenario: "g" vuelve al principio, "G" salta al final, y ctrl+d/ctrl+u mueven
+// diez líneas. The coarse steps and the jumps share the same scroll field, so a
+// step landing past the end is pinned by View()'s clamp.
+func TestHelpModal_CoarseScrollKeysAndJumps(t *testing.T) {
+	m := modalWith(config.NewKeybindRegistry(config.KeybindingsConfig{}))
+
+	// G jumps past the end. The clamp lives in View(), not in the handler, so
+	// the jump itself is deliberately out of range until the next render.
+	m.Update(teaKey("G"))
+	if m.scroll != 1000 {
+		t.Fatalf("G left the scroll at %d, want the raw 1000 jump", m.scroll)
+	}
+	m.View()
+	if m.scroll >= 1000 {
+		t.Errorf("View() left the scroll at %d; it must clamp back to the end", m.scroll)
+	}
+
+	// g returns to the top.
+	m.Update(teaKey("g"))
+	if m.scroll != 0 {
+		t.Fatalf("g left the scroll at %d, want 0", m.scroll)
+	}
+
+	// ctrl+d steps ten lines, ctrl+u steps back.
+	m.Update(teaKey("ctrl+d"))
+	if m.scroll != 10 {
+		t.Errorf("ctrl+d left the scroll at %d, want 10", m.scroll)
+	}
+	m.Update(teaKey("ctrl+u"))
+	if m.scroll != 0 {
+		t.Errorf("ctrl+u left the scroll at %d, want 0", m.scroll)
+	}
+}
+
+// Scenario: "q" cierra el modal igual que "esc" y "?". The close keys are an
+// overlay exception, not registry keys, so they are listed here explicitly.
+func TestHelpModal_QClosesToo(t *testing.T) {
+	m := modalWith(config.NewKeybindRegistry(config.KeybindingsConfig{}))
+
+	if _, handled := m.Update(teaKey("q")); !handled {
+		t.Fatal("q was not handled")
+	}
+	if m.IsVisible() {
+		t.Fatal("modal still visible after q")
+	}
+}
+
+// Scenario: Un modal oculto ignora todo, incluso las teclas que sí gestiona
+// cuando está visible. A hidden overlay must not eat the app's keystrokes.
+func TestHelpModal_HiddenModalIgnoresEverything(t *testing.T) {
+	m := NewHelpModal(theme.Resolve("dark").Styles(), config.NewKeybindRegistry(config.KeybindingsConfig{}))
+	m.SetWidth(80)
+	m.SetHeight(40)
+	// Never shown.
+
+	if got := m.View(); got != "" {
+		t.Errorf("a hidden modal rendered %q, want empty", got)
+	}
+	for _, key := range []string{"esc", "down", "j", "ctrl+d", "G", "q"} {
+		if _, handled := m.Update(teaKey(key)); handled {
+			t.Errorf("a hidden modal consumed %q", key)
+		}
+	}
+	if m.scroll != 0 {
+		t.Errorf("a hidden modal changed the scroll to %d", m.scroll)
+	}
+}
+
 // Scenario: The help modal shows every key, including aliases, and groups by
 // the same registry field the pane uses.
 func TestHelpModal_GridShowsAliasesAndGroups(t *testing.T) {

@@ -6,18 +6,27 @@ INSTALL_DIR := $(HOME)/.local/bin
 GOLANGCI_LINT_VERSION := v2.13.2
 MUTATE_BASE ?= main
 
-# Mutation gate scope. Only packages with real test coverage are gated. A full-module
-# baseline measured: internal/ui (415 surviving mutants, 67% uncovered), internal/app
-# (95, 62%), internal/ai (184 uncovered), internal/cli and internal/drivers (100%
-# uncovered). Uncovered code produces no mutants at all, so gating it would be a green
-# check that cannot fail. Those packages are excluded until they have tests; today the
-# gate protects internal/config and internal/store only.
+# Mutation gate scope. Only code the test suite actually reaches is gated:
+# uncovered code emits no mutants at all, so including it would give a green
+# check that cannot fail.
+#
+# Gated today: internal/config, internal/store, and the internal/ui ROOT files
+# (keybindspane, modal, toast, zones). internal/ui's subpackages stay excluded
+# because they are 67% uncovered.
+#
+# Still excluded, with what it would take to admit them: internal/app (62%
+# uncovered), internal/ai, internal/cli and internal/drivers (100%), cmd.
+#
+# Granularity is PER PACKAGE, not per file. --exclude-files takes an RE2 regexp
+# and RE2 has no lookahead, so "everything except these two files" is not
+# expressible; excluding the subpackage directories is the only way to admit the
+# root package on its own.
 #
 # The value is a regexp alternation, so it MUST stay quoted where it is expanded:
 # unquoted, sh reads each '|' as a pipe, `make mutate` dies with "broken pipe",
 # no report.json is produced, and the CI Gate treats that as "no result, gate
 # passes" - a permanently green gate.
-MUTATE_EXCLUDE ?= internal/ui/|internal/app/|internal/ai/|internal/cli/|internal/drivers/|cmd/
+MUTATE_EXCLUDE ?= internal/ui/(components|keydisplay|bordered)/|internal/app/|internal/ai/|internal/cli/|internal/drivers/|cmd/
 
 build:
 	go build $(LDFLAGS) -o .local/bin/dbx .
