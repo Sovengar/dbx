@@ -85,6 +85,8 @@ new Go file nobody classified.
 - [x] `internal/app/router.go` (4 killed)
 - [x] `internal/ai/nl2sql/{anthropic,openai,deepseek,qwen}.go` (35 killed) — was
       Tier 2; all four went from 8-9 uncovered to zero in one table-driven file
+- [x] `internal/ui/components/grid/mouse.go` (41 killed, 4 survivors) — was
+      Tier 2; 2 uncovered → 0, 9 lived → 4
 
 ### Two contracts worth keeping
 
@@ -107,6 +109,22 @@ The four call `http.DefaultClient` against hardcoded https URLs, so
 swapped onto `http.DefaultTransport` for the duration of the test, which
 exercises the real request path, headers and body without the network.
 
+### mouse.go: a surprising interaction worth knowing
+
+`visibleColumnAtX` correctly refuses an x that lands on a column which does not
+fit. But `HandleClick` then calls `syncScroll`, and `syncScroll` **clamps the
+cursor into range and brings the window to it**. So the observable result is not
+"nothing happened": clicking right of the visible area moves the cursor to a
+valid column and `scrollCol` follows. `TestGrid_HandleClick_BeyondTheVisibleAreaScrollsTheCursor`
+pins that. Skipping `syncScroll` when no column was hit would be the other
+behaviour; which is right is a product decision, recorded rather than assumed.
+
+One test trap worth repeating: a sentinel `cursorCol` of 99 does not work. It
+has to be **in range**, because `syncScroll` clamps `cursorCol` to
+`[0, len(widths)-1]` on every click. An out-of-range sentinel is silently
+rewritten, so the test passes for the wrong reason. `sentinelCol(n)` returns
+`n-1`.
+
 ### A defect found, not fixed
 
 `cleanSQL` strips the literal ` ```sql ` prefix and the bare ` ``` ` prefix, both
@@ -123,8 +141,6 @@ alone.
 
 - [ ] `internal/cli/root.go` — 3 uncovered
 - [ ] `internal/cli/context.go` — 6 uncovered
-- [ ] `internal/ui/components/grid/mouse.go` — 2 uncovered, 9 lived. Cover the
-      2, then probe the 9 before assuming they are equivalent.
 - [ ] `internal/ui/components/grid/header.go` — 6 uncovered, 16 lived.
 - [ ] `internal/ui/components/grid/export_picker.go` — 9 uncovered, 0 killed.
 
@@ -194,8 +210,11 @@ make mutate MUTATE_DSN='postgres://dbx:dbx@127.0.0.1:55432/dbx_test?sslmode=disa
 - **Locate the span by searching the line for the literal operator**, never by
   the reported column. gremlins columns have been off by one, and a 1-char span
   on a 2-char operator silently applies a no-op that reads as SURVIVED.
-- **A probe that disagrees with gremlins is the probe that is wrong.** Verify with
-  `s.index(op)`.
+- **A probe that disagrees with `make mutate` is the probe that is wrong.** Twice
+  now: once because the span was off by a column and produced invalid Go, once
+  because I probed line 71 while the surviving mutant was on line 68, and
+  concluded from it that a killable mutant was equivalent. **Never write an
+  allowlist entry from a probe alone** — re-run the real thing first.
 - **gremlins is nondeterministic run to run.** Timed-out mutants are absent from
   `report.json`, so survivors appear and disappear. Re-run before concluding —
   but note that a deterministic 136 timeouts in a row is NOT variance, it is a

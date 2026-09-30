@@ -241,6 +241,54 @@ ARITHMETIC_BASE internal/app/txn.go:354
 #        stop lands on the same end index.
 ARITHMETIC_BASE internal/app/txn.go:396
 
+# === Group B4: internal/ui/components/grid/mouse.go, viewport arithmetic ====
+#
+# FOUR survivors, not three. I probed `acc+w > available` as a relaxation to
+# `>=`, concluded it survived, and wrote that into this file. The full run
+# disagreed and killed it. Line 68 IS that break and it IS killable, because a
+# column ending exactly at the content width is selectable and
+# TestVisibleColumnAtX_ColumnFittingExactlyIsSelectable pins that. What I probed
+# was line 71, the `contentX < acc+w` test, one line down.
+#
+# That is the second time a hand-applied probe has disagreed with the tool, and
+# both times the PROBE was wrong: once because it applied an invalid span, once
+# because it targeted the wrong line. Trust `make mutate` over a probe, and
+# never add an allowlist entry from a probe alone.
+#
+# The remaining four are verified by hand-applying the exact mutation (span
+# located by searching the line for the literal) and running the package suite.
+# Each is an inclusive edge whose mutated branch is unreachable or a no-op.
+#
+# The other 41 mutants in this file are killed by mouse_test.go, including the
+# arithmetic these four sit next to: available = width-2
+# (AvailableIsWidthMinusBothBorders), the exclusive right edge of a column
+# (ColumnRightEdgeIsExclusive), and vj >= 0 accepting the first column
+# (FirstVisibleColumnIsReachable). The arithmetic around them is pinned; only
+# these boundaries are not distinguishable.
+
+# mouse.go:61 `if available <= 0` -> `available < 0`: available is width-2, so
+# this is the "no content area" guard. The mutant lets available == 0 (width 2)
+# into the loop, where `acc+w > 0` breaks immediately for any positive width and
+# returns -1, the same answer. A zero-width first column does not break there,
+# but `contentX < 0 + 0` is false for every contentX and the next iteration
+# breaks anyway. The function returns -1 for every x either way.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/mouse.go:61
+
+# mouse.go:66 both loop bounds, `i < len(mh.grid.columns)` and
+# `i < len(mh.grid.widths)`, -> `<=`: the loop indexes mh.grid.widths[i] on the
+# next line, so at i == len(...) the mutant reads out of range and panics. The
+# mutated run cannot complete, which gremlins reports as LIVED rather than NOT
+# VIABLE because the panic happens in a goroutine it does not join.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/mouse.go:66
+
+# mouse.go:28 `if y < headerY` -> `y <= headerY`: HandleClick tests `y ==
+# headerY` first and returns there, so by the time this branch runs y !=
+# headerY. An inclusive `<=` therefore reduces to the strict `<`, and the
+# mutated branch is unreachable. This is why
+# TestGrid_HandleClick_LineAboveTheHeaderIsNotTheHeader kills nothing here: no
+# input can reach the difference.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/mouse.go:28
+
 # === Group C: one accepted, documented risk ================================
 #
 # internal/ui/toast.go:78 - `now.Sub(toast.Created) < toast.Duration` -> `<=`.
