@@ -1,9 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -11,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/buble/dbx/internal/ai/session"
-	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/drivers/postgres"
 )
 
@@ -36,90 +36,19 @@ func runReplay(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
 
-	filename := args[0]
-	jsonOutput, _ := cmd.Flags().GetBool("json")
-
-	cfg, err := config.Load()
+	cfg, err := loadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	sessionDir := cfg.Session.Dir
 
-	reader := session.NewReader(sessionDir)
-	entries, err := reader.ReadFile(filename)
+	reader := session.NewReader(cfg.Session.Dir)
+	entries, err := reader.ReadFile(args[0])
 	if err != nil {
 		return fmt.Errorf("failed to read session file: %w", err)
 	}
 
-	ctx := context.Background()
-	loader := postgres.NewSchemaLoader(conn)
-
-	type ReplayResult struct {
-		SQL      string `json:"sql"`
-		Duration int64  `json:"duration_ms"`
-		Rows     int    `json:"rows"`
-		Error    string `json:"error,omitempty"`
-	}
-
-	var results []ReplayResult
-	queryCount := 0
-	errorCount := 0
-
-	for _, entry := range entries {
-		if entry.Level != session.LogQuery || entry.SQL == "" {
-			continue
-		}
-
-		queryCount++
-		start := time.Now()
-
-		result, err := loader.ExecuteRaw(ctx, entry.SQL)
-		duration := time.Since(start).Milliseconds()
-
-		r := ReplayResult{
-			SQL:      entry.SQL,
-			Duration: duration,
-		}
-
-		if err != nil {
-			r.Error = err.Error()
-			errorCount++
-			fmt.Fprintf(os.Stderr, "FAIL: %s\n  Error: %v\n", entry.SQL, err)
-		} else {
-			r.Rows = result.Count
-			fmt.Fprintf(os.Stderr, "OK: %s (%d rows, %dms)\n", entry.SQL, result.Count, duration)
-		}
-
-		results = append(results, r)
-	}
-
-	if jsonOutput {
-		output := map[string]interface{}{
-			"session": filename,
-			"total":   queryCount,
-			"errors":  errorCount,
-			"queries": results,
-		}
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(output)
-	}
-
-	fmt.Fprintf(os.Stderr, "\nReplay complete: %d queries, %d errors\n", queryCount, errorCount)
-	return nil
-}
-
-var pipeCmd = &cobra.Command{
-	Use:   "pipe",
-	Short: "Execute SQL from stdin",
-	Long:  `Read SQL from stdin and execute it. Useful for piping.`,
-	RunE:  runPipe,
-}
-
-func init() {
-	pipeCmd.Flags().StringP("connection", "c", "", "Connection name from config")
-	pipeCmd.Flags().BoolP("json", "j", false, "Output as JSON")
-	rootCmd.AddCommand(pipeCmd)
+	jsonOutput, _ := cmd.Flags().GetBool("json")
+	return replayEntries(os.Stdout, os.Stderr, conn, entries, args[0], jsonOutput)
 }
 
 func runPipe(cmd *cobra.Command, args []string) error {
@@ -138,54 +67,89 @@ func runPipe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no input provided. Usage: echo \"SELECT 1\" | dbx pipe")
 	}
 
-	buf := make([]byte, 0, 4096)
-	tmp := make([]byte, 1024)
-	for {
-		n, err := os.Stdin.Read(tmp)
-		if n > 0 {
-			buf = append(buf, tmp[:n]...)
-		}
-		if err != nil {
-			break
-		}
+	sql, err := readSQL(os.Stdin)
+	if err != nil {
+		return err
 	}
-
-	sql := strings.TrimSpace(string(buf))
 	if sql == "" {
 		return fmt.Errorf("empty SQL input")
 	}
 
 	jsonOutput, _ := cmd.Flags().GetBool("json")
-	ctx := context.Background()
+	return queryAndReport(os.Stdout, conn, sql, jsonOutput)
+}
 
-	result, err := postgres.ExecuteQuery(ctx, conn, sql)
-	if err != nil {
-		return fmt.Errorf("query failed: %w", err)
+// readSQL reads a whole stream and trims it.
+//
+// Piping is how this command is meant to be used, so the reading has to handle
+// input that arrives in pieces larger or smaller than any buffer, and a read that
+// returns data together with io.EOF — the normal way the last chunk of a pipe
+// arrives, and the case a naive loop silently truncates.
+//
+// A real Read error is reported rather than swallowed: executing a truncated
+// statement against the database is worse than refusing to run it.
+func readSQL(r io.Reader) (string, error) {
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		return "", fmt.Errorf("failed to read stdin: %w", err)
 	}
+	return strings.TrimSpace(buf.String()), nil
+}
 
-	if jsonOutput {
-		output := map[string]interface{}{
-			"columns": result.Columns,
-			"rows":    result.Rows,
-			"count":   result.Count,
+// ReplayResult is one line of `dbx replay -j`.
+type ReplayResult struct {
+	SQL      string `json:"sql"`
+	Duration int64  `json:"duration_ms"`
+	Rows     int    `json:"rows"`
+	Error    string `json:"error,omitempty"`
+}
+
+// replayEntries re-runs every query in a session log.
+//
+// A failing statement is recorded and the replay continues: the point of a replay
+// is to see how far a session gets, and stopping at the first error would answer
+// a different question. The error count in the summary is what tells the user
+// where it stopped mattering.
+func replayEntries(stdout, stderr io.Writer, conn postgres.Conn, entries []session.LogEntry, filename string, asJSON bool) error {
+	loader := postgres.NewSchemaLoader(conn)
+
+	// Initialised, not declared: with nothing to replay a nil slice marshals to
+	// JSON `null`, and the empty case is an ordinary one.
+	results := []ReplayResult{}
+	queryCount := 0
+	errorCount := 0
+
+	for _, entry := range entries {
+		if entry.Level != session.LogQuery || entry.SQL == "" {
+			continue
 		}
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(output)
-	}
 
-	for _, col := range result.Columns {
-		fmt.Printf("%-20s", col.Name)
-	}
-	fmt.Println()
+		queryCount++
+		start := time.Now()
+		result, err := loader.ExecuteRaw(context.Background(), entry.SQL)
+		duration := time.Since(start).Milliseconds()
 
-	for _, row := range result.Rows {
-		for _, val := range row {
-			fmt.Printf("%-20v", val)
+		r := ReplayResult{SQL: entry.SQL, Duration: duration}
+		if err != nil {
+			r.Error = err.Error()
+			errorCount++
+			_, _ = fmt.Fprintf(stderr, "FAIL: %s\n  Error: %v\n", entry.SQL, err)
+		} else {
+			r.Rows = result.Count
+			_, _ = fmt.Fprintf(stderr, "OK: %s (%d rows, %dms)\n", entry.SQL, result.Count, duration)
 		}
-		fmt.Println()
+		results = append(results, r)
 	}
 
-	fmt.Printf("\n%d rows\n", result.Count)
+	if asJSON {
+		return writeJSON(stdout, map[string]interface{}{
+			"session": filename,
+			"total":   queryCount,
+			"errors":  errorCount,
+			"queries": results,
+		})
+	}
+
+	_, _ = fmt.Fprintf(stderr, "\nReplay complete: %d queries, %d errors\n", queryCount, errorCount)
 	return nil
 }

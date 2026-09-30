@@ -28,19 +28,19 @@ nc=  2 lived=  0 killed=  13  internal/config/keybindings.go            [GATED]
 nc=  2 lived=  0 killed=  24  internal/ui/keybindspane.go               [GATED]
 nc=  2 lived= 11 killed=  90  internal/ui/bordered/bordered.go          [GATED]
 nc=  2 lived=  9 killed=  34  internal/ui/components/grid/mouse.go
-nc=  3 lived=  0 killed=   0  internal/cli/root.go
+nc=  0 lived=  0 killed=   3  internal/cli/root.go
 nc=  3 lived=  0 killed=   0  internal/config/config.go                 [GATED]
 nc=  4 lived=  0 killed=   0  internal/app/router.go
-nc=  6 lived=  0 killed=   0  internal/cli/context.go
+nc=  0 lived=  0 killed=   6  internal/cli/context.go
 nc=  6 lived= 16 killed=  15  internal/ui/components/grid/header.go
 nc=  8 lived=  0 killed=   0  internal/ai/nl2sql/anthropic.go
 nc=  9 lived=  0 killed=   0  internal/ai/nl2sql/{deepseek,openai,qwen}.go
 nc=  9 lived=  0 killed=   0  internal/ui/components/grid/export_picker.go
 nc= 10 lived=  2 killed=   9  internal/config/scanner.go                [GATED]
-nc= 13 lived=  0 killed=   0  internal/cli/ask.go
+nc=  0 lived=  0 killed=  13  internal/cli/ask.go
 nc= 13 lived=  0 killed=   0  internal/drivers/postgres/query.go
 nc= 14 lived=  3 killed=  31  internal/store/query_history.go           [GATED]
-nc= 16 lived=  0 killed=   0  internal/cli/pipe.go
+nc=  0 lived=  0 killed=  14  internal/cli/pipe.go
 nc= 18 lived=  0 killed=   0  internal/ai/context/schema.go
 nc= 18 lived=  0 killed=   0  internal/ui/components/explorerpreview/tabbar.go
 nc= 22 lived=  0 killed=   0  internal/ai/nl2sql/provider.go
@@ -48,7 +48,7 @@ nc= 25 lived=  8 killed= 125  internal/app/txn.go                       [GATED]
 nc= 26 lived=  0 killed=   0  internal/ai/session/logger.go
 nc= 27 lived= 30 killed=  34  internal/ui/components/editor/highlight.go
 nc= 31 lived= 12 killed=   5  internal/ui/components/grid/pager.go
-nc= 32 lived=  0 killed=   0  internal/cli/commands.go
+nc=  0 lived=  0 killed=  32  internal/cli/commands.go
 nc= 32 lived= 76 killed= 103  internal/ui/components/explorerpreview/ere.go
 nc= 34 lived=  0 killed=   0  internal/drivers/postgres/schema.go
 nc= 39 lived=  0 killed=   0  internal/ui/components/palette/fuzzy.go
@@ -96,6 +96,8 @@ new Go file nobody classified.
 - [x] `internal/ui/components/grid/pager.go` (43 killed, 5 survivors) — was
       Tier 3; 31 uncovered → 0, 12 lived → 5. The 5 are the densest cluster of
       no-op-at-equality clamps found so far; see Group A in the allowlist
+- [x] `internal/cli/{ask,commands,context,pipe,root}.go` (68 killed, 0 survivors) —
+      was Tier 2/3, and needed a production refactor to be testable at all
 
 ### pager.go: the pattern to expect in the rest of the gate
 
@@ -162,34 +164,45 @@ has to be **in range**, because `syncScroll` clamps `cursorCol` to
 rewritten, so the test passes for the wrong reason. `sentinelCol(n)` returns
 `n-1`.
 
-### internal/cli: the uncovered mutants are all `if err != nil`, and that is the blocker
+### internal/cli: refactored into testable shape, 68 mutants, 0 survivors
 
-`internal/cli` has **no test file at all**, and every one of its uncovered mutants
-is a `CONDITIONALS_NEGATION` on an error check — 3 in `root.go`, 6 in `context.go`.
-They are not "hard to test", they are **unreachable from a test** in `root.go`:
+I had written this package off as untestable, which was wrong. It had **no test
+file** and all nine uncovered mutants were `CONDITIONALS_NEGATION` on error
+checks, and the two obstacles I named were real but both were removable:
 
-- `root.go:23` `if err := rootCmd.Execute(); err != nil` wraps an `os.Exit(1)`.
-  Both branches of that `if` terminate the process, so a test can observe neither.
-- `root.go:31` and `root.go:37` are inside `runTUI`, which builds a bubbletea
-  program and calls `p.Run()`. Reaching them means launching the TUI.
+- `root.go:23` had `os.Exit(1)` in **both** branches of its `if`, so no test could
+  observe either. Fixed by splitting `execute() error` out of `Execute()`, and then
+  by putting `os.Exit` behind `var exit = os.Exit` so the last statement of the
+  program is observable too.
+- Every command took a concrete `*pgx.Conn`. Fixed by adding `postgres.Conn`
+  (Query + QueryRow + Close) and threading it through. `*pgx.Conn` satisfies it, so
+  production is unchanged, and `pgx.Row` is a one-method interface, so the fake is
+  small.
 
-`context.go` is not quite so bad, but every one of its six needs either a live
-PostgreSQL reached through the user's config, or a `json.MarshalIndent` failure
-that cannot be provoked:
+**The rule that came out of this: a concrete dependency in a function signature is
+a testability decision, and usually a bad one.** Every one of these nine mutants
+lived above the database, not in it, and all nine died as soon as the connection
+became an interface.
 
-- `context.go:31` (getConnection) is the only one reachable with no database: a
-  `-c` naming a connection that does not exist.
-- `context.go:49` and `context.go:50` are reachable **with** a database: `-o` to a
-  path, and `-o` into a directory that does not exist.
-- `context.go:39` (ExportSchema), `context.go:44` (MarshalIndent) and
-  `context.go:64` (current_database) each need a fault injected into pgx.
+The bodies were then split so they can be driven at all: `queryAndReport`,
+`listTablesAndReport`, `listColumnsAndReport` + `findColumns` + `writeColumns`,
+`replayEntries`, `askAndReport`, `generateSQLOnly`, `writeSchemaOutput`,
+`writeQueryResult`, `readSQL`, `dsnFor`. The RunE wrappers stayed three lines each.
 
-So: covering these needs a production seam — an injectable `tea.Program` runner
-and an injectable `pgx` connection — not a test. **Deliberately left out of the
-gate**, and not allowlisted, because an allowlist entry for a NOT COVERED mutant
-is exactly the kind of parked gap the gate is meant to surface. `internal/cli` is
-therefore the one package where the honest answer is "the code is not testable
-yet", and the fix is a refactor someone has to choose to make.
+**Two production bugs the new tests found, both fixed here:**
+
+1. `dbx list tables -j` and `dbx replay -j` on an empty result marshalled to `null`,
+   not `[]`. `var allTables []map[string]interface{}` is nil, and `null` breaks
+   `jq '.[] | .name'` with a message about the wrong thing — on a database that is
+   merely empty. Now initialised.
+2. `runAsk` had a second `if sqlOnly { print; return }` after the first one had
+   already returned. Unreachable, so removed.
+
+Also: three copies of the result-printing loop (`query`, `pipe`, `ask`) became one
+`writeQueryResult`, and two copies of the column-printing loop became one
+`writeColumns`. errcheck then forced the question of which writes are the output
+(propagate) and which are progress (ignore) — the answer is now written down at
+each call site.
 
 ### A second defect found, not fixed: the camelCase bonus in the palette is dead
 
@@ -226,19 +239,15 @@ alone.
 
 ### Tier 2 — under 10 uncovered
 
-DONE except for `internal/cli`, which is blocked on a production seam rather than
-on tests. See the `internal/cli` note above.
+DONE. Tier 2 is empty.
 
 - [x] `internal/ui/components/grid/header.go` — done, 34 killed / 3 survivors
 - [x] `internal/ui/components/grid/export_picker.go` — done, 9 killed / 0 survivors
-- [!] `internal/cli/root.go` — 3 uncovered, **not testable without a seam**. Left
-      out of the gate on purpose, see above.
-- [!] `internal/cli/context.go` — 6 uncovered, needs a live PG plus injectable
-      faults. See above.
+- [x] `internal/cli/{ask,commands,context,pipe,root}.go` — done, 68 killed /
+      **0 survivors**. Needed a production refactor, not just tests. See above.
 
 ### Tier 3 — 10-45 uncovered
 
-- [ ] `internal/cli/{ask,pipe,commands}.go` — 13/16/32
 - [ ] `internal/drivers/postgres/{query,schema}.go` — 13/34
 - [ ] `internal/ai/context/schema.go` — 18
 - [ ] `internal/ai/nl2sql/provider.go` — 22

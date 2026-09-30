@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/buble/dbx/internal/drivers/postgres"
 )
 
 type SchemaExport struct {
@@ -50,7 +50,7 @@ type FKInfo struct {
 	RefColumns      string `json:"ref_columns"`
 }
 
-func ExportSchema(ctx context.Context, conn *pgx.Conn, dbName string) (*SchemaExport, error) {
+func ExportSchema(ctx context.Context, conn postgres.Conn, dbName string) (*SchemaExport, error) {
 	export := &SchemaExport{Database: dbName}
 
 	schemas, err := listSchemas(ctx, conn)
@@ -90,7 +90,7 @@ func ExportSchema(ctx context.Context, conn *pgx.Conn, dbName string) (*SchemaEx
 	return export, nil
 }
 
-func ExportSchemaString(ctx context.Context, conn *pgx.Conn, dbName string) (string, error) {
+func ExportSchemaString(ctx context.Context, conn postgres.Conn, dbName string) (string, error) {
 	export, err := ExportSchema(ctx, conn, dbName)
 	if err != nil {
 		return "", err
@@ -110,7 +110,7 @@ type tableRow struct {
 	RowCount int64
 }
 
-func listSchemas(ctx context.Context, conn *pgx.Conn) ([]string, error) {
+func listSchemas(ctx context.Context, conn postgres.Conn) ([]string, error) {
 	query := `
 		SELECT schema_name
 		FROM information_schema.schemata
@@ -134,7 +134,7 @@ func listSchemas(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 	return schemas, rows.Err()
 }
 
-func listTables(ctx context.Context, conn *pgx.Conn, schema string) ([]tableRow, error) {
+func listTables(ctx context.Context, conn postgres.Conn, schema string) ([]tableRow, error) {
 	query := `
 		SELECT
 			t.table_name,
@@ -163,7 +163,7 @@ func listTables(ctx context.Context, conn *pgx.Conn, schema string) ([]tableRow,
 	return tables, rows.Err()
 }
 
-func listColumns(ctx context.Context, conn *pgx.Conn, schema, table string) ([]ColumnInfo, error) {
+func listColumns(ctx context.Context, conn postgres.Conn, schema, table string) ([]ColumnInfo, error) {
 	query := `
 		SELECT
 			column_name,
@@ -194,7 +194,7 @@ func listColumns(ctx context.Context, conn *pgx.Conn, schema, table string) ([]C
 	return columns, rows.Err()
 }
 
-func listIndexes(ctx context.Context, conn *pgx.Conn, schema, table string) ([]IndexInfo, error) {
+func listIndexes(ctx context.Context, conn postgres.Conn, schema, table string) ([]IndexInfo, error) {
 	query := `
 		SELECT
 			i.relname as index_name,
@@ -230,7 +230,7 @@ func listIndexes(ctx context.Context, conn *pgx.Conn, schema, table string) ([]I
 	return indexes, rows.Err()
 }
 
-func listFKs(ctx context.Context, conn *pgx.Conn, schema, table string) ([]FKInfo, error) {
+func listFKs(ctx context.Context, conn postgres.Conn, schema, table string) ([]FKInfo, error) {
 	query := `
 		SELECT
 			tc.constraint_name,
