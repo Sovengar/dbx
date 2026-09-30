@@ -341,6 +341,50 @@ CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:138
 #       the mutant it enters the truncation branch and comes out unchanged.
 CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:141
 
+# === Group B6: internal/ui/components/palette/fuzzy.go, score + sort =======
+#
+# FOUR survivors. Three are one dead branch, and the fourth is a loop bound whose
+# extra iteration has an empty body. Both shapes are provable by reading, and
+# both were confirmed by hand-applying the exact mutation on a green suite.
+#
+# The other 35 mutants in this file are killed, including the whole score
+# formula contribution by contribution (FuzzyMatch_ScoresAreFixedByContract), the
+# in-order requirement, the alias fallback and the fact that it is a fallback
+# rather than a maximum, the descending order, the stability of ties, and the
+# empty query keeping the registry order.
+
+# fuzzy.go:31, all THREE mutations of `if t[ti] >= 'A' && t[ti] <= 'Z'` ->
+#       the body `score += 3` is UNREACHABLE. Line 11 is
+#       `t := strings.ToLower(target)` and that is the only thing t is ever bound
+#       to, so t[ti] is by construction never in 'A'..'Z'. The bytes 0x41-0x5A
+#       cannot occur in a lower-cased string.
+#
+#       This is not equivalent code, it is INERT code: a camelCase bonus meant to
+#       rank "CamelCase" above "concat", which never fires. Two things keep it
+#       from rotting unnoticed:
+#       - TestFuzzyMatch_CamelCaseBonusIsUnreachable asserts the exact scores
+#         without the bonus, and asserts that an upper-case target and a
+#         lower-case one score identically.
+#       - The defect is written up in TODO.md. It is NOT fixed here, per the rule
+#         that test commits carry no production changes.
+#
+#       The three entries below are the boundary on each half of the condition
+#       and the negation of the first half. The boundary on the SECOND half is
+#       the third line, keyed by the same 31 because gremlins attributes both
+#       halves of an && to the line's first token.
+CONDITIONALS_BOUNDARY internal/ui/components/palette/fuzzy.go:31
+CONDITIONALS_NEGATION internal/ui/components/palette/fuzzy.go:31
+CONDITIONALS_BOUNDARY internal/ui/components/palette/fuzzy.go:31
+
+# fuzzy.go:73 `for i := 0; i < len(scored); i++` -> `i <= len(scored)`: at
+#       i == len(scored) the OUTER loop runs one extra time, but its body is a
+#       single inner loop `for j := i + 1; j < len(scored); j++`, which starts at
+#       len+1 and therefore executes zero times. scored[i] is never evaluated on
+#       that iteration, so nothing happens and the returned slice is identical.
+#       The mutant is a pure no-op, NOT a panic: the out-of-range index a reader
+#       might expect here is never reached.
+CONDITIONALS_BOUNDARY internal/ui/components/palette/fuzzy.go:73
+
 # === Group C: one accepted, documented risk ================================
 #
 # internal/ui/toast.go:78 - `now.Sub(toast.Created) < toast.Duration` -> `<=`.

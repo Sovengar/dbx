@@ -87,6 +87,12 @@ new Go file nobody classified.
       Tier 2; all four went from 8-9 uncovered to zero in one table-driven file
 - [x] `internal/ui/components/grid/mouse.go` (41 killed, 4 survivors) — was
       Tier 2; 2 uncovered → 0, 9 lived → 4
+- [x] `internal/ui/components/grid/header.go` (34 killed, 3 survivors) — was
+      Tier 2; 6 uncovered → 0, 13 lived → 3
+- [x] `internal/ui/components/grid/export_picker.go` (9 killed, **0 survivors**) —
+      was Tier 2; 9 uncovered → 0, no allowlist entry needed
+- [x] `internal/ui/components/palette/fuzzy.go` (35 killed, 4 survivors) — was
+      Tier 3; 39 uncovered → 0
 
 ### Two contracts worth keeping
 
@@ -125,6 +131,56 @@ has to be **in range**, because `syncScroll` clamps `cursorCol` to
 rewritten, so the test passes for the wrong reason. `sentinelCol(n)` returns
 `n-1`.
 
+### internal/cli: the uncovered mutants are all `if err != nil`, and that is the blocker
+
+`internal/cli` has **no test file at all**, and every one of its uncovered mutants
+is a `CONDITIONALS_NEGATION` on an error check — 3 in `root.go`, 6 in `context.go`.
+They are not "hard to test", they are **unreachable from a test** in `root.go`:
+
+- `root.go:23` `if err := rootCmd.Execute(); err != nil` wraps an `os.Exit(1)`.
+  Both branches of that `if` terminate the process, so a test can observe neither.
+- `root.go:31` and `root.go:37` are inside `runTUI`, which builds a bubbletea
+  program and calls `p.Run()`. Reaching them means launching the TUI.
+
+`context.go` is not quite so bad, but every one of its six needs either a live
+PostgreSQL reached through the user's config, or a `json.MarshalIndent` failure
+that cannot be provoked:
+
+- `context.go:31` (getConnection) is the only one reachable with no database: a
+  `-c` naming a connection that does not exist.
+- `context.go:49` and `context.go:50` are reachable **with** a database: `-o` to a
+  path, and `-o` into a directory that does not exist.
+- `context.go:39` (ExportSchema), `context.go:44` (MarshalIndent) and
+  `context.go:64` (current_database) each need a fault injected into pgx.
+
+So: covering these needs a production seam — an injectable `tea.Program` runner
+and an injectable `pgx` connection — not a test. **Deliberately left out of the
+gate**, and not allowlisted, because an allowlist entry for a NOT COVERED mutant
+is exactly the kind of parked gap the gate is meant to surface. `internal/cli` is
+therefore the one package where the honest answer is "the code is not testable
+yet", and the fix is a refactor someone has to choose to make.
+
+### A second defect found, not fixed: the camelCase bonus in the palette is dead
+
+`fuzzyMatch` (`internal/ui/components/palette/fuzzy.go:31`) scores a match on an
+upper-case letter +3, so typing `cc` should rank `CamelCase` above `concat`. The
+check is `if t[ti] >= 'A' && t[ti] <= 'Z'`, but line 11 is
+`t := strings.ToLower(target)` and that is the only thing `t` is ever bound to.
+**The lower-case bytes `0x41`-`0x5A` cannot occur in a lower-cased string, so the
+`score += 3` is unreachable.** All three mutants on that line are provably
+equivalent, and the allowlist says so.
+
+The score it would have changed is load-bearing for the ranking, so the inert
+branch is pinned rather than left implicit:
+`TestFuzzyMatch_CamelCaseBonusIsUnreachable` asserts `c`/`camelCase` = 28
+(10 + 8 + 10, no bonus) and that `XMLHttp` and `xmlhttp` score identically. The
+fix would be to score against the un-lowercased target and keep `q`/`t` lower-cased
+for the scan, which is a production change and was left alone.
+
+Also pinned, because it surprised me while writing the test: **the search is not
+accent-insensitive.** There is no Unicode normalisation anywhere in the path, so
+`cafe` does not find `café`.
+
 ### A defect found, not fixed
 
 `cleanSQL` strips the literal ` ```sql ` prefix and the bare ` ``` ` prefix, both
@@ -139,10 +195,15 @@ alone.
 
 ### Tier 2 — under 10 uncovered
 
-- [ ] `internal/cli/root.go` — 3 uncovered
-- [ ] `internal/cli/context.go` — 6 uncovered
-- [ ] `internal/ui/components/grid/header.go` — 6 uncovered, 16 lived.
-- [ ] `internal/ui/components/grid/export_picker.go` — 9 uncovered, 0 killed.
+DONE except for `internal/cli`, which is blocked on a production seam rather than
+on tests. See the `internal/cli` note above.
+
+- [x] `internal/ui/components/grid/header.go` — done, 34 killed / 3 survivors
+- [x] `internal/ui/components/grid/export_picker.go` — done, 9 killed / 0 survivors
+- [!] `internal/cli/root.go` — 3 uncovered, **not testable without a seam**. Left
+      out of the gate on purpose, see above.
+- [!] `internal/cli/context.go` — 6 uncovered, needs a live PG plus injectable
+      faults. See above.
 
 ### Tier 3 — 10-45 uncovered
 
@@ -155,7 +216,8 @@ alone.
 - [ ] `internal/ui/components/editor/highlight.go` — 27 uncovered, 30 lived
 - [ ] `internal/ui/components/grid/pager.go` — 31 uncovered, 12 lived
 - [ ] `internal/ui/components/explorerpreview/ere.go` — 32 uncovered, 76 lived
-- [ ] `internal/ui/components/{palette/fuzzy,picker/picker,grid/cell}.go` — 39/39/41
+- [x] `internal/ui/components/palette/fuzzy.go` — done, 35 killed / 4 survivors
+- [ ] `internal/ui/components/{picker/picker,grid/cell}.go` — 39/41
 - [ ] `internal/ui/components/ask/ask.go` — 43 uncovered, 6 lived
 
 ### Tier 4 — 60+ uncovered, high value, high cost
