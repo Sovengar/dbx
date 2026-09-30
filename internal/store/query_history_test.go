@@ -357,3 +357,294 @@ func mustMarshal(t *testing.T, entries []QueryEntry) []byte {
 	}
 	return data
 }
+
+// --- the three operations that look an entry up by position ------------------
+
+// Scenario: Poner nombre y borrar por indice, y un indice invalido no hace nada.
+//
+// Both take an index into All(), which is newest-first, and both return silently
+// on an index that is not there. A stale index is ordinary: the list changes
+// underneath a selection when a query is re-run, and panicking on a stale click is
+// not an option.
+func TestQueryStore_SetNameAndDelete_IgnoreAnIndexOutOfRange(t *testing.T) {
+	s := NewQueryStore(t.TempDir())
+	s.Add("SELECT 1")
+	s.Add("SELECT 2")
+	s.Add("SELECT 3")
+	before := s.All()
+
+	// The list deliberately includes 0 and 1, which are VALID indices, and the
+	// next test proves they still work. A guard written as `idx < 0 ||` that
+	// relaxed to `idx <= 0` would reject 0 and silently refuse to rename the
+	// newest query, which is the one a user renames most.
+	for _, idx := range []int{-1, -100, 3, 4, 1000} {
+		// The calls are wrapped rather than made directly because the bug this
+		// guards is an INDEX, and an out-of-range index panics instead of
+		// failing. A panicking test still fails the run, but it fails as a crash:
+		// the mutation harness reads a crash as "the mutant survived" and the
+		// guard would look untested while in fact it is what stops the panic.
+		// Recovering and failing turns the same signal into a normal assertion.
+		if p := callCatchingPanic(func() { s.SetName(idx, "should not stick") }); p != nil {
+			t.Errorf("SetName(%d) panicked: %v", idx, p)
+		}
+		if got := s.All(); len(got) != len(before) {
+			t.Fatalf("SetName(%d) changed the entry count to %d", idx, len(got))
+		}
+		if p := callCatchingPanic(func() { s.Delete(idx) }); p != nil {
+			t.Errorf("Delete(%d) panicked: %v", idx, p)
+		}
+		if got := s.All(); len(got) != len(before) {
+			t.Fatalf("Delete(%d) changed the entry count to %d", idx, len(got))
+		}
+	}
+	// Nothing was renamed either.
+	for _, e := range s.All() {
+		if e.Name == "should not stick" {
+			t.Errorf("a name stuck to %q from an out-of-range index", e.SQL)
+		}
+	}
+}
+
+// Scenario: El índice 0 y el 1 son válidos y funcionan.
+//
+// The out-of-range guard above has to reject what is out of range and NOTHING
+// else. A `>= 0` relaxed to `> 0` would reject 0, and 0 is the newest query —
+// the one a user is most likely to name after running it.
+func TestQueryStore_SetNameAndDelete_WorkOnTheFirstTwoIndices(t *testing.T) {
+	s := NewQueryStore(t.TempDir())
+	s.Add("one")
+	s.Add("two")
+
+	// All() is newest-first, so index 0 is "two" and index 1 is "one".
+	if got := s.All()[0].SQL; got != "two" {
+		t.Fatalf("fixture is wrong: index 0 is %q, want two", got)
+	}
+
+	s.SetName(0, "newest")
+	s.SetName(1, "oldest")
+	after := s.All()
+	if after[0].Name != "newest" {
+		t.Errorf("index 0 is named %q, want newest", after[0].Name)
+	}
+	if after[1].Name != "oldest" {
+		t.Errorf("index 1 is named %q, want oldest", after[1].Name)
+	}
+
+	// And index 0 deletes, which would panic if the guard let it through as
+	// "one past the end".
+	if p := callCatchingPanic(func() { s.Delete(0) }); p != nil {
+		t.Errorf("Delete(0) panicked: %v", p)
+	}
+	left := s.All()
+	if len(left) != 1 || left[0].SQL != "one" {
+		t.Errorf("after Delete(0) the survivors are %q, want just one", sqlOf(left))
+	}
+}
+
+// Scenario: Poner nombre y borrar por indice valido, y el indice es el de All.
+//
+// All() is newest-first, so index 0 is the most recent query. Getting that
+// backwards would rename or delete the wrong row, which is silent and then
+// permanent once it is saved.
+func TestQueryStore_SetNameAndDelete_ActOnTheIndexAllReports(t *testing.T) {
+	s := NewQueryStore(t.TempDir())
+	s.Add("oldest")
+	s.Add("middle")
+	s.Add("newest")
+
+	all := s.All()
+	if all[0].SQL != "newest" || all[2].SQL != "oldest" {
+		t.Fatalf("All() = %q, %q, %q, want newest first", all[0].SQL, all[1].SQL, all[2].SQL)
+	}
+
+	s.SetName(1, "renamed")
+	after := s.All()
+	if after[1].Name != "renamed" {
+		t.Errorf("index 1 is %q named %q, want it named renamed", after[1].SQL, after[1].Name)
+	}
+	if after[0].Name != "" || after[2].Name != "" {
+		t.Errorf("the other entries were named too: %q / %q", after[0].Name, after[2].Name)
+	}
+
+	s.Delete(1)
+	rest := s.All()
+	if len(rest) != 2 {
+		t.Fatalf("after Delete there are %d entries, want 2", len(rest))
+	}
+	for _, e := range rest {
+		if e.SQL == "middle" {
+			t.Error("Delete(1) removed the wrong entry: middle is still there")
+		}
+	}
+	if rest[0].SQL != "newest" || rest[1].SQL != "oldest" {
+		t.Errorf("the survivors are %q, %q, want newest and oldest", rest[0].SQL, rest[1].SQL)
+	}
+}
+
+// Scenario: La búsqueda del objetivo salta las entradas que no encajan.
+//
+// SetName and Delete find their target by matching SQL AND timestamp, walking
+// entries in insertion order. Every entry before the target has to be compared
+// and rejected, so a store with several entries is what exercises the loop rather
+// than just its first iteration.
+func TestQueryStore_SetNameAndDelete_ScanPastNonMatchingEntries(t *testing.T) {
+	s := NewQueryStore(t.TempDir())
+	for _, q := range []string{"a", "b", "c", "d", "e"} {
+		s.Add(q)
+	}
+	// "b" is at index 3 of 5 in All(), which is the FOURTH newest-first, so the
+	// scan has to reject three entries before it matches.
+	if got := s.All()[3].SQL; got != "b" {
+		t.Fatalf("fixture is wrong: index 3 is %q, want b", got)
+	}
+
+	s.SetName(3, "found-it")
+	for i, e := range s.All() {
+		if e.SQL == "b" {
+			if e.Name != "found-it" {
+				t.Errorf("b is at index %d and named %q, want found-it", i, e.Name)
+			}
+		} else if e.Name != "" {
+			t.Errorf("the scan named the wrong entry: %q got %q", e.SQL, e.Name)
+		}
+	}
+
+	s.Delete(3)
+	for _, e := range s.All() {
+		if e.SQL == "b" {
+			t.Error("the scan deleted the wrong entry")
+		}
+	}
+	if len(s.All()) != 4 {
+		t.Errorf("after Delete there are %d entries, want 4", len(s.All()))
+	}
+}
+
+// --- the dedupe and the cap --------------------------------------------------
+
+// Scenario: Una consulta repetida se mueve al final en vez de duplicarse.
+//
+// History is a recency list, so re-running a query has to make it the most recent
+// entry. Appending a second copy would show the same SQL twice and make the list
+// grow for no reason.
+func TestQueryStore_Add_MovesARepeatedQueryToTheEnd(t *testing.T) {
+	s := NewQueryStore(t.TempDir())
+	s.Add("one")
+	s.Add("two")
+	s.Add("three")
+
+	// Re-run the oldest one, which is the furthest from the end.
+	s.Add("one")
+
+	all := s.All()
+	if len(all) != 3 {
+		t.Fatalf("after re-running there are %d entries, want 3: %q", len(all), sqlOf(all))
+	}
+	if all[0].SQL != "one" {
+		t.Errorf("the re-run query is at index %d, want it most recent: %q", indexOfSQL(all, "one"), sqlOf(all))
+	}
+	// And the other two kept their relative order.
+	if all[1].SQL != "three" || all[2].SQL != "two" {
+		t.Errorf("the survivors are %q, %q, want three then two", all[1].SQL, all[2].SQL)
+	}
+
+	// Re-running something already most recent changes nothing.
+	s.Add("one")
+	if got := s.All(); len(got) != 3 || got[0].SQL != "one" {
+		t.Errorf("re-running the most recent gave %q, want it unchanged at three entries", sqlOf(got))
+	}
+}
+
+// Scenario: La comparación del dedupe ignora los espacios de los extremos.
+//
+// Add trims what it stores and compares trimmed, so "  SELECT 1  " and "SELECT 1"
+// are the same query. Without that, whitespace differences would silently fill the
+// history with duplicates of the same statement.
+func TestQueryStore_Add_DedupeIgnoresSurroundingWhitespace(t *testing.T) {
+	s := NewQueryStore(t.TempDir())
+	s.Add("SELECT 1")
+	s.Add("  SELECT 1  ")
+	s.Add("\tSELECT 1\n")
+
+	all := s.All()
+	if len(all) != 1 {
+		t.Fatalf("three spellings of one query produced %d entries: %q", len(all), sqlOf(all))
+	}
+	if all[0].SQL != "SELECT 1" {
+		t.Errorf("the stored SQL is %q, want it trimmed", all[0].SQL)
+	}
+
+	// And an empty or whitespace-only query is not stored at all.
+	for _, empty := range []string{"", "   ", "\n\t "} {
+		s.Add(empty)
+	}
+	if got := s.All(); len(got) != 1 {
+		t.Errorf("an empty query was stored: %q", sqlOf(got))
+	}
+}
+
+// Scenario: El historial se corta a 500 entradas, y se corta por el final.
+//
+// The cap keeps the file from growing without bound. What must be kept is the
+// RECENT half: dropping the oldest is the only sensible choice, and keeping the
+// oldest would silently make the most recent queries disappear.
+func TestQueryStore_Add_CapsAtFiveHundredKeepingTheNewest(t *testing.T) {
+	s := NewQueryStore(t.TempDir())
+	// 500 is slow through the file system, so the cap is exercised through the
+	// in-memory path and the assertions are about WHICH entries survive.
+	for i := 0; i < 499; i++ {
+		s.Add("q" + strconv.Itoa(i))
+	}
+	if got := s.All(); len(got) != 499 {
+		t.Fatalf("after 499 adds there are %d entries, want 499", len(got))
+	}
+
+	// One more is still fine: the cap is "more than 500", not "500 or more".
+	s.Add("q499")
+	if got := s.All(); len(got) != 500 {
+		t.Fatalf("after 500 adds there are %d entries, want 500", len(got))
+	}
+
+	// The 501st evicts exactly one, the oldest.
+	s.Add("q500")
+	all := s.All()
+	if len(all) != 500 {
+		t.Fatalf("after 501 adds there are %d entries, want 500", len(all))
+	}
+	if all[0].SQL != "q500" {
+		t.Errorf("the newest entry is %q, want q500", all[0].SQL)
+	}
+	if all[len(all)-1].SQL != "q1" {
+		t.Errorf("the oldest surviving entry is %q, want q1: the cap must drop the oldest, not the newest", all[len(all)-1].SQL)
+	}
+	for _, e := range all {
+		if e.SQL == "q0" {
+			t.Error("q0 survived: the cap kept the oldest instead of the newest")
+		}
+	}
+}
+
+// callCatchingPanic runs f and returns whatever it panicked with, or nil. It
+// exists so an index bug is reported as a test failure rather than as a crash.
+func callCatchingPanic(f func()) (recovered any) {
+	defer func() { recovered = recover() }()
+	f()
+	return nil
+}
+
+func sqlOf(entries []QueryEntry) []string {
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		out[i] = e.SQL
+	}
+	return out
+}
+
+func indexOfSQL(entries []QueryEntry, sql string) int {
+	for i, e := range entries {
+		if e.SQL == sql {
+			return i
+		}
+	}
+	return -1
+}

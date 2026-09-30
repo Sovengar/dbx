@@ -401,3 +401,33 @@ func TestKeybindsPane_ExplorerPartialGroup(t *testing.T) {
 		t.Errorf("explorer pane rendered the goto-page group: %q", joined)
 	}
 }
+
+// Scenario: Un panel sin anchura no dibuja nada.
+//
+// The pane is laid out on every resize, and during a collapse-to-zero the width
+// can be 0 or briefly negative. Rendering anyway would divide by it or emit a
+// stray border; the guard is what makes a zero-width layout a no-op.
+func TestKeybindsPane_AZeroOrNegativeWidthRendersNothing(t *testing.T) {
+	for _, w := range []int{0, -1, -100} {
+		p := NewKeybindsPane(theme.Resolve("dark").Styles(), testRegistry())
+		p.SetWidth(w)
+		p.SetFocus("explorer")
+
+		got := p.View()
+		if got != "" {
+			t.Errorf("width %d rendered %q, want nothing", w, got)
+		}
+	}
+}
+
+// Scenario: El ancho por defecto, sin laying out, es cero y no dibuja.
+//
+// A pane that was constructed but never sized renders empty rather than
+// panicking, which is the state every pane is in between New and the first
+// SetWidth.
+func TestKeybindsPane_AnUnsizedPaneRendersNothing(t *testing.T) {
+	p := NewKeybindsPane(theme.Resolve("dark").Styles(), testRegistry())
+	if got := p.View(); got != "" {
+		t.Errorf("a pane that was never sized rendered %q, want nothing", got)
+	}
+}

@@ -1,0 +1,97 @@
+# .mutation-notcovered - the NOT COVERED mutants this project has accounted for.
+#
+# A NOT COVERED mutant is one gremlins chose not to run, because it believes the
+# surrounding code was never executed. `make mutate` used to print the count and
+# pass anyway, so an untested branch could sit here indefinitely and the only
+# symptom would be a number in a CI comment.
+#
+# scripts/check_mutate_nc.py fails on any entry here that is NOT in report.json as
+# NOT COVERED, and on any NOT COVERED mutant that is not here. A new entry is a red
+# build. Do not regenerate this file wholesale: that would silently re-hide real
+# gaps, which is the whole thing this file exists to prevent.
+#
+# Format:  <file>:<line>:<mutator>
+#
+# ---------------------------------------------------------------------------
+
+# === Group 1: switch-true `case` lines, mis-attributed by the coverage tool ====
+#
+# Every entry below sits on a `case` line of a `switch { ... }`. Go's cover tool
+# attributes a case expression's coverage to the case BODY, so the case line has no
+# block of its own and gremlins' per-line lookup finds nothing to attribute to.
+#
+# This is not a suspicion. `go tool cover` reported exactly 3 uncovered blocks in
+# internal/app/txn.go out of the whole file; gremlins reported 25 uncovered MUTANTS,
+# and all 25 of them are on case lines. Hand-applying txn.go:384:26
+# (`i+1 < len(sql)` -> `i+2 < len(sql)` in the line-comment case) and running the
+# suite KILLS it — gremlins never ran it at all.
+#
+# The same probe showed two that genuinely SURVIVED before the new tests:
+#   348:45, the E-string case bound, and 390:26, the block-comment opener bound.
+# Both need a two-character input (`E'` and `/*`) that the fixtures did not have,
+# and TestMaskNonCode_ATwoByteEStringPrefixIsStillAnEString and
+# TestMaskNonCode_ATwoByteCommentOpenerIsStillAComment now supply one. The rest are
+# killed by the existing suite and are listed here only because the tool declines
+# to run them.
+internal/app/txn.go:333:CONDITIONALS_NEGATION
+internal/app/txn.go:348:ARITHMETIC_BASE
+internal/app/txn.go:348:CONDITIONALS_BOUNDARY
+internal/app/txn.go:348:CONDITIONALS_NEGATION
+internal/app/txn.go:349:ARITHMETIC_BASE
+internal/app/txn.go:349:CONDITIONALS_NEGATION
+internal/app/txn.go:349:INVERT_NEGATIVES
+internal/app/txn.go:369:CONDITIONALS_NEGATION
+internal/app/txn.go:384:ARITHMETIC_BASE
+internal/app/txn.go:384:CONDITIONALS_BOUNDARY
+internal/app/txn.go:384:CONDITIONALS_NEGATION
+internal/app/txn.go:390:ARITHMETIC_BASE
+internal/app/txn.go:390:CONDITIONALS_BOUNDARY
+internal/app/txn.go:390:CONDITIONALS_NEGATION
+internal/app/txn.go:402:CONDITIONALS_NEGATION
+
+# === Group 2: the only remaining genuine gap ================================
+#
+# internal/config/config.go — the three error paths of the viper load:
+#   :23  the `if err != nil` after reading the config file. Needs a config that
+#        exists and cannot be read, which means a permissions case; chmod on a
+#        directory does not stop the owner reading it, and skipping the test when
+#        running as root would make it pass for the wrong reason.
+#   :105 the same load error on the project config.
+#   :124 a viper Unmarshal failure: a config file that parses but has a value of
+#        the wrong type for a known key. This one IS reachable and is the next
+#        thing to close; the fixture has to go through the file because the
+#        unmarshalling happens inside viper.
+internal/config/config.go:105:CONDITIONALS_NEGATION
+internal/config/config.go:124:CONDITIONALS_NEGATION
+
+# === Group 3: one dead branch ===============================================
+#
+# internal/ui/bordered/bordered.go:232 — the "ensure at least one line" fallback
+# in buildContentLines. The loop above it iterates strings.Split(content, "\n"),
+# and strings.Split ALWAYS returns at least one element: for "" it returns [""],
+# for "\n" it returns ["", ""]. So `len(result) == 0` is unreachable and the
+# fallback is inert.
+#
+# Verified rather than assumed, and pinned as executable proof by
+# TestRender_TheEnsureAtLeastOneLineFallbackIsUnreachable, which states both the
+# premise (Split never yields zero elements) and the consequence (every input
+# produces exactly split-lines + 2 box lines). Removing the fallback would change
+# nothing observable.
+internal/ui/bordered/bordered.go:232:ARITHMETIC_BASE
+
+# internal/config/scanner.go:49 — the `Name < Name` tiebreak at the end of the sort
+# in Scan. Unreachable, and the reason is the dedup that runs on the line before:
+# two survivors can only share a Path if they came from the same directory, and
+# FoundProject.Name is derived from the single .dbx.toml in that directory. Same
+# directory, same file, same first-sorted connection name. So by the time the sort
+# runs, equal Path always implies equal Name, and `Name < Name` is false for every
+# input the program can produce.
+#
+# Pinned as an invariant rather than as a fixture by
+# TestScan_DuplicatePathsCollapseSoTheNameTiebreakIsUnreachable, which asserts the
+# converse directly: within one scan, no two survivors share a Path with different
+# Names. A change that broke the invariant would fail there rather than silently
+# start depending on a comparator that can never return true.
+internal/config/scanner.go:49:CONDITIONALS_BOUNDARY
+internal/config/scanner.go:49:CONDITIONALS_NEGATION
+internal/config/config.go:23:CONDITIONALS_NEGATION

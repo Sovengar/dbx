@@ -38,7 +38,7 @@ nc=  9 lived=  0 killed=   0  internal/ai/nl2sql/{deepseek,openai,qwen}.go
 nc=  9 lived=  0 killed=   0  internal/ui/components/grid/export_picker.go
 nc= 10 lived=  2 killed=   9  internal/config/scanner.go                [GATED]
 nc=  0 lived=  0 killed=  13  internal/cli/ask.go
-nc= 13 lived=  0 killed=   0  internal/drivers/postgres/query.go
+nc=  0 lived=  0 killed=  13  internal/drivers/postgres/query.go
 nc= 14 lived=  3 killed=  31  internal/store/query_history.go           [GATED]
 nc=  0 lived=  0 killed=  14  internal/cli/pipe.go
 nc= 18 lived=  0 killed=   0  internal/ai/context/schema.go
@@ -50,7 +50,7 @@ nc= 27 lived= 30 killed=  34  internal/ui/components/editor/highlight.go
 nc= 31 lived= 12 killed=   5  internal/ui/components/grid/pager.go
 nc=  0 lived=  0 killed=  32  internal/cli/commands.go
 nc= 32 lived= 76 killed= 103  internal/ui/components/explorerpreview/ere.go
-nc= 34 lived=  0 killed=   0  internal/drivers/postgres/schema.go
+nc=  0 lived=  1 killed=  33  internal/drivers/postgres/schema.go
 nc= 39 lived=  0 killed=   0  internal/ui/components/palette/fuzzy.go
 nc= 39 lived=  0 killed=   0  internal/ui/components/picker/picker.go
 nc= 41 lived=  0 killed=   0  internal/ui/components/grid/cell.go
@@ -98,6 +98,9 @@ new Go file nobody classified.
       no-op-at-equality clamps found so far; see Group A in the allowlist
 - [x] `internal/cli/{ask,commands,context,pipe,root}.go` (68 killed, 0 survivors) —
       was Tier 2/3, and needed a production refactor to be testable at all
+- [x] `internal/drivers/postgres/{query,schema}.go` (46 killed, 1 survivor) — no
+      test file existed. Driven through `internal/testsupport/pgxfake`
+- [x] `internal/config` NOT COVERED: 21 → 0 uncovered, 12 mutants killed
 
 ### pager.go: the pattern to expect in the rest of the gate
 
@@ -164,45 +167,71 @@ has to be **in range**, because `syncScroll` clamps `cursorCol` to
 rewritten, so the test passes for the wrong reason. `sentinelCol(n)` returns
 `n-1`.
 
-### internal/cli: refactored into testable shape, 68 mutants, 0 survivors
+### A FOURTH blind spot in the harness, and it was the biggest one
 
-I had written this package off as untestable, which was wrong. It had **no test
-file** and all nine uncovered mutants were `CONDITIONALS_NEGATION` on error
-checks, and the two obstacles I named were real but both were removable:
+A NOT COVERED mutant is one gremlins chose not to run. The gate printed the count
+in a CI comment and **failed on nothing**. So an untested branch could sit in the
+gate indefinitely, and unlike a survivor — which shows up as a red build — this
+was completely silent. Same family as the TIMED OUT hazard, one level worse,
+because a timeout is at least absent from the report where you can count it.
 
-- `root.go:23` had `os.Exit(1)` in **both** branches of its `if`, so no test could
-  observe either. Fixed by splitting `execute() error` out of `Execute()`, and then
-  by putting `os.Exit` behind `var exit = os.Exit` so the last statement of the
-  program is observable too.
-- Every command took a concrete `*pgx.Conn`. Fixed by adding `postgres.Conn`
-  (Query + QueryRow + Close) and threading it through. `*pgx.Conn` satisfies it, so
-  production is unchanged, and `pgx.Row` is a one-method interface, so the fake is
-  small.
+`scripts/check_mutate_nc.py` and `.mutation-notcovered` now make it a hard
+failure in both directions, and the Calibration job is not the only gate: the
+Mutation job runs it too. A new uncovered mutant is a red build; an entry that
+stops being uncovered is also a red build, so a suppressed gap cannot quietly
+become a real one.
 
-**The rule that came out of this: a concrete dependency in a function signature is
-a testability decision, and usually a bad one.** Every one of these nine mutants
-lived above the database, not in it, and all nine died as soon as the connection
-became an interface.
+**And gremlins was wrong about a quarter of them.** `go tool cover` reported
+exactly **3** uncovered blocks in `internal/app/txn.go`; gremlins reported **25**
+uncovered mutants there, and all 25 sat on `case` lines of a `switch { ... }`.
+Go's cover tool attributes a case expression to the case BODY, so the case line has
+no block and gremlins' per-line lookup finds nothing to attribute to. Hand
+applying `txn.go:384:26` and running the suite **KILLS it** — gremlins never ran
+it. Twenty-two of the 58 were this artefact.
 
-The bodies were then split so they can be driven at all: `queryAndReport`,
-`listTablesAndReport`, `listColumnsAndReport` + `findColumns` + `writeColumns`,
-`replayEntries`, `askAndReport`, `generateSQLOnly`, `writeSchemaOutput`,
-`writeQueryResult`, `readSQL`, `dsnFor`. The RunE wrappers stayed three lines each.
+Closing them anyway found two real gaps the artefact had been hiding:
+`E'` and `/*` as two-character inputs, where the bound that detects the opener is
+one byte short. Both are now pinned.
 
-**Two production bugs the new tests found, both fixed here:**
+**My earlier claim that txn.go was "22 survivors → 8" was measured with a broken
+`jq` and was wrong about the uncovered half.** The killed count was right; 25
+mutants were never being run and I did not notice. This is the third time a
+measurement command in this project has failed silently, which is why the checks
+are now scripts that exit non-zero rather than shell one-liners.
 
-1. `dbx list tables -j` and `dbx replay -j` on an empty result marshalled to `null`,
-   not `[]`. `var allTables []map[string]interface{}` is nil, and `null` breaks
-   `jq '.[] | .name'` with a message about the wrong thing — on a database that is
-   merely empty. Now initialised.
-2. `runAsk` had a second `if sqlOnly { print; return }` after the first one had
-   already returned. Unreachable, so removed.
+### A third dead branch, and a real bug in the project scanner
 
-Also: three copies of the result-printing loop (`query`, `pipe`, `ask`) became one
-`writeQueryResult`, and two copies of the column-printing loop became one
-`writeColumns`. errcheck then forced the question of which writes are the output
-(propagate) and which are progress (ignore) — the answer is now written down at
-each call site.
+`internal/ui/bordered/bordered.go:232` has an "ensure at least one line" fallback
+whose guard is `len(result) == 0`. The loop above it iterates
+`strings.Split(content, "\n")`, and `strings.Split` **always** returns at least one
+element — `[""]` for `""`. Inert. Pinned by a test that states both the premise
+and the consequence.
+
+`internal/config/scanner.go` had a real one. The hidden-directory guard in
+`scanWithWalkDir` tested `d.Name()`, and WalkDir visits the ROOT first — so any
+root whose own last element starts with a dot was skipped entirely and the walk
+found nothing. `NewScanner("/home/x/.config/dev").Scan()` returns no projects. The
+guard now tests `path != root`. Found by the fixture `TestScanWithWalkDir_AHiddenRootIsStillWalked`.
+
+`internal/config/scanner.go:49`, the sort's `Name < Name` tiebreak, is dead for a
+structural reason: dedup runs first, and two survivors can only share a `Path` if
+they came from the same directory, whose single `.dbx.toml` gives them the same
+`Name`. Pinned as an invariant rather than a fixture, so a change that broke it
+would fail the test instead of silently depending on a comparator that can never
+return true.
+
+### The probe corrupted my working tree, and how I caught it
+
+A probe script whose arguments were in the wrong order never applied its
+mutations, and one of its runs ended with `git checkout -- <file>` on a file with
+uncommitted work. That reverted a bug fix, and a later run left `if err == nil`
+sitting in `scanWithFD` as if it were production code. Two symptoms: `fd` was
+installed and worked from a shell, but `scanWithFD` returned nothing, and the test
+I had just written to prove it worked was failing for no visible reason.
+
+`/tmp/opencode/verify_clean.sh` now prints every non-test `.go` diff after a probe
+run. **Never let a probe script touch a file with uncommitted work**, and take the
+backup before the FIRST probe of a session, not per-run.
 
 ### A second defect found, not fixed: the camelCase bonus in the palette is dead
 
@@ -248,7 +277,6 @@ DONE. Tier 2 is empty.
 
 ### Tier 3 — 10-45 uncovered
 
-- [ ] `internal/drivers/postgres/{query,schema}.go` — 13/34
 - [ ] `internal/ai/context/schema.go` — 18
 - [ ] `internal/ai/nl2sql/provider.go` — 22
 - [ ] `internal/ai/session/logger.go` — 26

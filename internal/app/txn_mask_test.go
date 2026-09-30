@@ -867,3 +867,111 @@ func TestExecute_NonDMLAfterAFailedCommitReturnsTheError(t *testing.T) {
 		t.Errorf("execute ran %d statements despite the failed commit, want 0", len(f.execs))
 	}
 }
+
+// Scenario: Un prefijo de dos bytes, solo, sigue siendo un E-string.
+//
+// The E-string case needs three bytes to read as one: the E, the quote, and
+// something after the quote. With the bound relaxed to i+2 the two-character
+// input "E'" stops being an E-string, so the E stays as code and the quote opens
+// an ordinary literal that runs to the end. Both are blanked, and the difference
+// is which of the two bytes is treated as code — which decides whether a
+// following backslash is an escape.
+func TestMaskNonCode_ATwoByteEStringPrefixIsStillAnEString(t *testing.T) {
+	txnMaskAssert(t, "E'", txnSpaces(2))
+	txnMaskAssert(t, "e'", txnSpaces(2))
+	// With something after, the two readings diverge on what a backslash means.
+	// Under the plain reading the backslash does NOT escape, so the quote after
+	// it CLOSES the literal and the rest is code; under the E-string reading it
+	// does escape and everything to the end is literal.
+	txnMaskAssert(t, `E'\''`, txnSpaces(len(`E'\''`)))
+	// A single byte, an E with no quote at all, is not an E-string.
+	txnMaskAssert(t, "E", "E")
+}
+
+// Scenario: Un opener de comentario de dos bytes, solo, sigue siendo un comentario.
+//
+// Same shape as the E-string: "/*" and "--" are complete openers with nothing
+// after them, and a relaxed bound stops recognising them. That would leave the
+// opener as code and mask nothing, so a "--" would still reach the keyword
+// scanner as a comment-looking token.
+func TestMaskNonCode_ATwoByteCommentOpenerIsStillAComment(t *testing.T) {
+	txnMaskAssert(t, "/*", txnSpaces(2))
+	txnMaskAssert(t, "--", txnSpaces(2))
+	// A single byte is not an opener.
+	txnMaskAssert(t, "/", "/")
+	txnMaskAssert(t, "-", "-")
+	// And an opener with a following line still masks to the end of the line only.
+	txnMaskAssert(t, "-- x\ny", txnSpaces(4)+"\ny")
+}
+
+// Scenario: Un E-string empieza también en medio de la entrada, no solo al principio.
+//
+// The "no identifier byte in front" rule has an i == 0 escape, so the E-string
+// branch has to be reached from the middle too. This is the case that pins the
+// i == 0 half of that condition: without the escape, an E-string at position 0
+// would be read as part of an identifier.
+func TestMaskNonCode_TheEOfAnEStringIsRecognisedAfterASpace(t *testing.T) {
+	txnMaskAssert(t, " E'ab'", " "+txnSpaces(5))
+	txnMaskAssert(t, "  E'ab'", "  "+txnSpaces(5))
+}
+
+// Scenario: La comilla de cierre de un E-string no se confunde con la de apertura.
+//
+// The scan has to stop at the closing quote and leave the rest as code, or a whole
+// statement after the literal would be blanked and the keyword scanner would see
+// nothing at all.
+func TestMaskNonCode_AnEStringClosesAndCodeFollows(t *testing.T) {
+	txnMaskAssert(t, `E'ab'c`, txnSpaces(5)+"c")
+	txnMaskAssert(t, `E'ab'  c`, txnSpaces(5)+"  c")
+	// Two literals in a row: the first must close.
+	txnMaskAssert(t, `E'a''b'`, txnSpaces(len(`E'a''b'`)))
+}
+
+// Scenario: Un delimitador de dollars abre y cierra con la misma etiqueta.
+//
+// $tag$ ... $tag$ is how PostgreSQL embeds a function body, and the closing tag
+// has to be the SAME one. Masking to the wrong tag hides code that follows, and
+// failing to mask at all leaves function bodies visible to the keyword scanner.
+func TestMaskNonCode_ADollarQuotedBodyIsMaskedWithItsOwnTag(t *testing.T) {
+	for _, in := range []string{
+		"$tag$ body $tag$",
+		"$body$ SELECT 1 $body$",
+		"$$ plain $$",
+		"$_x$ a $_x$",
+	} {
+		got := maskNonCode(in)
+		if got == in {
+			t.Errorf("maskNonCode(%q) left the dollar-quoted body visible: %q", in, got)
+		}
+		if len(got) != len(in) {
+			t.Errorf("maskNonCode(%q) changed the byte length: %d vs %d", in, len(got), len(in))
+		}
+	}
+	// And code after a closing tag is still code.
+	txnMaskAssert(t, "$tag$ x $tag$ DELETE", txnSpaces(13)+" DELETE")
+}
+
+// LIMITACIÓN CONOCIDA: un cuerpo con dollar-quote sin cerrar NO se tapa.
+//
+// matchDollarQuote requires a CLOSING tag: with only `$tag$ x` there is no second
+// occurrence, so it reports "not a dollar quote" and the scanner moves on one byte
+// at a time. The literal is therefore left visible.
+//
+// The impact is limited and worth stating rather than fixing blind: PostgreSQL
+// rejects an unterminated dollar-quoted body, so the statement cannot execute, so
+// the worst case is that a keyword inside it counts towards isSelectOnly and makes
+// the check stricter than it needs to be. Making it mask to end-of-input would
+// relax that check, so a fix has to be a decision, not a patch.
+func TestMaskNonCode_AnUnterminatedDollarQuoteIsLeftVisible(t *testing.T) {
+	for _, in := range []string{"$tag$ x", "$$ unterminated", "$tag$ DELETE"} {
+		if got := maskNonCode(in); got != in {
+			t.Errorf("maskNonCode(%q) = %q, want it unchanged: an unterminated body is not recognised", in, got)
+		}
+	}
+	// A $ that is not a tag at all is also left alone, which is the other half of
+	// the same contract.
+	txnMaskAssert(t, "a $ b", "a $ b")
+	txnMaskAssert(t, "$ x", "$ x")
+	// A tag with an illegal character in it is not a tag.
+	txnMaskAssert(t, "$ta g$ x $ta g$", "$ta g$ x $ta g$")
+}

@@ -46,11 +46,20 @@ CONDITIONALS_BOUNDARY internal/config/keybindings_groups.go:126
 # equal paths to the Name comparison instead.
 CONDITIONALS_BOUNDARY internal/config/scanner.go:47
 
-# internal/config/scanner.go:214 - `a.project.Path < b.project.Path` -> `<=`, the
-# lexicographic tiebreak after the equal-length guard. Only equal strings could
-# distinguish them, and two candidates in a group that shared a path would be
-# the same FoundProject, so the winner is unobservable either way.
-CONDITIONALS_BOUNDARY internal/config/scanner.go:214
+# CLOSED, and removed rather than moved: `a.project.Path < b.project.Path`, the
+# lexicographic tiebreak at the end of isBetterSurvivor, used to be allowlisted
+# here on the argument that two candidates sharing a path would be the same
+# FoundProject. That argument was right about Scan and wrong about the FUNCTION:
+# isBetterSurvivor is a pure three-level priority, and
+# TestIsBetterSurvivor_EqualLengthFallsBackToLexicographic calls it directly with
+# two same-length paths and kills the mutant. The gate reported the entry as stale,
+# which is the mechanism working: a suppressed mutant that stops surviving has to
+# be deleted, not re-keyed.
+#
+# The entry moved from line 214 to 221 first, because scanWithWalkDir gained a
+# comment above it. That is the hazard the header of this file warns about, and
+# the stale-entry check is what caught the shift instead of letting it silently
+# point at the wrong line.
 
 # internal/store/query_history.go:76 - `len(s.entries) > 500` -> `>= 500`. At exactly
 # 500 the mutant slices entries[0:], which is the same 500 entries.
@@ -356,6 +365,53 @@ CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:101
 #       a 10-character label in a 12-wide cell has maxTextWidth 10, and under
 #       the mutant it enters the truncation branch and comes out unchanged.
 CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:141
+
+# === Group B8: internal/config, two no-op-at-equality guards ================
+#
+# Two survivors, both the family from group A, and one of them a variant worth
+# spelling out because the guard is not where the eye goes.
+#
+# The other 46 mutants in internal/config are killed, including the whole
+# WalkDir fallback (hidden directories, a hidden ROOT, an unreadable subtree), the
+# three-level survivor priority, the dedup, the loadPaths skip rules, and the
+# fd-versus-WalkDir comparison that makes the two discovery paths distinguishable.
+
+# scanner.go:219 `if len(a.project.Path) != len(b.project.Path) { return
+#       len(a.project.Path) < len(b.project.Path) }` -> the inner `<` becomes
+#       `<=`. This is a no-op at equality, but NOT because the body is skipped at
+#       equality — it is the opposite: the body only RUNS when the lengths DIFFER,
+#       which is exactly what the enclosing `!=` guarantees. On every input that
+#       reaches the line, one length is strictly less than the other, so `<` and
+#       `<=` return the same answer.
+#
+# The three isBetterSurvivor tests do pin the surrounding priority (main checkout,
+# then shortest path, then lexicographic) and the mutant still survives, precisely
+# because none of them can produce two candidates whose paths have equal length
+# AND reach this line.
+CONDITIONALS_BOUNDARY internal/config/scanner.go:219
+
+# === Group B7: internal/drivers/postgres, one no-op-at-equality guard =======
+#
+# ONE survivor, the same shape as group A: a guard whose body recomputes the value
+# the line above already set.
+#
+# The other 46 mutants in this package are killed, including the whole
+# dataTypeOID table (which is the mapping the grid's type column comes from, and
+# which is easy to get wrong plausibly), every clause of the SELECT builder
+# including the OFFSET-without-LIMIT case PostgreSQL rejects, the UNIQUE substring
+# test, and the swallowed-stats sentinel in GetTableOverview.
+
+# schema.go:506 `if len(def) > 0` -> `len(def) >= 0`: line 505 already set
+#       idx.Unique = false, so the only value where `>=` fires and `>` does not is
+#       an EMPTY definition. There the body runs
+#       strings.Contains("", "UNIQUE"), which is false, and assigns the value the
+#       line above already put there. A self-assignment.
+#
+#       Confirmed by hand-applying the mutation on a green suite, and the empty
+#       definition IS exercised by TestListIndexes_MarksUniquenessFromTheDefinition
+#       — the fixture reaches the branch and the assertion passes either way,
+#       which is the proof.
+CONDITIONALS_BOUNDARY internal/drivers/postgres/schema.go:506
 
 # === Group B6: internal/ui/components/palette/fuzzy.go, score + sort =======
 #
