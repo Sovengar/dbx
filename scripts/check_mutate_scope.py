@@ -72,6 +72,7 @@ EXPECTED = [
     ("internal/cli/context.go", True),
     ("internal/cli/pipe.go", True),
     ("internal/cli/root.go", True),
+    ("internal/ai/context/schema.go", True),
     ("internal/drivers/postgres/query.go", True),
     ("internal/drivers/postgres/schema.go", True),
     # test-support fakes are never gated: they exist to be exercised by
@@ -100,7 +101,6 @@ EXPECTED = [
     ("internal/ai/nl2sql/deepseek.go", True),
     ("internal/ai/nl2sql/openai.go", True),
     ("internal/ai/nl2sql/qwen.go", True),
-    ("internal/ai/context/schema.go", False),
     ("internal/ai/session/logger.go", False),
     ("internal/app/messages.go", False),
     ("internal/config/keybindings_groups.go", True),
@@ -109,7 +109,6 @@ EXPECTED = [
     ("internal/theme/builtin.go", False),
     ("internal/theme/system.go", False),
     ("main.go", False),
-    ("internal/ai/context/schema.go", False),
     ("internal/ai/session/logger.go", False),
     ("cmd/dbx/main.go", False),
 ]

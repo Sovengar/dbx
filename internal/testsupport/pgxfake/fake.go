@@ -331,6 +331,12 @@ func assign(dest, v any) error {
 		return nil
 	}
 	switch p := dest.(type) {
+	case *struct{}:
+		// A discard destination. The driver uses `&struct{}{}` for columns it
+		// selects but does not want, so this is not a test artefact: a fake that
+		// refused it would make listIndexes untestable without changing the
+		// query to stop selecting those columns.
+		*p = struct{}{}
 	case *string:
 		*p = fmt.Sprint(v)
 	case **string:

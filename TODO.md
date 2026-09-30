@@ -100,6 +100,8 @@ new Go file nobody classified.
       was Tier 2/3, and needed a production refactor to be testable at all
 - [x] `internal/drivers/postgres/{query,schema}.go` (46 killed, 1 survivor) — no
       test file existed. Driven through `internal/testsupport/pgxfake`
+- [x] `internal/ai/context/schema.go` (18 killed, **0 survivors**) — was Tier 3;
+      free once the driver took an interface, so it came last and cost nothing
 - [x] `internal/config` NOT COVERED: 21 → 0 uncovered, 12 mutants killed
 
 ### pager.go: the pattern to expect in the rest of the gate
@@ -277,7 +279,6 @@ DONE. Tier 2 is empty.
 
 ### Tier 3 — 10-45 uncovered
 
-- [ ] `internal/ai/context/schema.go` — 18
 - [ ] `internal/ai/nl2sql/provider.go` — 22
 - [ ] `internal/ai/session/logger.go` — 26
 - [ ] `internal/ui/components/explorerpreview/tabbar.go` — 18
