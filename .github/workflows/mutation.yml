@@ -173,13 +173,13 @@ jobs:
             exit 1
           fi
 
-      - name: Check NOT COVERED against .mutation-notcovered
-        # A NOT COVERED mutant is one the tool chose not to run, so it is
-        # invisible to the check above: it is not a survivor, and it is not a
-        # kill either. Failing only on survivors therefore lets an untested
-        # branch sit in the gate forever with nothing but a number in the
-        # summary. This is the same hazard as a TIMED OUT mutant, which is absent
-        # from report.json altogether.
+      - name: Check unevaluated mutants against .mutation-notcovered
+        # A NOT COVERED or TIMED OUT mutant is one the tool chose not to run, so
+        # it is invisible to the check above: it is not a survivor, and it is not
+        # a kill either. Failing only on survivors therefore lets an untested
+        # branch sit in the gate forever with nothing but a number in the summary.
+        # A TIMED OUT mutant is worse, because it is absent from the counted
+        # totals and so makes the efficacy figure go UP.
         run: |
           set -uo pipefail
           if ! python3 scripts/check_mutate_nc.py; then

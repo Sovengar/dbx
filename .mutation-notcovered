@@ -1,14 +1,23 @@
-# .mutation-notcovered - the NOT COVERED mutants this project has accounted for.
+# .mutation-notcovered - the mutants this project has accounted for as UNEVALUATED.
 #
-# A NOT COVERED mutant is one gremlins chose not to run, because it believes the
-# surrounding code was never executed. `make mutate` used to print the count and
-# pass anyway, so an untested branch could sit here indefinitely and the only
-# symptom would be a number in a CI comment.
+# A mutant lands here when the tool did not run it. Two statuses mean that, and
+# they are the same hazard:
 #
-# scripts/check_mutate_nc.py fails on any entry here that is NOT in report.json as
-# NOT COVERED, and on any NOT COVERED mutant that is not here. A new entry is a red
-# build. Do not regenerate this file wholesale: that would silently re-hide real
-# gaps, which is the whole thing this file exists to prevent.
+#   NOT COVERED - gremlins believes the surrounding code was never executed.
+#   TIMED OUT   - the mutant makes the code loop forever and the harness gave up.
+#
+# `make mutate` used to print both counts and pass anyway, so an untested branch
+# could sit here indefinitely and the only symptom would be a number in a CI
+# comment. Worse, a TIMED OUT mutant is absent from the counted totals entirely, so
+# it makes the gate's efficacy figure go UP.
+#
+# scripts/check_mutate_nc.py fails on any entry here that is NOT in report.json with
+# one of those two statuses, and on any such mutant that is not here. A new entry
+# is a red build. So is an entry that stops appearing, which is how a suppressed
+# gap is stopped from quietly becoming a real one.
+#
+# Do not regenerate this file wholesale: that would silently re-hide real gaps,
+# which is the whole thing this file exists to prevent.
 #
 # Format:  <file>:<line>:<mutator>
 #
@@ -95,3 +104,39 @@ internal/ui/bordered/bordered.go:232:ARITHMETIC_BASE
 internal/config/scanner.go:49:CONDITIONALS_BOUNDARY
 internal/config/scanner.go:49:CONDITIONALS_NEGATION
 internal/config/config.go:23:CONDITIONALS_NEGATION
+
+# === Group 4: TIMED OUT, unkillable by any test =============================
+#
+# FOUR files, every entry the same shape: a loop guard that is also the only thing
+# advancing the index, whose negation leaves the loop never terminating.
+#
+#   internal/ui/components/editor/highlight.go   86 line-comment scan, 142 and 150/152
+#                                                the word scan, 186 punctuation, 193 unknown
+#   internal/app/txn.go                          386 the line-comment scan, 407 the blank loop
+#   internal/config/keybindings_groups.go        39  the group scan
+#   internal/ui/bordered/bordered.go             251 and 268 the ANSI-escape scan
+#
+# A test cannot kill an infinite loop. The only outcomes are a hang — which the
+# harness abandons, leaving the mutant absent from report.json and therefore
+# indistinguishable from a kill — or a failure, which requires the test to DETECT the
+# hang first. tokenizeWithin and highlightWithin in highlight_test.go do that, with
+# a budget chosen to fire before the harness's own, and they catch most of
+# highlight.go's. They cannot catch all of them: each hanging test burns its full
+# budget and the harness's budget for the whole package is smaller than the sum.
+#
+# The count is NOT deterministic — highlight.go reported 9 timeouts on one run and 7
+# on the next with an identical suite, because it depends on how much of the budget
+# each test consumes and on CPU contention with the other workers. So these are
+# CEILINGS, not an exact set. scripts/check_mutate_nc.py fails if a file exceeds its
+# ceiling, fails if a file with timeouts has no ceiling at all, and prints the set
+# for information.
+#
+# Ceilings are set above what a run normally produces, so an ordinary slow run does
+# not red the build, while a genuine increase is still caught.
+#
+# The right long-term answer is a property/fuzz test with a per-input timeout
+# enforced by the testing framework itself, which this project does not use yet.
+TIMEOUT_MAX internal/ui/components/editor/highlight.go 12 the tokenizer loop guards are the only thing advancing the index
+TIMEOUT_MAX internal/app/txn.go 6 the SQL lexer line-comment and blank loops
+TIMEOUT_MAX internal/config/keybindings_groups.go 3 the group scan in digitRange
+TIMEOUT_MAX internal/ui/bordered/bordered.go 4 the ANSI-escape scan

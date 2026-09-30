@@ -73,6 +73,7 @@ EXPECTED = [
     ("internal/cli/pipe.go", True),
     ("internal/cli/root.go", True),
     ("internal/ai/context/schema.go", True),
+    ("internal/ui/components/editor/highlight.go", True),
     ("internal/drivers/postgres/query.go", True),
     ("internal/drivers/postgres/schema.go", True),
     # test-support fakes are never gated: they exist to be exercised by
@@ -83,7 +84,6 @@ EXPECTED = [
     ("internal/ui/components/gridpreview/handled.go", False),
     ("internal/ui/components/gridsidebarpreview/preview.go", False),
     ("internal/ui/components/editor/sql.go", False),
-    ("internal/ui/components/editor/highlight.go", False),
     ("internal/ui/components/editor/autocomplete.go", False),
     ("internal/ui/components/editor/handled.go", False),
     ("internal/ui/components/ask/ask.go", False),

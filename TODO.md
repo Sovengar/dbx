@@ -102,6 +102,8 @@ new Go file nobody classified.
       test file existed. Driven through `internal/testsupport/pgxfake`
 - [x] `internal/ai/context/schema.go` (18 killed, **0 survivors**) — was Tier 3;
       free once the driver took an interface, so it came last and cost nothing
+- [x] `internal/ui/components/editor/highlight.go` (91 killed, 0 survivors, 9
+      unkillable timeouts) — was Tier 3; 27 uncovered → 0, 30 lived → 0
 - [x] `internal/config` NOT COVERED: 21 → 0 uncovered, 12 mutants killed
 
 ### pager.go: the pattern to expect in the rest of the gate
@@ -282,7 +284,6 @@ DONE. Tier 2 is empty.
 - [ ] `internal/ai/nl2sql/provider.go` — 22
 - [ ] `internal/ai/session/logger.go` — 26
 - [ ] `internal/ui/components/explorerpreview/tabbar.go` — 18
-- [ ] `internal/ui/components/editor/highlight.go` — 27 uncovered, 30 lived
 - [ ] `internal/ui/components/explorerpreview/ere.go` — 32 uncovered, 76 lived
 - [x] `internal/ui/components/palette/fuzzy.go` — done, 35 killed / 4 survivors
 - [x] `internal/ui/components/grid/pager.go` — done, 43 killed / 5 survivors
