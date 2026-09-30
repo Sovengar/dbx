@@ -34,9 +34,10 @@ MUTATE_BASE ?= main
 # packages. The regexp is an exclusion list, so a file is opted IN by naming its
 # siblings OUT. TODO.md tracks which files are in and which are still pending.
 #
-#   IN : internal/app/txn.go, internal/ui/components/explorer/node.go,
+#   IN : internal/app/{txn,router}.go, internal/ai/nl2sql/{anthropic,openai,
+#        deepseek,qwen}.go, internal/ui/components/explorer/node.go,
 #        internal/ui/components/palette/commands.go
-#   OUT: internal/app/app.go (350 uncovered), internal/app/router.go,
+#   OUT: internal/app/app.go (350 uncovered), internal/ai/nl2sql/compatible.go,
 #        and the rest of internal/ui/components.
 # Optional. A shared PostgreSQL for the mutation run, so internal/app does not
 # start a fresh testcontainers instance on every one of the hundreds of test
@@ -44,7 +45,7 @@ MUTATE_BASE ?= main
 # testcontainers, which is correct but slow. See the note above `mutate`.
 MUTATE_DSN ?=
 
-MUTATE_EXCLUDE ?= internal/ui/keydisplay/|internal/ui/components/(ask|editor|explorerpreview|grid|gridpreview|gridsidebarpreview|picker|querybrowser)/|internal/ui/components/(explorer/(explorer|handled|tree)|palette/(fuzzy|palette))\.go|internal/app/(app|router|messages)\.go|internal/ai/|internal/cli/|internal/drivers/|cmd/|main\.go|internal/theme/
+MUTATE_EXCLUDE ?= internal/ui/keydisplay/|internal/ui/components/(ask|editor|explorerpreview|grid|gridpreview|gridsidebarpreview|picker|querybrowser)/|internal/ui/components/(explorer/(explorer|handled|tree)|palette/(fuzzy|palette))\.go|internal/app/(app|messages)\.go|internal/ai/(context|session)/|internal/ai/nl2sql/(compatible|provider|prompt)\.go|internal/cli/|internal/drivers/|cmd/|main\.go|internal/theme/
 
 build:
 	go build $(LDFLAGS) -o .local/bin/dbx .

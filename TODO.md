@@ -82,17 +82,47 @@ new Go file nobody classified.
 - [x] `internal/app/txn.go` — done in `ad614e3`
 - [x] `internal/ui/components/explorer/node.go` (11 killed)
 - [x] `internal/ui/components/palette/commands.go` (4 killed)
+- [x] `internal/app/router.go` (4 killed)
+- [x] `internal/ai/nl2sql/{anthropic,openai,deepseek,qwen}.go` (35 killed) — was
+      Tier 2; all four went from 8-9 uncovered to zero in one table-driven file
+
+### Two contracts worth keeping
+
+**`router_test.go`** pins one thing the file does not state: only the explorer
+and the grid are in the focus cycle. The editor and the two preview panes have a
+`String()` but no `FocusByName` case, so the editor is not reachable by name at
+all. `TestFocusByName_ReachableNamesRoundTrip` enumerates the panes and fails if
+that set ever changes, so adding a name later is a deliberate edit.
+
+**`provider_test.go`** covers the four NL providers with one table, because they
+differ in three ways that each needed pinning separately: the endpoint, the auth
+header (Anthropic uses `x-api-key`, the rest use `Authorization: Bearer`), and
+the response shape (Anthropic nests the text at `content[].text`, the rest at
+`choices[0].message.content`). It also pins that Anthropic sends the system
+prompt in a dedicated `system` field rather than as a message, and that Qwen
+sends no `max_tokens` at all.
+
+The four call `http.DefaultClient` against hardcoded https URLs, so
+`httptest.Server` cannot reach them. The seam is a custom `http.RoundTripper`
+swapped onto `http.DefaultTransport` for the duration of the test, which
+exercises the real request path, headers and body without the network.
+
+### A defect found, not fixed
+
+`cleanSQL` strips the literal ` ```sql ` prefix and the bare ` ``` ` prefix, both
+lowercase, then the trailing fence. A model that emits ` ```SQL ` in caps gets
+the bare-fence strip, which removes the backticks and leaves the word `SQL`
+glued to the front of the statement. The result parses as a column alias, so the
+app reports a plausible "missing relation" error instead of "the model sent a
+fence". `TestCleanSQL_UppercaseLanguageTagLeaksIntoTheSQL` pins the actual
+behaviour with a note; the fix is a case-insensitive tag compare in
+`internal/ai/nl2sql/anthropic.go`, which is a production change and was left
+alone.
 
 ### Tier 2 — under 10 uncovered
 
-- [ ] `internal/app/router.go` — 4 uncovered, 0 mutants killed. Tiny; most of
-      the file is not exercised at all. Read it first: a 4-mutant file may be
-      almost pure wiring, in which case covering it is cheap.
 - [ ] `internal/cli/root.go` — 3 uncovered
 - [ ] `internal/cli/context.go` — 6 uncovered
-- [ ] `internal/ai/nl2sql/anthropic.go` — 8 uncovered, then `deepseek`/`openai`/`qwen`
-      at 9 each. Four near-identical provider adapters, so one table-driven test
-      per adapter shape should cover all four cheaply.
 - [ ] `internal/ui/components/grid/mouse.go` — 2 uncovered, 9 lived. Cover the
       2, then probe the 9 before assuming they are equivalent.
 - [ ] `internal/ui/components/grid/header.go` — 6 uncovered, 16 lived.
