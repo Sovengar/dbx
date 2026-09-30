@@ -181,6 +181,66 @@ CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:220
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:251
 ARITHMETIC_BASE internal/ui/bordered/bordered.go:251
 
+# === Group B3: internal/app/txn.go, scan bounds in the SQL lexer ==========
+#
+# Eight survivors, all in maskNonCode's byte-level scanning. Every one was
+# verified by hand-applying the exact mutation (span located by searching for the
+# literal operator, not by the reported column) and running the package suite.
+#
+# The common shape: `i+1 < len(sql)` guards an access to sql[i+1]. Relaxing it to
+# `i+1 <= len(sql)` fires the body at i+1 == len(sql), and the body either reads
+# one byte past the end (a panic, so the mutant is not viable and reports
+# LIVED-by-timeout) or advances i past the end, which ends the loop with i >= len
+# and makes blank() clamp the same way. The counters are never wrong; they are
+# just one index wider than the data they guard.
+#
+# 318:11 `if from < 0` -> `from <= 0`: blank()'s lower clamp. Every caller passes
+#       a start index that is already >= 0 (it is a byte offset found by the
+#       scan, or 0), so the `from = 0` body can only ever assign 0. At from == 0
+#       the mutant fires and assigns the value already there.
+CONDITIONALS_BOUNDARY internal/app/txn.go:318
+
+# 321:9  `if to > len(out)` -> `to >= len(out)`: blank()'s upper clamp, the same
+#        shape. At to == len(out) the body assigns the value already there, and
+#        for the mutated call sites (an index one past the end) the write loop
+#        `for i := from; i < to` simply does not execute, because the clamped
+#        range is empty either way.
+CONDITIONALS_BOUNDARY internal/app/txn.go:321
+
+# 354:30 `if sql[i] == '\\' && i+1 < len(sql)` -> `i+1 <= len(sql)`: the E-string
+#        backslash escape. A trailing backslash as the LAST byte of the input is
+#        the only firing case; `i += 2` then leaves i == len+1, the loop exits,
+#        and blank(start, i) clamps to the same end. No output byte differs.
+CONDITIONALS_BOUNDARY internal/app/txn.go:354
+
+# 396:11 `if i+1 < len(sql)` -> `i+1 <= len(sql)`: the block-comment terminator
+#        check. Same shape: at i+1 == len(sql) the `i += 2` branch pushes i past
+#        the end, and the following `else { i = len(sql) }` produces the same
+#        final index that blank() would clamp to anyway.
+CONDITIONALS_BOUNDARY internal/app/txn.go:396
+
+# 338:32 / 374:32 `if i+1 < len(sql) && sql[i+1] == '\''` -> `i+2 < len(sql)`: the
+#        doubled-quote escape in the single-quoted and double-quoted scanners.
+#        ARITHMETIC_BASE retargets the ADDEND of the bound, not the operator. A
+#        doubled quote is only meaningful at i+1; skipping to i+2 asks whether
+#        the byte AFTER the candidate pair is a quote, which for every input is
+#        either a different byte or out of range. When the pair is the last thing
+#        in the input, both forms stop at the same end index.
+ARITHMETIC_BASE internal/app/txn.go:338
+ARITHMETIC_BASE internal/app/txn.go:374
+
+# 354:27 `if sql[i] == '\\' && i+1 < len(sql)` -> `i+2 < len(sql)`: the same
+#        retargeted addend in the E-string escape. A backslash escape needs the
+#        escaped byte at i+1; asking about i+2 reads the byte after it.
+ARITHMETIC_BASE internal/app/txn.go:354
+
+# 396:8  `for i+1 < len(sql) && (...)` -> `i+2 < len(sql)`: the block-comment
+#        body scan. The retargeted addend stops the scan one byte early, but the
+#        only thing the loop finds is the `*/` terminator, and the trailing
+#        `if i+1 < len(sql)` re-checks the bound before consuming it, so an early
+#        stop lands on the same end index.
+ARITHMETIC_BASE internal/app/txn.go:396
+
 # === Group C: one accepted, documented risk ================================
 #
 # internal/ui/toast.go:78 - `now.Sub(toast.Created) < toast.Duration` -> `<=`.

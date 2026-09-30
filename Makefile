@@ -10,9 +10,10 @@ MUTATE_BASE ?= main
 # uncovered code emits no mutants at all, so including it would give a green
 # check that cannot fail.
 #
-# Gated today: internal/config, internal/store, internal/ui/bordered, and the
-# internal/ui ROOT files (keybindspane, modal, toast, zones). internal/ui's
-# component subpackages stay excluded because they are 67% uncovered.
+# Gated today: internal/config, internal/store, internal/ui/bordered, the
+# internal/ui ROOT files (keybindspane, modal, toast, zones), and internal/app's
+# txn.go. internal/ui's component subpackages stay excluded because they are 67%
+# uncovered, and app.go for the same reason at a larger scale.
 #
 # Still excluded, with what it would take to admit them: internal/app (62%
 # uncovered), internal/ai, internal/cli and internal/drivers (100%), cmd.
@@ -28,7 +29,12 @@ MUTATE_BASE ?= main
 # passes" - a permanently green gate.
 # internal/ui/keydisplay is excluded on purpose: at 100% statement coverage it
 # yields no mutants at all, so gating it would add a check that cannot fail.
-MUTATE_EXCLUDE ?= internal/ui/(components|keydisplay)/|internal/app/|internal/ai/|internal/cli/|internal/drivers/|cmd/
+#
+# internal/app is gated PER FILE, not per package, because app.go is still 350
+# mutants NOT COVERED and admitting it would make the check one that rarely
+# fails. Naming the two excluded files explicitly keeps txn.go in scope; the
+# regexp is an exclusion list, so there is no way to write "all but X".
+MUTATE_EXCLUDE ?= internal/ui/(components|keydisplay)/|internal/app/(app|router)\.go|internal/ai/|internal/cli/|internal/drivers/|cmd/
 
 build:
 	go build $(LDFLAGS) -o .local/bin/dbx .
