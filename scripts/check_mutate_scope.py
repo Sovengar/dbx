@@ -62,11 +62,11 @@ EXPECTED = [
     ("internal/ui/components/grid/pager.go", False),
     ("internal/ui/components/grid/consts.go", False),
     ("internal/ui/components/grid/handled.go", False),
-    ("internal/ui/components/grid/export_picker.go", False),
     ("internal/ui/components/grid/where_filter.go", False),
     # newly admitted
     ("internal/ui/components/grid/mouse.go", True),
     ("internal/ui/components/grid/header.go", True),
+    ("internal/ui/components/grid/export_picker.go", True),
     ("internal/ui/components/gridpreview/preview.go", False),
     ("internal/ui/components/gridpreview/handled.go", False),
     ("internal/ui/components/gridsidebarpreview/preview.go", False),
