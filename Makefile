@@ -30,11 +30,21 @@ MUTATE_BASE ?= main
 # internal/ui/keydisplay is excluded on purpose: at 100% statement coverage it
 # yields no mutants at all, so gating it would add a check that cannot fail.
 #
-# internal/app is gated PER FILE, not per package, because app.go is still 350
-# mutants NOT COVERED and admitting it would make the check one that rarely
-# fails. Naming the two excluded files explicitly keeps txn.go in scope; the
-# regexp is an exclusion list, so there is no way to write "all but X".
-MUTATE_EXCLUDE ?= internal/ui/(components|keydisplay)/|internal/app/(app|router)\.go|internal/ai/|internal/cli/|internal/drivers/|cmd/
+# The ui/ai/cli/drivers groups are excluded A LA CARTE by filename, not as whole
+# packages. The regexp is an exclusion list, so a file is opted IN by naming its
+# siblings OUT. TODO.md tracks which files are in and which are still pending.
+#
+#   IN : internal/app/txn.go, internal/ui/components/explorer/node.go,
+#        internal/ui/components/palette/commands.go
+#   OUT: internal/app/app.go (350 uncovered), internal/app/router.go,
+#        and the rest of internal/ui/components.
+# Optional. A shared PostgreSQL for the mutation run, so internal/app does not
+# start a fresh testcontainers instance on every one of the hundreds of test
+# runs. Point it at any reachable database; leaving it empty falls back to
+# testcontainers, which is correct but slow. See the note above `mutate`.
+MUTATE_DSN ?=
+
+MUTATE_EXCLUDE ?= internal/ui/keydisplay/|internal/ui/components/(ask|editor|explorerpreview|grid|gridpreview|gridsidebarpreview|picker|querybrowser)/|internal/ui/components/(explorer/(explorer|handled|tree)|palette/(fuzzy|palette))\.go|internal/app/(app|router|messages)\.go|internal/ai/|internal/cli/|internal/drivers/|cmd/|main\.go|internal/theme/
 
 build:
 	go build $(LDFLAGS) -o .local/bin/dbx .
@@ -56,14 +66,31 @@ lint:
 # deliberately excluded.
 check: build lint test
 
+# A timed-out mutant is ABSENT from report.json, so it is indistinguishable from
+# a killed one. That makes timeouts dangerous rather than merely slow: a
+# surviving mutant that times out is not caught, and an allowlisted survivor that
+# times out is not re-verified either. Two independent causes, both fixed here.
+#
+# 1. --timeout-coefficient 20, not the default 3. At 3 this scope produced 136
+#    timeouts on txn.go, which meant all 8 of its allowlisted survivors were
+#    never evaluated at all.
+# 2. DBX_TEST_DSN, so internal/app does not start a fresh testcontainers
+#    PostgreSQL on every one of the hundreds of runs. Without it each run pays
+#    ~4s of container startup and times out; with a shared container the same
+#    package finishes in 0.5s. Set MUTATE_DSN, or leave it unset to let the
+#    suite use testcontainers (correct but slow, and prone to timeouts).
+#
+# Check `jq '[.files[].mutations[]|select(.status=="TIMED OUT")]|length' report.json`
+# after any change here. A jump in that number means results are no longer
+# trustworthy, even when the gate still passes.
 mutate:
-	go tool gremlins unleash --workers 4 --timeout-coefficient 3 --exclude-files '$(MUTATE_EXCLUDE)' --output report.json
+	DBX_TEST_DSN="$(MUTATE_DSN)" go tool gremlins unleash --workers 4 --timeout-coefficient 20 --exclude-files '$(MUTATE_EXCLUDE)' --output report.json
 
 # gremlins silently falls back to the whole module when the diff is empty (base == HEAD),
 # so fail fast instead of running a full-module run that looks diff-scoped.
 mutate-diff:
 	@if git diff --name-only $(MUTATE_BASE)...HEAD | grep -q '\.go$$'; then \
-		go tool gremlins unleash --diff $(MUTATE_BASE) --workers 4 --timeout-coefficient 3 --exclude-files '$(MUTATE_EXCLUDE)' --output report.json; \
+		DBX_TEST_DSN="$(MUTATE_DSN)" go tool gremlins unleash --diff $(MUTATE_BASE) --workers 4 --timeout-coefficient 20 --exclude-files '$(MUTATE_EXCLUDE)' --output report.json; \
 	else \
 		echo "no .go changes vs $(MUTATE_BASE) - nothing to mutate"; \
 	fi

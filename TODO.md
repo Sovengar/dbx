@@ -1,0 +1,181 @@
+# TODO —mutation gate backlog
+
+Objective: widen the gate in `MUTATE_EXCLUDE` file by file. Two rules, learned the hard way:
+
+1. **Tests first, gate second.** A file is admitted only once its survivors are
+   killed or proven equivalent. Admitting an uncovered file makes the check green
+   by construction, which is the failure mode the gate exists to prevent.
+2. **Write tests from the contract**, never from a guessed mutant replacement. On
+   `bordered` and `txn.go` that produced 7 wrong "equivalent" claims.
+
+## How to measure one file
+
+```bash
+go tool gremlins unleash ./path/to/pkg --workers 4 --timeout-coefficient 3 \
+  --output /tmp/m.json
+jq -r '.files[].mutations[] | select(.status=="LIVED") | "\(.type) \(.line):\(.column)"' /tmp/m.json
+```
+
+Per-file counts across the whole module (measured on `ad614e3`):
+
+```
+nc=  0 lived=  0 killed=  11  internal/ui/components/explorer/node.go
+nc=  0 lived=  0 killed=  4  internal/ui/components/palette/commands.go
+nc=  0 lived= 10 killed=  53  internal/ui/toast.go                      [GATED]
+nc=  0 lived=  2 killed=  42  internal/config/keybindings_groups.go      [GATED]
+nc=  0 lived=  9 killed=  32  internal/ui/modal.go                      [GATED]
+nc=  2 lived=  0 killed=  13  internal/config/keybindings.go            [GATED]
+nc=  2 lived=  0 killed=  24  internal/ui/keybindspane.go               [GATED]
+nc=  2 lived= 11 killed=  90  internal/ui/bordered/bordered.go          [GATED]
+nc=  2 lived=  9 killed=  34  internal/ui/components/grid/mouse.go
+nc=  3 lived=  0 killed=   0  internal/cli/root.go
+nc=  3 lived=  0 killed=   0  internal/config/config.go                 [GATED]
+nc=  4 lived=  0 killed=   0  internal/app/router.go
+nc=  6 lived=  0 killed=   0  internal/cli/context.go
+nc=  6 lived= 16 killed=  15  internal/ui/components/grid/header.go
+nc=  8 lived=  0 killed=   0  internal/ai/nl2sql/anthropic.go
+nc=  9 lived=  0 killed=   0  internal/ai/nl2sql/{deepseek,openai,qwen}.go
+nc=  9 lived=  0 killed=   0  internal/ui/components/grid/export_picker.go
+nc= 10 lived=  2 killed=   9  internal/config/scanner.go                [GATED]
+nc= 13 lived=  0 killed=   0  internal/cli/ask.go
+nc= 13 lived=  0 killed=   0  internal/drivers/postgres/query.go
+nc= 14 lived=  3 killed=  31  internal/store/query_history.go           [GATED]
+nc= 16 lived=  0 killed=   0  internal/cli/pipe.go
+nc= 18 lived=  0 killed=   0  internal/ai/context/schema.go
+nc= 18 lived=  0 killed=   0  internal/ui/components/explorerpreview/tabbar.go
+nc= 22 lived=  0 killed=   0  internal/ai/nl2sql/provider.go
+nc= 25 lived=  8 killed= 125  internal/app/txn.go                       [GATED]
+nc= 26 lived=  0 killed=   0  internal/ai/session/logger.go
+nc= 27 lived= 30 killed=  34  internal/ui/components/editor/highlight.go
+nc= 31 lived= 12 killed=   5  internal/ui/components/grid/pager.go
+nc= 32 lived=  0 killed=   0  internal/cli/commands.go
+nc= 32 lived= 76 killed= 103  internal/ui/components/explorerpreview/ere.go
+nc= 34 lived=  0 killed=   0  internal/drivers/postgres/schema.go
+nc= 39 lived=  0 killed=   0  internal/ui/components/palette/fuzzy.go
+nc= 39 lived=  0 killed=   0  internal/ui/components/picker/picker.go
+nc= 41 lived=  0 killed=   0  internal/ui/components/grid/cell.go
+nc= 43 lived=  6 killed=  22  internal/ui/components/ask/ask.go
+nc= 63 lived=  0 killed=   0  internal/ui/components/explorerpreview/preview.go
+nc= 65 lived=  0 killed=   0  internal/ui/components/explorer/explorer.go
+nc= 65 lived=  0 killed=   0  internal/ui/components/gridsidebarpreview/preview.go
+nc= 70 lived= 17 killed=   4  internal/ui/components/explorer/tree.go
+nc= 76 lived= 25 killed=  33  internal/ui/components/editor/sql.go
+nc= 76 lived= 44 killed=  93  internal/ui/components/editor/autocomplete.go
+nc= 81 lived=  0 killed=   0  internal/ui/components/palette/palette.go
+nc= 83 lived= 11 killed=  27  internal/ai/nl2sql/compatible.go
+nc=116 lived=  0 killed=   0  internal/ui/components/querybrowser/querybrowser.go
+nc=171 lived=  0 killed=   0  internal/ui/components/grid/where_filter.go
+nc=281 lived= 31 killed=  13  internal/ui/components/gridpreview/preview.go
+nc=350 lived= 63 killed= 124  internal/app/app.go
+nc=414 lived=117 killed=  85  internal/ui/components/grid/table.go
+```
+
+## Queue — ordered easiest first
+
+### Tier 1 — free admissions, no tests needed
+
+Zero survivors, zero uncovered. The only work is narrowing `MUTATE_EXCLUDE`,
+which is a regexp alternation, so a file is opted IN by naming its siblings OUT.
+`scripts/check_mutate_scope.py` now enforces both directions and fails on any
+new Go file nobody classified.
+
+- [x] `internal/app/txn.go` — done in `ad614e3`
+- [x] `internal/ui/components/explorer/node.go` (11 killed)
+- [x] `internal/ui/components/palette/commands.go` (4 killed)
+
+### Tier 2 — under 10 uncovered
+
+- [ ] `internal/app/router.go` — 4 uncovered, 0 mutants killed. Tiny; most of
+      the file is not exercised at all. Read it first: a 4-mutant file may be
+      almost pure wiring, in which case covering it is cheap.
+- [ ] `internal/cli/root.go` — 3 uncovered
+- [ ] `internal/cli/context.go` — 6 uncovered
+- [ ] `internal/ai/nl2sql/anthropic.go` — 8 uncovered, then `deepseek`/`openai`/`qwen`
+      at 9 each. Four near-identical provider adapters, so one table-driven test
+      per adapter shape should cover all four cheaply.
+- [ ] `internal/ui/components/grid/mouse.go` — 2 uncovered, 9 lived. Cover the
+      2, then probe the 9 before assuming they are equivalent.
+- [ ] `internal/ui/components/grid/header.go` — 6 uncovered, 16 lived.
+- [ ] `internal/ui/components/grid/export_picker.go` — 9 uncovered, 0 killed.
+
+### Tier 3 — 10-45 uncovered
+
+- [ ] `internal/cli/{ask,pipe,commands}.go` — 13/16/32
+- [ ] `internal/drivers/postgres/{query,schema}.go` — 13/34
+- [ ] `internal/ai/context/schema.go` — 18
+- [ ] `internal/ai/nl2sql/provider.go` — 22
+- [ ] `internal/ai/session/logger.go` — 26
+- [ ] `internal/ui/components/explorerpreview/tabbar.go` — 18
+- [ ] `internal/ui/components/editor/highlight.go` — 27 uncovered, 30 lived
+- [ ] `internal/ui/components/grid/pager.go` — 31 uncovered, 12 lived
+- [ ] `internal/ui/components/explorerpreview/ere.go` — 32 uncovered, 76 lived
+- [ ] `internal/ui/components/{palette/fuzzy,picker/picker,grid/cell}.go` — 39/39/41
+- [ ] `internal/ui/components/ask/ask.go` — 43 uncovered, 6 lived
+
+### Tier 4 — 60+ uncovered, high value, high cost
+
+- [ ] `internal/ui/components/explorerpreview/preview.go` — 63
+- [ ] `internal/ui/components/explorer/explorer.go` — 65
+- [ ] `internal/ui/components/gridsidebarpreview/preview.go` — 65
+- [ ] `internal/ui/components/explorer/tree.go` — 70 uncovered, 17 lived
+- [ ] `internal/ui/components/editor/sql.go` — 76 uncovered, 25 lived
+- [ ] `internal/ui/components/editor/autocomplete.go` — 76 uncovered, 44 lived
+- [ ] `internal/ui/components/palette/palette.go` — 81
+- [ ] `internal/ai/nl2sql/compatible.go` — 83 uncovered, 11 lived
+- [ ] `internal/ui/components/querybrowser/querybrowser.go` — 116
+- [ ] `internal/ui/components/grid/where_filter.go` — 171
+- [ ] `internal/ui/components/gridpreview/preview.go` — 281 uncovered, 31 lived
+- [ ] `internal/app/app.go` — 350 uncovered, 63 lived. The single largest gap.
+- [ ] `internal/ui/components/grid/table.go` — 414 uncovered, 117 lived. Largest.
+
+## Before trusting any measurement here
+
+**A TIMED OUT mutant is absent from `report.json`, so it is indistinguishable
+from a killed one.** This is the most dangerous property of the tool: it makes
+the gate pass for the wrong reason, and it makes an allowlist entry look
+re-verified when it was never evaluated.
+
+Two independent causes, both fixed in the `mutate` target:
+
+- `--timeout-coefficient 20`, not the default 3. At 3 this scope produced 136
+  timeouts on `txn.go` alone, which meant all 8 of its allowlisted survivors were
+  skipped entirely.
+- `MUTATE_DSN`, so `internal/app` reuses one PostgreSQL instead of starting a
+  testcontainer per run. Without it each of the hundreds of runs pays ~4s of
+  container startup. The package takes 4.3s without a DSN and 0.5s with one.
+
+Current state after both: **9 timeouts out of 563 mutants**, down from 142. Check
+with `jq '[.files[].mutations[]|select(.status=="TIMED OUT")]|length' report.json`
+after any change to the harness. A jump means results are untrustworthy even when
+the gate still passes.
+
+```bash
+docker run -d --name dbx-mut-pg -e POSTGRES_PASSWORD=dbx -e POSTGRES_USER=dbx \
+  -e POSTGRES_DB=dbx_test -p 55432:5432 postgres:16-alpine
+make mutate MUTATE_DSN='postgres://dbx:dbx@127.0.0.1:55432/dbx_test?sslmode=disable'
+```
+
+## Notes for whoever picks this up
+
+- **gremlins does not report the applied replacement.** `report.json` carries
+  only `{type,status,line,column}`. Learn a mutant by hand-applying it.
+- **A probe is only trustworthy once the suite is green.** A probe run while
+  `go test` fails for any reason reports false KILLs. Check the suite first.
+- **Locate the span by searching the line for the literal operator**, never by
+  the reported column. gremlins columns have been off by one, and a 1-char span
+  on a 2-char operator silently applies a no-op that reads as SURVIVED.
+- **A probe that disagrees with gremlins is the probe that is wrong.** Verify with
+  `s.index(op)`.
+- **gremlins is nondeterministic run to run.** Timed-out mutants are absent from
+  `report.json`, so survivors appear and disappear. Re-run before concluding —
+  but note that a deterministic 136 timeouts in a row is NOT variance, it is a
+  harness problem, and it was hiding eight allowlist entries from verification.
+- **NOT COVERED is attributed by line, Go's cover tool by block.** A multi-line
+  `if`/`case` condition is attributed to the PRECEDING block, so a line can be
+  reported NOT COVERED while the block containing its code has count > 0.
+  `txn.go:110` was exactly this. Confirm by hand-applying before writing a test.
+- **`ARITHMETIC_BASE` on a relational subexpression retargets the addend**, not
+  the operator, and the reported column points at the addend. Replace the whole
+  bound (`i+1 < len` -> `i+2 < len`), not a bare `2`.
+- **`CONDITIONALS_BOUNDARY` relaxes toward "true on equality"**: `<`->`<=`,
+  `<=`->`<`, `>`->`>=`, `>=`->`>`. Guessing the opposite gives an already-killed mutant.
