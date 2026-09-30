@@ -93,6 +93,37 @@ new Go file nobody classified.
       was Tier 2; 9 uncovered → 0, no allowlist entry needed
 - [x] `internal/ui/components/palette/fuzzy.go` (35 killed, 4 survivors) — was
       Tier 3; 39 uncovered → 0
+- [x] `internal/ui/components/grid/pager.go` (43 killed, 5 survivors) — was
+      Tier 3; 31 uncovered → 0, 12 lived → 5. The 5 are the densest cluster of
+      no-op-at-equality clamps found so far; see Group A in the allowlist
+
+### pager.go: the pattern to expect in the rest of the gate
+
+Five of `pager.go`'s six survivors were the *same* shape: a clamp whose body
+assigns the value already there, so the boundary mutant fires at equality and does
+nothing. `if pages < 1 { pages = 1 }`, `if n < 1 { n = 1 }`, `if n > total`,
+`if endRow > total` — twice, once per renderer. Expect roughly one of these per
+clamp, and expect them to be genuinely unkillable rather than undertested. Group A
+in the allowlist is the place they go.
+
+**The sixth was a real miss and it is the lesson.** `if p.pendingCount > 0` in
+`RenderFooter` had a `>= 0` variant, which at zero appends a literal `0 pending`.
+I *had* written a test for that, but on `Render()` — the other renderer. Two
+renderers of the same numbers sit next to each other, and I asserted the absence
+of a segment in one of them. **When a value feeds two render paths, assert on
+both.** Fixing that took the file from 5 survivors to 5 survivors, of which 5
+became the no-op clamps: 42 → 43 killed.
+
+Two assertions I wrote from a guess and the code corrected, both worth not
+guessing next time:
+
+- With a non-positive `pageSize` there is exactly one page, so `NextPage()`
+  correctly returns **false**. I had asserted true, reasoning "it moved". The
+  return value is "did it move", not "is there a next page".
+- `Offset()` is `(page-1) * pageSize` with no clamping, so asking for page 11 of
+  ten gives the offset of page 10, not a wrong answer I had to allow for. The
+  clamp lives in `GoToPage`, and `GoToPage(99)` landing on the last page is the
+  property that matters, because F1..F9 are wired to it unconditionally.
 
 ### Two contracts worth keeping
 
@@ -214,9 +245,9 @@ on tests. See the `internal/cli` note above.
 - [ ] `internal/ai/session/logger.go` — 26
 - [ ] `internal/ui/components/explorerpreview/tabbar.go` — 18
 - [ ] `internal/ui/components/editor/highlight.go` — 27 uncovered, 30 lived
-- [ ] `internal/ui/components/grid/pager.go` — 31 uncovered, 12 lived
 - [ ] `internal/ui/components/explorerpreview/ere.go` — 32 uncovered, 76 lived
 - [x] `internal/ui/components/palette/fuzzy.go` — done, 35 killed / 4 survivors
+- [x] `internal/ui/components/grid/pager.go` — done, 43 killed / 5 survivors
 - [ ] `internal/ui/components/{picker/picker,grid/cell}.go` — 39/41
 - [ ] `internal/ui/components/ask/ask.go` — 43 uncovered, 6 lived
 

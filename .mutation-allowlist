@@ -101,6 +101,32 @@ CONDITIONALS_BOUNDARY internal/ui/modal.go:86
 CONDITIONALS_BOUNDARY internal/ui/toast.go:130
 CONDITIONALS_BOUNDARY internal/ui/toast.go:133
 
+# internal/ui/components/grid/header.go:138 - `if maxTextWidth < 0` -> `<= 0`.
+# maxTextWidth is assigned on the line above and not touched in between, so the
+# only value where `<=` fires and `<` does not is exactly 0, where the body
+# `maxTextWidth = 0` assigns the value already there.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:138
+
+# internal/ui/components/grid/pager.go, all FIVE clamps. Every one is the same
+# no-op-at-equality shape, and the pager is the densest cluster of them so far.
+# pager_test.go covers the surrounding behaviour (rounding, the last page, the
+# pending count, the offsets, GoToPage's clamp against F1..F9), so what is left is
+# only these boundaries.
+#
+#   46:  `if pages < 1` -> `<=`: pages is 0 only when total == 0, because
+#        pageSize > 0 is guaranteed by the guard above. So the only extra firing
+#        is pages == 1, where the body `pages = 1` is a no-op.
+#   89:  `if n < 1` -> `<=`: fires only at n == 1, body `n = 1`.
+#   93:  `if n > total` -> `>=`: fires only at n == total, body `n = total`.
+#   108: `if endRow > total` -> `>=`: the last page's end row. Fires only at
+#        endRow == total, body `endRow = total`.
+#   131: the same clamp in RenderFooter, so 108's proof covers it verbatim.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/pager.go:46
+CONDITIONALS_BOUNDARY internal/ui/components/grid/pager.go:89
+CONDITIONALS_BOUNDARY internal/ui/components/grid/pager.go:93
+CONDITIONALS_BOUNDARY internal/ui/components/grid/pager.go:108
+CONDITIONALS_BOUNDARY internal/ui/components/grid/pager.go:131
+
 # === Group B: boundaries already answered by a unicode script table =========
 #
 # isWideRune checks the four script tables (Han, Hangul, Katakana, Hiragana)
@@ -318,16 +344,6 @@ CONDITIONALS_BOUNDARY internal/ui/components/grid/mouse.go:28
 #       Pinned by TestHeader_RendersNothingWithoutColumnsOrCells, which
 #       asserts Render(0, 0) == "".
 CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:101
-
-# header.go:138 `if maxTextWidth < 0` -> `<= 0`: maxTextWidth is assigned on the
-#       line above as `width - 2` and is not modified in between, so the only
-#       value where `<=` fires and `<` does not is exactly 0 — and the body is
-#       `maxTextWidth = 0`, a self-assignment of the value already there.
-#       Negative values are caught by both forms. Provably equivalent.
-#       Pinned by the width 0/1/2 cases in
-#       TestHeader_TextOfExactlyTheAvailableWidthIsLeftAlone, which is the shape
-#       that makes maxTextWidth reach 0.
-CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:138
 
 # header.go:141 `if lipgloss.Width(label) > maxTextWidth` -> `>=`: the mutant can
 #       only fire when the label's display width is EXACTLY maxTextWidth, i.e.
