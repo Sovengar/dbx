@@ -289,6 +289,58 @@ CONDITIONALS_BOUNDARY internal/ui/components/grid/mouse.go:66
 # input can reach the difference.
 CONDITIONALS_BOUNDARY internal/ui/components/grid/mouse.go:28
 
+# === Group B5: internal/ui/components/grid/header.go, window + truncation ===
+#
+# THREE survivors, and all three are the same shape: a guard whose mutated
+# branch is a no-op, so no fixture can distinguish it. Each proof is backed by
+# an executable test in header_test.go rather than by a probe alone.
+#
+# The other 34 mutants in this file are killed, including the whole three-state
+# sort cycle (ToggleSortCyclesAscDescNone), ClearSort releasing the column
+# rather than only the direction, the PK/FK prefixes, the ↑/↓ arrows, both
+# truncation modes and the exact boundary between them, the cell width coming
+# from widths[i] and not from the 20 fallback, and Render drawing exactly the
+# count it was asked for.
+#
+# Every proof below needs one fact about lipgloss/ansi that was verified by
+# running it, not by reading it: **ansi.Truncate(s, n, "...") returns s
+# unchanged whenever lipgloss.Width(s) <= n.** Verified for 1..40 across ASCII,
+# double-width CJK runes, a multi-cell arrow, and a string carrying an SGR
+# sequence, with zero exceptions. That is what makes 141:28 equivalent, and it
+# is now pinned by
+# TestHeader_TruncatingTextThatAlreadyFitsChangesNothing.
+
+# header.go:101 `if len(h.columns) == 0 || count <= 0` -> `count <= 0` becomes
+#       `count < 0`: with count == 0 the mutant falls through into the loop,
+#       whose condition is `j < count`, so it runs zero times, leaves `cells`
+#       nil, and returns strings.Join(nil, ""), which is "". The guard returns
+#       the same "" directly. Provably equivalent, no fixture needed.
+#       Pinned by TestHeader_RendersNothingWithoutColumnsOrCells, which
+#       asserts Render(0, 0) == "".
+CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:101
+
+# header.go:138 `if maxTextWidth < 0` -> `<= 0`: maxTextWidth is assigned on the
+#       line above as `width - 2` and is not modified in between, so the only
+#       value where `<=` fires and `<` does not is exactly 0 — and the body is
+#       `maxTextWidth = 0`, a self-assignment of the value already there.
+#       Negative values are caught by both forms. Provably equivalent.
+#       Pinned by the width 0/1/2 cases in
+#       TestHeader_TextOfExactlyTheAvailableWidthIsLeftAlone, which is the shape
+#       that makes maxTextWidth reach 0.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:138
+
+# header.go:141 `if lipgloss.Width(label) > maxTextWidth` -> `>=`: the mutant can
+#       only fire when the label's display width is EXACTLY maxTextWidth, i.e.
+#       when the label already fits. Both truncation paths are then no-ops on
+#       such a label: ansi.Truncate returns it unchanged (the verified fact
+#       above), and label[:maxTextWidth] is a prefix of a string that is not
+#       longer than maxTextWidth. So the output is byte-identical either way.
+#       This is why the exact-fit fixture in
+#       TestHeader_TextOfExactlyTheAvailableWidthIsLeftAlone does not kill it:
+#       a 10-character label in a 12-wide cell has maxTextWidth 10, and under
+#       the mutant it enters the truncation branch and comes out unchanged.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:141
+
 # === Group C: one accepted, documented risk ================================
 #
 # internal/ui/toast.go:78 - `now.Sub(toast.Created) < toast.Duration` -> `<=`.

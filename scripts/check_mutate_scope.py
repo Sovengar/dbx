@@ -58,7 +58,6 @@ EXPECTED = [
     ("internal/ui/components/palette/fuzzy.go", False),
     ("internal/ui/components/palette/palette.go", False),
     ("internal/ui/components/grid/table.go", False),
-    ("internal/ui/components/grid/header.go", False),
     ("internal/ui/components/grid/cell.go", False),
     ("internal/ui/components/grid/pager.go", False),
     ("internal/ui/components/grid/consts.go", False),
@@ -67,6 +66,7 @@ EXPECTED = [
     ("internal/ui/components/grid/where_filter.go", False),
     # newly admitted
     ("internal/ui/components/grid/mouse.go", True),
+    ("internal/ui/components/grid/header.go", True),
     ("internal/ui/components/gridpreview/preview.go", False),
     ("internal/ui/components/gridpreview/handled.go", False),
     ("internal/ui/components/gridsidebarpreview/preview.go", False),

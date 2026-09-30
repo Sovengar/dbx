@@ -36,7 +36,7 @@ MUTATE_BASE ?= main
 #
 #   IN : internal/app/{txn,router}.go, internal/ai/nl2sql/{anthropic,openai,
 #        deepseek,qwen}.go, internal/ui/components/explorer/node.go,
-#        internal/ui/components/grid/mouse.go,
+#        internal/ui/components/grid/{header,mouse}.go,
 #        internal/ui/components/palette/commands.go
 #   OUT: internal/app/app.go (350 uncovered), internal/ai/nl2sql/compatible.go,
 #        and the rest of internal/ui/components.
@@ -46,7 +46,7 @@ MUTATE_BASE ?= main
 # testcontainers, which is correct but slow. See the note above `mutate`.
 MUTATE_DSN ?=
 
-MUTATE_EXCLUDE ?= internal/ui/keydisplay/|internal/ui/components/(ask|editor|explorerpreview|gridpreview|gridsidebarpreview|picker|querybrowser)/|internal/ui/components/grid/(cell|consts|export_picker|handled|header|pager|table|where_filter)\.go|internal/ui/components/(explorer/(explorer|handled|tree)|palette/(fuzzy|palette))\.go|internal/app/(app|messages)\.go|internal/ai/(context|session)/|internal/ai/nl2sql/(compatible|provider|prompt)\.go|internal/cli/|internal/drivers/|cmd/|main\.go|internal/theme/
+MUTATE_EXCLUDE ?= internal/ui/keydisplay/|internal/ui/components/(ask|editor|explorerpreview|gridpreview|gridsidebarpreview|picker|querybrowser)/|internal/ui/components/grid/(cell|consts|export_picker|handled|pager|table|where_filter)\.go|internal/ui/components/(explorer/(explorer|handled|tree)|palette/(fuzzy|palette))\.go|internal/app/(app|messages)\.go|internal/ai/(context|session)/|internal/ai/nl2sql/(compatible|provider|prompt)\.go|internal/cli/|internal/drivers/|cmd/|main\.go|internal/theme/
 
 build:
 	go build $(LDFLAGS) -o .local/bin/dbx .
