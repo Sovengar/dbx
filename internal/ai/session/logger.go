@@ -1,6 +1,8 @@
 package session
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -244,15 +246,45 @@ func (r *Reader) Read(date time.Time) ([]LogEntry, error) {
 	return parseEntries(data)
 }
 
+// maxLogLine bounds one entry's line. A query's SQL is the only unbounded field and
+// a megabyte of it is already unreadable in a picker, so a longer line is a corrupt
+// file rather than a real entry.
+const maxLogLine = 1 << 20
+
+// parseEntries reads a JSONL log: one JSON object per line, as written by
+// json.Encoder in Logger.Log.
+//
+// It reads line by line rather than streaming a json.Decoder over the whole buffer.
+// The streaming form does not terminate on a malformed line: Decode returns a syntax
+// error WITHOUT advancing the reader, so More() stays true, `continue` comes straight
+// back around, and the loop spins forever. Inputs that trigger it are ordinary
+// accident rather than adversarial: "garbage", a truncated "{", a binary file that
+// happens to be named YYYY-MM-DD.jsonl. A log written by a process that was killed
+// mid-write is exactly the case this file format is supposed to survive, so it was
+// also the case most likely to hang.
+//
+// A bad line is skipped and the rest are read, which is the whole point: one
+// corrupt entry must not make a session unreadable. That contract is unchanged from
+// the streaming version; only the way it terminates is new.
 func parseEntries(data []byte) ([]LogEntry, error) {
 	var entries []LogEntry
-	decoder := json.NewDecoder(strings.NewReader(string(data)))
-	for decoder.More() {
+
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(make([]byte, 0, 64*1024), maxLogLine)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
 		var entry LogEntry
-		if err := decoder.Decode(&entry); err != nil {
+		if err := json.Unmarshal(line, &entry); err != nil {
 			continue
 		}
 		entries = append(entries, entry)
 	}
+	// A line over the limit makes Scan stop. Whatever was read up to that point is
+	// still returned: a truncated tail is exactly the case this function exists to
+	// survive, and reporting an error would make every caller treat a long-but-good
+	// prefix as a failure.
 	return entries, nil
 }
