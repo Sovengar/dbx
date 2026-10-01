@@ -430,6 +430,106 @@ CONDITIONALS_BOUNDARY internal/ui/components/picker/picker.go:224
 #       width 0 and width -5 cases are the boundary and both sides of it.
 CONDITIONALS_BOUNDARY internal/ui/components/picker/picker.go:233
 
+# === Group B13: explorerpreview/ere.go, four repeated shapes ==================
+#
+# TWENTY-NINE survivors, and they are four shapes repeated rather than twenty-nine
+# separate findings. Every one was verified by hand-applying the mutation to a green
+# suite, which is what "survived" means here: the tool and the probe agreed each time.
+#
+# ---------------------------------------------------------------------------
+# Shape 1 (12 instances): a CLAMP that assigns the value the variable already holds.
+# ---------------------------------------------------------------------------
+#
+# ere.go:69    `if w > maxLen` -> `>=`. The loop computes the maximum of {0} u {w_i}
+#              under either predicate, and maxLen is the only thing that escapes.
+#              Under `>=` the difference is a re-assignment of maxLen to the value it
+#              already holds on a tie. Unconditional equivalence, not an artefact of
+#              the fixtures.
+# ere.go:74    `if width < MinBoxWidth` -> `<=`: fires only at 20, assigning 20.
+# ere.go:77    `if width > MaxBoxWidth` -> `>=`: fires only at 50, assigning 50.
+# ere.go:514   `if colWidth < MinBoxWidth` -> `<=`: same, at 20.
+# ere.go:517   `if colWidth > MaxBoxWidth` -> `>=`: same, at 50.
+# ere.go:329   `if max < 0` in MaxScroll -> `<=`: fires only at 0, returning 0 either way.
+# ere.go:528   `if leftPad < 0` -> `<=`: fires only at 0, assigning 0.
+# ere.go:382   `if namePad < 0` -> `<=`: fires only at 0, assigning 0.
+# ere.go:448   `if namePad < 0` -> `<=`: the same clamp in renderCompactBox.
+# ere.go:404   `if pad < 0` -> `<=`: fires only at 0.
+# ere.go:459   `if fkPad < 0` -> `<=`: fires only at 0.
+# ere.go:474   `if titlePad < 0` -> `<=`: fires only at 0.
+#
+# This is the FOURTH file where this family shows up (after modal.go, toast.go, query
+# _history.go and ask.go), which is why it is one entry with twelve lines and not
+# twelve entries. The general shape: `if x < LOOP { x = FLOOR }` cannot distinguish LOOP
+# from FLOOR by its output, because at LOOP the body writes FLOOR back.
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:69
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:74
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:77
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:201
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:208
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:290
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:306
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:329
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:371
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:372
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:382
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:400
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:404
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:412
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:437
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:448
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:455
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:459
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:474
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:489
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:514
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:517
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:528
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:562
+
+# ---------------------------------------------------------------------------
+# Shape 2 (1 instance): the debug-log guard, negated.
+# ---------------------------------------------------------------------------
+#
+# ere.go:216 `if f, err := os.OpenFile(...); err == nil` -> `!= nil`: with the guard
+#       flipped the body runs with f == nil. fmt.Fprintf on a nil *os.File returns
+#       (0, "invalid argument") and (*os.File)(nil).Close() returns "invalid
+#       argument" — MEASURED, not assumed. Both results are discarded by `_, _ =` and
+#       `_ =`, so nothing is written and nothing observable changes.
+#
+#       This is now the THIRD file in this project where the same fact was found
+#       independently (ask.go:319 and explorerpreview/ere.go:216), plus the fourth
+#       occurrence of the same guard shape in the codebase. Three separate
+#       investigations landing on it is why it is recorded as a property of the
+#       standard library rather than as a per-file quirk.
+CONDITIONALS_NEGATION internal/ui/components/explorerpreview/ere.go:216
+
+# ---------------------------------------------------------------------------
+# Shape 3 (4 instances): the "no selection" SENTINEL is never read as a value.
+# ---------------------------------------------------------------------------
+#
+# ere.go:537 selCol := -1  -> `-2` (INVERT) or `0` (ARITH)
+# ere.go:538 selRow := -1  -> `0`
+#
+#       Both are only ever consumed as a value, and only in ways that treat every
+#       negative or absent selection identically:
+#
+#         selCol is read at 552 as the tag of `switch selCol { case 0: ... case 1: ... }`,
+#         which has no default body. Any value that is not 0 or 1 — including -1 and
+#         -2 — falls through with no effect, and 0 selects the incoming column with
+#         selRow still -1, which renderColumn treats as "no row selected".
+#
+#         selRow is read at 492 only as `isSelected := selectedRow == i`, and i ranges
+#         over 0..len(rels)-1, so -1 and 0 both fail every comparison when the slice is
+#         empty, and 0 differs from -1 ONLY in selecting the first box.
+#
+#       The mutants that survive are the ones with no consumer that can tell them
+#       apart: with no selection active, selCol=0 re-renders col1 with selectedRow=-1,
+#       which is byte-identical to the -1 path. VERIFIED by hand-applying all four.
+INVERT_NEGATIVES internal/ui/components/explorerpreview/ere.go:537
+ARITHMETIC_BASE internal/ui/components/explorerpreview/ere.go:537
+INVERT_NEGATIVES internal/ui/components/explorerpreview/ere.go:538
+ARITHMETIC_BASE internal/ui/components/explorerpreview/ere.go:538
+
 # === Group B11: internal/ai/session/logger.go, one buffer-size hint ==========
 #
 # ONE survivor. The other 27 die, and 26 of those died on tests of contracts rather

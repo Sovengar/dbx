@@ -16,7 +16,6 @@ const (
 	MaxTableName  = 40
 	MaxColumnName = 30
 	MaxNeighbors  = 10
-	boxHPad       = 2 // padding inside box borders
 )
 
 type ColumnBadge struct {
@@ -360,14 +359,15 @@ func (v *ERDiagramViewport) Reset() {
 // --- Renderer ---
 
 // renderBox renders a box for the center table (full detail).
-func renderBox(name string, columns []ColumnBadge, width int, cardinality string, isJunction bool, selected bool) string {
+//
+// The centre box is never selected — the cursor lives on a neighbour, and the only
+// call site passed selected=false — so there is no selector row here. A junction
+// marker is still drawn, because a junction centre table is a real case.
+func renderBox(name string, columns []ColumnBadge, width int, isJunction bool) string {
 	var lines []string
 	innerWidth := width - 2
 	displayName := TruncateTableName(name)
 
-	if selected {
-		displayName = "► " + displayName + " ◄"
-	}
 	if ansi.StringWidth(displayName) > innerWidth {
 		if innerWidth > 1 {
 			displayName = displayName[:innerWidth-1] + "…"
@@ -409,15 +409,6 @@ func renderBox(name string, columns []ColumnBadge, width int, cardinality string
 
 	if isJunction {
 		label := "  *"
-		if ansi.StringWidth(label) > innerWidth {
-			label = label[:innerWidth]
-		}
-		pad := innerWidth - ansi.StringWidth(label)
-		lines = append(lines, "│"+label+strings.Repeat(" ", pad)+"│")
-	}
-
-	if cardinality != "" {
-		label := "  " + cardinality
 		if ansi.StringWidth(label) > innerWidth {
 			label = label[:innerWidth]
 		}
@@ -505,6 +496,11 @@ func renderColumn(title string, rels []Relationship, overflow int, width int, se
 }
 
 // RenderERDiagram renders a complete ERE diagram as text with 2-column layout.
+//
+// paneHeight is unused here: the rendered text is as tall as its content, and the
+// preview pane does the vertical slicing. The parameter is kept because it is an
+// exported signature whose callers all have a pane height on hand, and removing it
+// would be a change to the API rather than to the behaviour.
 func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int, nav *ERDiagramNav) string {
 	if len(diagram.Outgoing) == 0 && len(diagram.Incoming) == 0 {
 		return "  No relationships for this table"
@@ -523,7 +519,7 @@ func RenderERDiagram(diagram ERDiagram, paneWidth, paneHeight int, nav *ERDiagra
 	}
 
 	// Render center box
-	centerBox := renderBox(diagram.Center.Name, diagram.Center.Columns, centerWidth, "", diagram.Center.IsJunction, false)
+	centerBox := renderBox(diagram.Center.Name, diagram.Center.Columns, centerWidth, diagram.Center.IsJunction)
 	centerLines := strings.Split(centerBox, "\n")
 
 	// Center the center box horizontally
