@@ -366,6 +366,36 @@ CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:101
 #       the mutant it enters the truncation branch and comes out unchanged.
 CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:141
 
+# === Group B9: internal/ui/components/grid/cell.go, two boundaries =========
+#
+# TWO survivors, one in each of the two families this project keeps finding.
+#
+# The other 39 mutants in this file are killed. Most of them came from two
+# invariants asserted over all ten Render*Row functions at once rather than from a
+# test per function: the row is exactly the sum of its column widths, and the active
+# column changes the STYLING and nothing else. The five selection mutants needed a
+# third assertion, a DIRECT per-column expectation, because a renderer that
+# highlighted the wrong index still varies with activeCol and shows the same text.
+#
+# cell.go:49 `if lipgloss.Width(text) <= maxWidth` -> `<`: the mutant can only fire
+#       on text whose display width is EXACTLY maxWidth, i.e. text that already
+#       fits. ansi.Truncate is a no-op on text that fits — verified for 1..40 cells
+#       across ASCII, double-width CJK, a multi-cell arrow and a string carrying an
+#       SGR sequence, zero exceptions, and pinned by
+#       TestTruncate_MeasuresDisplayWidth. So the output is identical either way.
+#       The same fact is recorded for the same guard in
+#       internal/ui/components/grid/header.go:141.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/cell.go:49
+
+# cell.go:126 `if cursorPos > len(runes)` -> `>=`: the only value where `>=` fires
+#       and `>` does not is cursorPos == len(runes), where the body clamps to
+#       len(runes) — the value already there. A self-assignment.
+#
+#       Pinned by TestRenderEditCell_TheBlockIsWhereTheCursorIs, which renders a
+#       cursor at exactly the end of the text and one past it, and gets the same
+#       cell from both.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/cell.go:126
+
 # === Group B8: internal/config, two no-op-at-equality guards ================
 #
 # Two survivors, both the family from group A, and one of them a variant worth

@@ -131,12 +131,15 @@ internal/config/config.go:23:CONDITIONALS_NEGATION
 # ceiling, fails if a file with timeouts has no ceiling at all, and prints the set
 # for information.
 #
-# Ceilings are set above what a run normally produces, so an ordinary slow run does
-# not red the build, while a genuine increase is still caught.
+# Ceilings are set at roughly TWICE the highest count observed, because the count
+# moves with machine load: bordered.go produced 3 on one run and 4 on the next, and
+# a ceiling sitting on the observed maximum is a ceiling that will flake. At twice
+# the maximum an ordinary slow run passes, and a genuine increase — a new hang, or
+# a change that makes more of the suite reach a mutated path — is still caught.
 #
 # The right long-term answer is a property/fuzz test with a per-input timeout
 # enforced by the testing framework itself, which this project does not use yet.
-TIMEOUT_MAX internal/ui/components/editor/highlight.go 12 the tokenizer loop guards are the only thing advancing the index
-TIMEOUT_MAX internal/app/txn.go 6 the SQL lexer line-comment and blank loops
-TIMEOUT_MAX internal/config/keybindings_groups.go 3 the group scan in digitRange
-TIMEOUT_MAX internal/ui/bordered/bordered.go 4 the ANSI-escape scan
+TIMEOUT_MAX internal/ui/components/editor/highlight.go 16 the tokenizer loop guards are the only thing advancing the index
+TIMEOUT_MAX internal/app/txn.go 10 the SQL lexer line-comment and blank loops
+TIMEOUT_MAX internal/config/keybindings_groups.go 6 the group scan in digitRange
+TIMEOUT_MAX internal/ui/bordered/bordered.go 8 the ANSI-escape scan

@@ -57,7 +57,6 @@ EXPECTED = [
     ("internal/ui/components/explorer/tree.go", False),
     ("internal/ui/components/palette/palette.go", False),
     ("internal/ui/components/grid/table.go", False),
-    ("internal/ui/components/grid/cell.go", False),
     ("internal/ui/components/grid/consts.go", False),
     ("internal/ui/components/grid/handled.go", False),
     ("internal/ui/components/grid/where_filter.go", False),
@@ -74,6 +73,7 @@ EXPECTED = [
     ("internal/cli/root.go", True),
     ("internal/ai/context/schema.go", True),
     ("internal/ui/components/editor/highlight.go", True),
+    ("internal/ui/components/grid/cell.go", True),
     ("internal/drivers/postgres/query.go", True),
     ("internal/drivers/postgres/schema.go", True),
     # test-support fakes are never gated: they exist to be exercised by

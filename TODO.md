@@ -104,6 +104,8 @@ new Go file nobody classified.
       free once the driver took an interface, so it came last and cost nothing
 - [x] `internal/ui/components/editor/highlight.go` (91 killed, 0 survivors, 9
       unkillable timeouts) — was Tier 3; 27 uncovered → 0, 30 lived → 0
+- [x] `internal/ui/components/grid/cell.go` (39 killed, 2 survivors) — was Tier 3;
+      41 uncovered → 0, 0 lived → 2
 - [x] `internal/config` NOT COVERED: 21 → 0 uncovered, 12 mutants killed
 
 ### pager.go: the pattern to expect in the rest of the gate
@@ -287,7 +289,7 @@ DONE. Tier 2 is empty.
 - [ ] `internal/ui/components/explorerpreview/ere.go` — 32 uncovered, 76 lived
 - [x] `internal/ui/components/palette/fuzzy.go` — done, 35 killed / 4 survivors
 - [x] `internal/ui/components/grid/pager.go` — done, 43 killed / 5 survivors
-- [ ] `internal/ui/components/{picker/picker,grid/cell}.go` — 39/41
+- [ ] `internal/ui/components/picker/picker.go` — 39 uncovered
 - [ ] `internal/ui/components/ask/ask.go` — 43 uncovered, 6 lived
 
 ### Tier 4 — 60+ uncovered, high value, high cost
