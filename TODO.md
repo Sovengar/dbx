@@ -289,7 +289,8 @@ DONE. Tier 2 is empty.
 - [ ] `internal/ui/components/explorerpreview/ere.go` — 32 uncovered, 76 lived
 - [x] `internal/ui/components/palette/fuzzy.go` — done, 35 killed / 4 survivors
 - [x] `internal/ui/components/grid/pager.go` — done, 43 killed / 5 survivors
-- [ ] `internal/ui/components/picker/picker.go` — 39 uncovered
+- [x] `internal/ui/components/picker/picker.go` (37 killed, 2 survivors) — 39
+      uncovered → 0, 0 lived → 2; one real rendering bug fixed
 - [ ] `internal/ui/components/ask/ask.go` — 43 uncovered, 6 lived
 
 ### Tier 4 — 60+ uncovered, high value, high cost

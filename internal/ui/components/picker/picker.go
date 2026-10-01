@@ -136,13 +136,19 @@ func (p *Picker) View() string {
 	s.WriteString("\n\n")
 
 	// Connection list
+	//
+	// cursorArrow is a full cell but not two, so the placeholder for a row
+	// without it has to be measured rather than written as two spaces. Written as
+	// two, the cursor's row came out one cell narrower than every other row and
+	// the driver and path columns visibly jumped as the cursor moved.
+	cursorArrow := "▸"
 	for i, proj := range p.projects {
-		arrow := "  "
+		arrow := strings.Repeat(" ", lipgloss.Width(cursorArrow))
 		if i == p.cursor {
 			arrow = lipgloss.NewStyle().
 				Foreground(p.styles.Primary.GetForeground()).
 				Bold(true).
-				Render("▸")
+				Render(cursorArrow)
 		}
 
 		// Determine styles based on active state
@@ -200,25 +206,25 @@ func (p *Picker) getPort(dsn string) string {
 	if atIdx == -1 {
 		return ""
 	}
-	
+
 	// After @, find the next : for port
 	afterAt := dsn[atIdx+1:]
 	colonIdx := strings.Index(afterAt, ":")
 	if colonIdx == -1 {
 		return ""
 	}
-	
+
 	// Extract port (digits after colon until / or ? or end)
 	portStart := colonIdx + 1
 	portEnd := portStart
 	for portEnd < len(afterAt) && afterAt[portEnd] >= '0' && afterAt[portEnd] <= '9' {
 		portEnd++
 	}
-	
+
 	if portEnd > portStart {
 		return afterAt[portStart:portEnd]
 	}
-	
+
 	return ""
 }
 

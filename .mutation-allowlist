@@ -396,6 +396,40 @@ CONDITIONALS_BOUNDARY internal/ui/components/grid/cell.go:49
 #       cell from both.
 CONDITIONALS_BOUNDARY internal/ui/components/grid/cell.go:126
 
+# === Group B10: internal/ui/components/picker, two guards that agree with their
+#       own fallthrough at the boundary =====================================
+#
+# TWO survivors. This file is 39 mutants and 37 of them died to four contracts:
+# getPort's three-step parse (first @, first : after it, digits immediately after)
+# over a table of twenty DSNs including every one of its three failure modes; the
+# key state machine tabled over EVERY (state, key) pair rather than sampled, so the
+# cases where a key must fall through unconsumed are covered; the cursor clamped at
+# both ends, asserted through which row carries the arrow rather than through the
+# unexported field; and each list row as an exact line.
+#
+# The two survivors share one shape, and it is a family this project has not hit
+# before: the guard's BODY and the code AFTER the guard return the same value, so
+# moving the boundary changes which of the two runs and not the answer.
+#
+# picker.go:224 `if portEnd > portStart` -> `>=`: the one extra value where `>=`
+#       fires and `>` does not is portEnd == portStart, which is the case of no
+#       digits at all. The body returns afterAt[portStart:portStart], an empty
+#       slice, which is the empty string; the line after the guard returns "".
+#       Identical output either way.
+#
+#       Pinned by TestGetPort_FindsThePortAfterTheFirstAt, whose "@:" and "@h:abc/db"
+#       cases are exactly the zero-digit input, and which asserts the empty string
+#       rather than merely the absence of a crash.
+CONDITIONALS_BOUNDARY internal/ui/components/picker/picker.go:224
+
+# picker.go:233 `if textWidth >= p.width` -> `>`: the one extra value is textWidth
+#       == p.width, where the body computes padding = (width - textWidth) / 2 == 0
+#       and returns strings.Repeat(" ", 0) + text, which is text. Identical output.
+#
+#       Pinned by TestCenterText_PadsByHalfTheDifference, whose width 3 / "abc" and
+#       width 0 and width -5 cases are the boundary and both sides of it.
+CONDITIONALS_BOUNDARY internal/ui/components/picker/picker.go:233
+
 # === Group B8: internal/config, two no-op-at-equality guards ================
 #
 # Two survivors, both the family from group A, and one of them a variant worth
