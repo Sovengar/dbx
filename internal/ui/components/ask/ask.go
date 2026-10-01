@@ -205,8 +205,14 @@ func (a *Ask) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			a.input = ""
 			return func() tea.Msg { return AskSubmittedMsg{Question: question} }, true
 		case "backspace":
-			if len(a.input) > 0 {
-				a.input = a.input[:len(a.input)-1]
+			// One CHARACTER, not one byte. Cutting bytes left half a rune
+			// behind whenever the character before the cursor was not ASCII, so
+			// backspacing over an accented letter or any CJK put invalid UTF-8
+			// into the question — and the question is what gets sent to the
+			// model. []rune is the whole fix; the cost is an allocation per
+			// keystroke on a line that is a sentence long.
+			if chars := []rune(a.input); len(chars) > 0 {
+				a.input = string(chars[:len(chars)-1])
 			}
 			return nil, true
 		default:

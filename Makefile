@@ -41,6 +41,8 @@ MUTATE_BASE ?= main
 #        internal/ui/components/editor/highlight.go,
 #        internal/ui/components/grid/cell.go,
 #        internal/ui/components/picker/picker.go,
+#        internal/ui/components/ask/ask.go,
+#        internal/ai/session/logger.go,
 #        internal/drivers/postgres/{query,schema}.go,
 #        internal/ui/components/grid/{header,mouse,pager}.go,
 #        internal/ui/components/palette/{commands,fuzzy}.go
@@ -52,7 +54,7 @@ MUTATE_BASE ?= main
 # testcontainers, which is correct but slow. See the note above `mutate`.
 MUTATE_DSN ?=
 
-MUTATE_EXCLUDE ?= internal/testsupport/|internal/ui/keydisplay/|internal/ui/components/(ask|explorerpreview|gridpreview|gridsidebarpreview|querybrowser)/|internal/ui/components/grid/(consts|handled|table|where_filter)\.go|internal/ui/components/editor/(autocomplete|handled|sql)\.go|internal/ui/components/(explorer/(explorer|handled|tree)|palette/palette)\.go|internal/app/(app|messages)\.go|internal/ai/session/|internal/ai/nl2sql/(compatible|provider|prompt)\.go|cmd/|main\.go|internal/theme/
+MUTATE_EXCLUDE ?= internal/testsupport/|internal/ui/keydisplay/|internal/ui/components/(explorerpreview|gridpreview|gridsidebarpreview|querybrowser)/|internal/ui/components/grid/(consts|handled|table|where_filter)\.go|internal/ui/components/editor/(autocomplete|handled|sql)\.go|internal/ui/components/(explorer/(explorer|handled|tree)|palette/palette)\.go|internal/app/(app|messages)\.go|internal/ai/nl2sql/(compatible|provider|prompt)\.go|cmd/|main\.go|internal/theme/
 
 build:
 	go build $(LDFLAGS) -o .local/bin/dbx .

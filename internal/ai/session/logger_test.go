@@ -26,7 +26,7 @@ func newTestLogger(t *testing.T, retentionDays int) (*Logger, string) {
 	if err != nil {
 		t.Fatalf("NewLogger: %v", err)
 	}
-	t.Cleanup(func() { _ = l.Close() })
+	t.Cleanup(func() { _ = l.Close() }) // cleanup, not an assertion // cleanup, nothing left to assert to
 	return l, dir
 }
 
@@ -94,7 +94,7 @@ func TestNewLogger_CreatesTheDirectoryItNeeds(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewLogger(%q) = %v, want it to create the directory", dir, err)
 			}
-			defer l.Close()
+			defer func() { _ = l.Close() }()
 
 			info, err := os.Stat(dir)
 			if err != nil {
@@ -162,7 +162,7 @@ func TestNewLogger_AppendsToTodaysFileAndNeverTruncates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer second.Close()
+	defer func() { _ = second.Close() }()
 	if err := second.LogQuery("SELECT 2", time.Millisecond, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -657,7 +657,7 @@ func TestCleanup_ReportsAMissingDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 
 	missing := filepath.Join(t.TempDir(), "never-created")
 	l.dir = missing
