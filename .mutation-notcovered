@@ -140,6 +140,15 @@ internal/config/config.go:23:CONDITIONALS_NEGATION
 # The right long-term answer is a property/fuzz test with a per-input timeout
 # enforced by the testing framework itself, which this project does not use yet.
 TIMEOUT_MAX internal/ui/components/editor/highlight.go 16 the tokenizer loop guards are the only thing advancing the index
+# grid/table.go times out on THREE mutants, all of them loop index advances:
+# the F-key page lookup (for i := 1; i <= 9; i++) and the blank padding at the
+# bottom of the row block (for i := visibleCount; i < contentHeight; i++), plus
+# the negation of that loop's bound. Removing the advance makes either loop spin
+# forever with no test able to bound it, which is the same shape as every other
+# entry in this file and the reason the coefficient is 20 rather than the
+# default 3. The ceiling is set at twice the observed count so that a genuine
+# regression above three is a red build rather than a flake.
+TIMEOUT_MAX internal/ui/components/grid/table.go 6 the page-lookup and row-padding loops; their index advance is the only thing terminating them
 TIMEOUT_MAX internal/app/txn.go 10 the SQL lexer line-comment and blank loops
 TIMEOUT_MAX internal/config/keybindings_groups.go 6 the group scan in digitRange
 TIMEOUT_MAX internal/ui/bordered/bordered.go 8 the ANSI-escape scan

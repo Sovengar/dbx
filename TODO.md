@@ -67,7 +67,7 @@ nc=116 lived=  0 killed=   0  internal/ui/components/querybrowser/querybrowser.g
 nc=171 lived=  0 killed=   0  internal/ui/components/grid/where_filter.go
 nc=281 lived= 31 killed=  13  internal/ui/components/gridpreview/preview.go
 nc=350 lived= 63 killed= 124  internal/app/app.go
-nc=414 lived=117 killed=  85  internal/ui/components/grid/table.go
+nc=  0 lived= 69 killed= 525  internal/ui/components/grid/table.go  <- DONE
 ```
 
 ## Queue — ordered easiest first
@@ -107,6 +107,107 @@ new Go file nobody classified.
 - [x] `internal/ui/components/grid/cell.go` (39 killed, 2 survivors) — was Tier 3;
       41 uncovered → 0, 0 lived → 2
 - [x] `internal/config` NOT COVERED: 21 → 0 uncovered, 12 mutants killed
+
+### table.go: ONE FIXTURE BUG EXPLAINED 128 OF 414 UNCOVERED MUTANTS
+
+Every pre-existing fixture in this package built its grid as `New(styles, 0, nil)`,
+and both arguments are wrong in ways that hide code:
+
+- **pageSize 0** makes `Pager.Limit()` return 0, so `renderRecordsView` computes
+  `endRow == 0` and the row loop `for i := startRow; i < endRow` never runs. Not one row
+  was ever rendered by the whole suite — which is why the four largest row-renderer lines
+  were uncovered.
+- **a nil `keybinds` Resolver** panics the moment `handleKey` resolves a key, so nothing
+  that goes through the key path could be tested at all.
+
+A third one, found later and worth its own note: `Update` drops everything for an
+unfocused grid while `HandleAction` deliberately skips that guard. That is why the
+pre-existing action tests could get away with an unfocused fixture and the contract
+tests all call `Focus()`.
+
+### table.go: TWO REAL BUGS, both found by the gate
+
+**Backspace removed one BYTE, not one character.** `handleEditKey`'s `backspace` and
+`delete` cases sliced `editValue` at `editCursor`, which is a byte offset — that is what
+makes insertion a two-slice concatenation. On an accented letter or an emoji that leaves
+invalid UTF-8 in the value and the cursor inside the broken sequence, and that value is
+the cell content the user is about to commit. The same defect was found and fixed in the
+ASK pane's editor earlier in this project; the shape is identical. Fixed here with
+`runeAt`/`runeAtBefore` helpers and the whole editor made rune-aware, cursor movement
+included.
+
+**`expandEditCol` remembered the wrong width.** It saved the column's CURRENT width into
+`editOrigWidth` every time it ran, and it runs once per typed character — so the
+"original" tracked the previous expansion. Typing 20 characters into a 16-cell column left
+it at 24 for the rest of the session. The trigger is a COUNT: one keystroke works, two do
+not, so a test that types once passes against the broken code.
+
+### table.go: TWO DEAD RULES DELETED, and one of them explains four mutants
+
+- `syncScroll` clamped `scrollCol` to `len(widths)-1`, and the cursor clamp two lines above
+  had already bounded `cursorCol` to `len-1` while the rule below pulls the window back to
+  the cursor. Any value the clamp could write was overwritten.
+- `jumpToColumn` computed a scroll start two columns left of the match, but
+  `syncScroll`'s expand-left loop refills from the left for as long as the cursor still
+  fits, so the final window is a function of the cursor and the widths alone. Five mutants
+  gone, and one place to keep in step instead of two.
+
+### table.go: FIVE FIXTURES THAT PROVED NOTHING, and what each was hiding
+
+The recurring mistake is a fixture chosen for readability rather than for being at a
+boundary or at a non-zero offset.
+
+- **A page offset of zero makes three of four terms invisible.** `offset + scrollRow`,
+  `offset - scrollRow` and `scrollRow` alone all agree when `offset == 0`, and so do
+  `cursorCol - scrollCol` and `cursorCol + scrollCol` when `scrollCol == 0`. Four mutants
+  on the yank's row index, the render's first row and the selected cell's column survived
+  until one fixture set page offset, row scroll and column scroll to three DIFFERENT
+  non-zero numbers at the same time.
+- **A fixture that never restores a change proves nothing about restoring.** The discard
+  and undo fixtures set a pending update but left the data holding the ORIGINAL value, so
+  "restored to the original" passed for a restore that did nothing. That is why the guard
+  for row ZERO survived: the only row whose index a `>= 0` test could mistake was the one
+  the fixture never actually changed.
+- **An assertion on the end state misses a boundary that fires earlier.** Typing a value
+  that exactly fills a column does not widen it, and neither does a comparison that fires
+  one keystroke early — the column ends up the same width either way. What the user sees is
+  it nudging sideways as they type, so the width is now checked after EVERY character.
+- **One insert cannot tell `+ n` from `- n`.** `startInsertRow`'s edit row is
+  `len(rows) + pendingRow`, and with a single insert `pendingRow` is zero, so one minus zero
+  is one. Two inserts can, and the test presses the key repeatedly.
+- **A row block slice that runs to the end of the output measures the wrong thing.** It also
+  holds the trailing blanks and the mode indicator, so a length check on it is not a check
+  on the row budget.
+
+### table.go: A WIDTH ASSERTION IS NOT A CONTENT ASSERTION, AGAIN
+
+The same lesson as `ere.go` and `picker.go`, in a third place. There, a width matrix could
+not see a mutation that replaced a character with another character. Here the row renderer
+draws a highlight on ONE cell of a row, and the usual fixture shape — "the output changed"
+— passes a renderer that lit the wrong column. The observation that kills it reads each
+cell's colours off the escape sequences: `cells` tokenises the line and accumulates the
+SGR parameters in force over each run, and `inStyle` picks out the cells painted in one
+style's colours. Those colours are derived from the THEME at test time rather than written
+as literals, so a theme change cannot quietly turn the assertions into ones that compare
+the wrong thing and pass.
+
+### table.go: A PANICKING MUTANT SCORES AS A SURVIVOR, so a bounds check is a permanent allowlist entry
+
+Twenty-nine survivors are off-by-ones on a slice bound: `i < len(S)` to `i <= len(S)`,
+`i >= len(S)` to `i > len(S)`. The only value that tells them apart is `i == len(S)`, and
+there the original declines the index while the mutant performs it, so the mutant reads one
+element past the end and panics. A panicking mutant is scored as LIVED, so these are real
+robustness regressions the gate structurally cannot see. They are allowlisted with that
+stated plainly rather than hidden, because an allowlist entry that does not say what it is
+saying is worse than no entry.
+
+### table.go: FOUR KEYS STILL OPEN
+
+Four survivor keys have no explanation yet and are NOT allowlisted: the `isEditing`
+expression in `renderRecordsView` and the `activeCol` in its multi-selected branch. Both
+need a fixture where the page offset, the row scroll and the column scroll are all
+non-zero AND the rendered row is one that takes that branch, and the obvious candidate
+does not reach them. They are the honest remainder of this file.
 
 ### pager.go: the pattern to expect in the rest of the gate
 
@@ -307,7 +408,8 @@ DONE. Tier 2 is empty.
 - [ ] `internal/ui/components/grid/where_filter.go` — 171
 - [ ] `internal/ui/components/gridpreview/preview.go` — 281 uncovered, 31 lived
 - [ ] `internal/app/app.go` — 350 uncovered, 63 lived. The single largest gap.
-- [ ] `internal/ui/components/grid/table.go` — 414 uncovered, 117 lived. Largest.
+- [x] `internal/ui/components/grid/table.go` — 414 uncov → 0, 117 lived → 69; 525 killed.
+      Two real bugs fixed, two dead-code deletions, four survivor keys still open.
 
 ## Before trusting any measurement here
 

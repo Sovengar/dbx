@@ -34,8 +34,8 @@ type rowRenderer struct {
 func rowRenderers() []rowRenderer {
 	return []rowRenderer{
 		{"RenderRow", func(v []interface{}, w []int, a int, _ map[int]bool) string { return cellRenderer().RenderRow(v, w, a) }, true},
-		{"RenderSelectedRow", func(v []interface{}, w []int, a int, _ map[int]bool) string {
-			return cellRenderer().RenderSelectedRow(v, w, a)
+		{"RenderSelectedRow", func(v []interface{}, w []int, _ int, _ map[int]bool) string {
+			return cellRenderer().RenderSelectedRow(v, w)
 		}, false},
 		{"RenderCursorSelectedRow", func(v []interface{}, w []int, a int, _ map[int]bool) string {
 			return cellRenderer().RenderCursorSelectedRow(v, w, a)
@@ -792,7 +792,7 @@ func TestRowRenderers_EachColumnGetsExactlyItsOwnStyle(t *testing.T) {
 		},
 		{
 			"RenderSelectedRow",
-			cr.RenderSelectedRow(values, widths, active),
+			cr.RenderSelectedRow(values, widths),
 			[]lipgloss.Style{styles.Cursor, styles.Cursor, styles.Cursor, styles.Cursor},
 		},
 		{

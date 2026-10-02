@@ -394,7 +394,7 @@ CONDITIONALS_BOUNDARY internal/ui/components/grid/cell.go:49
 #       Pinned by TestRenderEditCell_TheBlockIsWhereTheCursorIs, which renders a
 #       cursor at exactly the end of the text and one past it, and gets the same
 #       cell from both.
-CONDITIONALS_BOUNDARY internal/ui/components/grid/cell.go:126
+CONDITIONALS_BOUNDARY internal/ui/components/grid/cell.go:130
 
 # === Group B10: internal/ui/components/picker, two guards that agree with their
 #       own fallthrough at the boundary =====================================
@@ -529,6 +529,176 @@ INVERT_NEGATIVES internal/ui/components/explorerpreview/ere.go:537
 ARITHMETIC_BASE internal/ui/components/explorerpreview/ere.go:537
 INVERT_NEGATIVES internal/ui/components/explorerpreview/ere.go:538
 ARITHMETIC_BASE internal/ui/components/explorerpreview/ere.go:538
+
+# === Group B14: grid/table.go — shape 1, a CLAMP that writes back the value it already holds ====
+# TWENTY-SIX survivors, one shape: `if x <= F` written as `<` where the body
+# assigns F, or the reverse. At the boundary the comparison differs but the
+# assignment does not, so the two forms cannot be told apart by any output.
+#
+# The general shape has now appeared in SIX files — modal.go, toast.go,
+# query_history.go, ask.go, explorerpreview/ere.go and here, with ere.go alone
+# carrying twelve instances. It is recorded once per file with the count in the
+# prose rather than once per instance: the FAMILY is the finding, and the count
+# is what says whether it is growing.
+
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:321
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:334
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:345
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:349
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:353
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:377
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:383
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:392
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1540
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1543
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1546
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1870
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1874
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1882
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1885
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1906
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1910
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1952
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1975
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2014
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2018
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2027
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2040
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2087
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2247
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2251
+
+# === Group B15: grid/table.go — shape 2, a bounds check replaced by an off-by-one that CRASHES ====
+# TWENTY-NINE survivors. The mutation turns `i < len(S)` into `i <= len(S)` or
+# `i >= len(S)` into `i > len(S)`, and the only value that tells the two apart
+# is `i == len(S)` — at which the ORIGINAL declines the index and the MUTANT
+# performs it. S is a slice in every one of these, so the mutant reads one
+# element past its end and panics.
+#
+# A panicking mutant is scored as a SURVIVOR by the tool, so this is a real
+# robustness regression the gate structurally cannot see. It is written down
+# rather than hidden: the guards are load-bearing, and a reader who sees them
+# allowlisted deserves to know that the allowlist is not saying they do nothing.
+#
+# There is no way to kill these from the test side — the only observable state is
+# the one where the mutant crashes.
+
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:330
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:400
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:474
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:881
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:884
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:933
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:989
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:996
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1003
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1031
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1039
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1059
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1134
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1174
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1318
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1338
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1384
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1553
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1563
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1619
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1921
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2092
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2097
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2121
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2152
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2157
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2166
+
+# === Group B16: grid/table.go — shape 3, four shapes provably equivalent in context ====
+# EIGHTEEN survivors in four smaller groups.
+#
+# 1. THE DEBUG-LOG GUARD, negated (921, 1783, 2199). `if f != nil` -> `== nil`
+#    turns the body off rather than on, so the only difference is whether a line
+#    reaches /tmp/dbx_grid_debug.log. A nil *os.File's Fprintf and Close were
+#    MEASURED earlier in this project to return "invalid argument" without
+#    panicking. This is the FOURTH file where that fact was found independently.
+#
+# 2. hasDrafts TAKING THE ZERO VALUE (2132, 2141). `len(...) > 0` -> `>= 0` is
+#    always true, so every row would render through RenderDraftUpdateRow. For a
+#    row with no draft columns of its own that renderer produces byte-identical
+#    output to RenderRow: with draftCols[i] false for every i, each cell falls
+#    through to the same style RenderRow picks. And a row that HAS a draft
+#    column already had hasDrafts true. Provably equivalent.
+#
+# 3. THE SECOND OPERAND OF A `&&` (400, 2092, 2152). Loops of the form
+#    `for i := a; i < b && other(i); i++`. Go short-circuits, so `other` is only
+#    consulted while `i < b` still holds — and its own boundary can therefore
+#    never decide whether the body runs. 2092 is the row loop and 2152 the
+#    pending-insert loop; 400 is the `used` accumulator, bounded by the cursor
+#    clamp above it.
+#
+# 4. A PADDING LOOP COMPLEMENTED BY THE GAP (2177, 2183, 2186). The body and the
+#    gap are computed from the same line count — `gap := target - bodyLines - 1`
+#    — so one extra blank in the body removes exactly one newline from the gap.
+#    The rendered block is byte-identical. That is the third time in this
+#    project two quantities derived from one another have hidden a mutation from
+#    the gate.
+#
+# And five that need saying one at a time:
+#
+#   327  `len(g.data.Rows) > 0` -> `>= 0`. The body is a loop over the rows, so
+#        entering it with zero rows iterates zero times.
+#   343  `len(g.widths) > 0` -> `>= 0`. Always true, which lets minCols be set to
+#        zero and turns `available / minCols` into a DIVISION BY ZERO. This guard
+#        is the only thing between an empty width list and a crash.
+#   406  `used > available` -> `>=` in the shrink loop. The loop is immediately
+#        followed by the expand-left loop, whose condition is
+#        `used + widths[scrollCol-1] <= available` — which, after one shrink, is
+#        exactly `used <= available`, the case being tested. The column the
+#        mutation drops is the column it puts back.
+#   1956 `totalVisible < limit` -> `<=`. Both branches return `limit` at the
+#        boundary, so the two forms return the same value.
+#   2180 `contentHeight > 0` -> `>= 0`. contentHeight is floored at one, so the
+#        second operand is always true.
+
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:327
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:343
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:406
+CONDITIONALS_NEGATION internal/ui/components/grid/table.go:921
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1492
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1502
+CONDITIONALS_NEGATION internal/ui/components/grid/table.go:1783
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1956
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2132
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2141
+INCREMENT_DECREMENT internal/ui/components/grid/table.go:2177
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2180
+INCREMENT_DECREMENT internal/ui/components/grid/table.go:2183
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2186
+CONDITIONALS_NEGATION internal/ui/components/grid/table.go:2199
+
+# === Group B17: grid/table.go — two where the surrounding code corrects the value ====
+# 1492 `i >= len(s)` -> `> len(s)` in runeAt. The only caller is handleEditKey's
+#      "right" branch, which checks `editCursor < len(editValue)` first, so the
+#      upper guard is unreachable. Dead as written.
+#
+# 1502 `if i <= 0` -> `<` in runeAtBefore. At i == 0 both forms return
+#      RuneError. Provably equivalent.
+#
+# 1477 `len(g.editValue)+4 > widths[g.editCol]` -> `>=`. At the boundary
+#      editValWidth equals the column's width, so expandEditCol's
+#      `max(orig, name+4, val+4)` returns the column's width UNLESS name+4 is
+#      larger — and entering the editor has already widened the column to at
+#      least name+4. Every term is therefore at most the current width and the
+#      expansion is a no-op. Provably equivalent, and it took reading
+#      expandEditCol to see rather than a fixture.
+#
+# 1853 `g.cursorCol = len(g.columns) - 1` -> `+ 1` in moveLeft's wrap. moveLeft
+#      ends in syncScroll(), whose first clamp bounds cursorCol to len-1, so the
+#      wrap's value never reaches the caller. The same shape as the scrollCol
+#      clamp deleted from syncScroll in this commit: a second rule correcting the
+#      first.
+
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1477
+ARITHMETIC_BASE internal/ui/components/grid/table.go:1853
+INVERT_NEGATIVES internal/ui/components/grid/table.go:1853
 
 # === Group B11: internal/ai/session/logger.go, one buffer-size hint ==========
 #
