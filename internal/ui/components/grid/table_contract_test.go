@@ -5777,3 +5777,62 @@ func TestGrid_WithEveryOffsetSetTheIndicesStillNameTheRightRow(t *testing.T) {
 		t.Errorf("the selected cell holds %q, want the cursor column's value %q", painted[0], marker(absRow, sel.cursorCol))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The bounds guards: a test that reaches the boundary, not just the safe side
+// ---------------------------------------------------------------------------
+
+// mustNotPanic turns "the guard declined to index past the end" into a test
+// failure instead of a crashed binary.
+//
+// It exists because of how this project measures itself. A CONDITIONALS_BOUNDARY
+// mutant turns `i >= len(s)` into `i > len(s)`, and the ONLY state that tells the
+// two apart is `i == len(s)` — where the original declines the index and the mutant
+// performs it, reading one element past the end of a slice and panicking.
+//
+// A panic in a test aborts the whole binary, so the tool has no per-test result to
+// read and scores the mutant as a SURVIVOR. Recovering here and failing through the
+// testing package instead turns the crash into an ordinary red test, which is what
+// makes these mutants killable at all.
+func mustNotPanic(t *testing.T, what string, f func()) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("%s panicked: %v — a guard that declines to index past the end must not reach the index", what, r)
+		}
+	}()
+	f()
+}
+
+// Scenario: Una fila con MAS celdas que columnas no se sale de la lista de anchos.
+//
+// calculateWidths sizes the width list from the COLUMN list and then walks each row,
+// guarding against a row that is longer than the columns describe. That mismatch is
+// exactly what the guard exists for, and it is reachable: a projection can return more
+// values than the header lists.
+//
+// The fixture is the mismatch itself, and the assertion is on the widths rather than
+// on "it did not crash", because a guard that clamped to the wrong length would also
+// not crash.
+func TestCalculateWidths_ARowLongerThanTheColumnListStaysInsideTheWidths(t *testing.T) {
+	g := newGrid(t, 0, 2, 80, 20, 10) // two columns c0, c1
+	g.width = 200
+
+	// One row with THREE cells against two columns.
+	g.data = &postgres.QueryResult{
+		Columns: []postgres.ColumnInfo{{Name: "c0"}, {Name: "c1"}},
+		Rows:    [][]interface{}{{"aaa", "bbb", "cccccccccc"}},
+	}
+
+	mustNotPanic(t, "calculateWidths over a 3-cell row and 2 columns", func() { g.calculateWidths() })
+
+	if len(g.widths) != 2 {
+		t.Fatalf("the width list has %d entries, want one per column (2): a row longer than the columns must not grow it", len(g.widths))
+	}
+	// The third cell's width must NOT have been folded into a column.
+	for i, w := range g.widths {
+		if w >= len("cccccccccc")+2 {
+			t.Errorf("column %d was widened to %d from the cell that has no column: the guard did not stop the walk", i, w)
+		}
+	}
+}
