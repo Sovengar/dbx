@@ -411,6 +411,40 @@ DONE. Tier 2 is empty.
 - [x] `internal/ui/components/grid/table.go` — 414 uncov → 0, 117 lived → 69; 525 killed.
       Two real bugs fixed, two dead-code deletions, four survivor keys still open.
 
+## Round 2 — the three remaining giants
+
+Ordered easiest first, same rule as round 1: measure, kill, admit, commit. Each entry
+is updated in place with its measured numbers and whatever the file taught, so this
+section is the running record rather than a to-do list.
+
+- [ ] `internal/ui/components/grid/where_filter.go` — 171 uncovered. Smallest of the
+      three and a self-contained widget: no I/O, no app wiring, everything reachable
+      from the in-package test file. Start here.
+- [ ] `internal/ui/components/gridpreview/preview.go` — 281 uncovered. One test file
+      against 1253 lines, so almost all of it is untested; the pattern that killed
+      table.go's rows applies here.
+- [ ] `internal/app/app.go` — 350 uncovered, 63 lived. The largest gap in the repo and
+      the hardest: it is the lifecycle and the router, so its fixtures are teatest
+      programs rather than function calls. Last, deliberately.
+
+Rules carried over from round 1, because every one of them cost time to learn:
+
+- **A fixture with a zero value where a real one is needed is worse than no fixture.**
+  `New(styles, 0, nil)` hid 128 of table.go's 414 mutants on its own.
+- **A fixture that stays at zero offsets cannot see arithmetic.** `offset + n`,
+  `offset - n` and `n` agree when `offset == 0`. Set every offset non-zero and
+  different.
+- **A differential assertion cannot say WHICH thing changed.** Read the change off the
+  output — the cell's colours, the row's index — not off "it differs from before".
+- **An assertion on the end state misses a boundary that fires earlier.** Check after
+  every step, not once at the end.
+- **A skip that tolerates the symptom of a defect is a hole.** A `t.Skip` for "this
+  case has nothing to assert" hid a live mutant in ere.go.
+- **Write the expectation from the contract.** Guessed expectations cost six cycles in
+  cell.go, six in picker.go and three in ask.go.
+- **Read the source before asserting.** More allowlist entries were settled by reading
+  the function than by probing it.
+
 ## Before trusting any measurement here
 
 **A TIMED OUT mutant is absent from `report.json`, so it is indistinguishable
