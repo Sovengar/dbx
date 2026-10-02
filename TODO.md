@@ -445,7 +445,78 @@ Rules carried over from round 1, because every one of them cost time to learn:
 - **Read the source before asserting.** More allowlist entries were settled by reading
   the function than by probing it.
 
-## Before trusting any measurement here
+## Round 3 — bajar los supervivientes, que es el UNICO camino a una cifra alta
+
+Objetivo pedido: 98% de eficacia del gate. Medido y **reescrito a mitad de camino**,
+porque la aritmética lo hace inalcanzable de otra forma.
+
+### La aritmética, y por qué admitir ficheros no ayuda
+
+    eficacia = K / (K+L)      98%  <=>  49*L <= K
+
+Con K=1776 y L=180, los 180 supervivientes que ya existen exigen `K >= 8820`. Un
+fichero nuevo aporta `x` muertos y `y` vivos: `49*(180+y) <= 1776 + x`, o sea
+`49y <= x - 7044`. Como `y = x*(1-e)/e`, el margen es **negativo para todo `e < 98%`
+y cero justo en `e = 98%`**. Añadir ficheros al gate no sube la eficacia; la deja
+igual o peor. El único palanca es reducir L.
+
+- [x] `where_filter.go` — 53 NOT COVERED -> 0. 136 muertos, 35 supervivientes. Los
+      tests son `where_filter_contract_test.go`, en el paquete, con la lista de
+      sugerencias y el popup leídos directamente. Las sugerencias son variables de
+      PAQUETE compartidas y NO se copian al entregarse, asi que un test que las
+      mutara contaminaria el resto del paquete: nada las toca.
+- [x] `grid/table.go` — 20 de 21 guardas de slice matadas (8488e78).
+
+### El patron que lo hizo posible: un panic no es un rojo
+
+Un panic dentro de un test aborta el binario entero. La herramienta no tiene
+resultado por test para ese mutante y lo puntua SUPERVIVIENTE — por eso 29 de estas
+guardas estaban escritas como "no se pueden matar desde el test". Era cierto de los
+tests que existian. `mustNotPanic` (en `table_contract_test.go`) recupera el panic y
+lo reporta por el paquete `testing`, asi que el crash pasa a ser un test rojo normal.
+
+Verificado a mano en 21 sitios: 20 muertos. El vivo (`navigateFK:933`) es equivalente
+de verdad: tras la guardia hay un `g.keyIcons[g.cursorCol]` que es **map**, luego un
+cursor pasado la ultima columna se rechaza igual en los dos.
+
+### La ficha que faltaba: las ENTRADAS OBSOLETAS
+
+`toast.go` tiene un test que asserta AMBOS extremos de los nueve rangos CJK con las
+runas exactas. Al aplicar los 6 rangos a mano, 4 ya estaban muertos y solo 2
+sobrevivian de verdad (`210` y `216`, cubiertos ambos por las tablas `unicode.Hangul`
+y `unicode.Han`). Las otras 4 entradas del allowlist eran **obsoletas**: nadie ha
+re-ejecutado el gate para limpiarlas tras escribir el test.
+
+Una entrada obsoleta es peor que no tener entrada: declara equivalente un riesgo que
+en realidad esta cubierto, y queda con respuesta aparente. Por eso el barrido
+manual de las 152 `CONDITIONALS_BOUNDARY` es la accion de mayor rendimiento que queda:
+cada entrada que muere es un muerto gratis.
+
+Reglas del barrido (`/tmp/opencode/sweep_allowlist.py`):
+
+- **Una linea puede generar dos mutantes** (`i >= 0 && i < len(s)`): uno por `<` y otro
+  por `>=`. La entrada del allowlist es `fichero:linea`, asi que para borrar la entrada
+  tienen que morir LOS DOS.
+- **Una cobertura por tabla de unicode hace equivalente el mutante.** Si la runa del
+  limite la cubre `unicode.Hangul`/`Han`/etc., el mutante del borde no es observable
+  por ningun test. Eso es lo que pasa en `toast.go:210` y `:216`.
+- **La ficha de tipo tabla de scripts ya existe** en `toast_test.go` con un flag
+  `tailIsTableWide`; ese flag es exactamente la nocion de "otro disjunto ya cubre
+  este punto". Merece la pena repetirlo donde haya disjunciones.
+- La ficha por LINEA no distingue dos mutantes de la misma linea: al re-verificar hay
+  que intentar AMBOS.
+
+### Siguiente
+
+- [ ] Barrer las 152 `CONDITIONALS_BOUNDARY` a mano y borrar las que mueren
+- [ ] Los otros 20 (`ARITHMETIC_BASE`, `CONDITIONALS_NEGATION`, `INVERT_NEGATIVES`,
+      `INCREMENT_DECREMENT`) necesitan un barredor aparte: la sustitucion no es un
+      intercambio de operador sino reescribir la operacion
+- [ ] admitting `where_filter.go` al gate es gratis en cobertura pero **baja** la
+      eficacia (79.5%): 136 muertos contra 35 vivos. Entra solo cuando sus 35 se hayan
+      matado oclassifier
+
+
 
 **A TIMED OUT mutant is absent from `report.json`, so it is indistinguishable
 from a killed one.** This is the most dangerous property of the tool: it makes
