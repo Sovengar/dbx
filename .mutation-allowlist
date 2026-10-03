@@ -421,7 +421,7 @@ CONDITIONALS_BOUNDARY internal/ui/components/picker/picker.go:233
 
 # === Group B13: explorerpreview/ere.go, four repeated shapes ==================
 #
-# TWENTY-NINE survivors, and they are four shapes repeated rather than twenty-nine
+# TWENTY-SEVEN survivors, and they are four shapes repeated rather than twenty-seven
 # separate findings. Every one was verified by hand-applying the mutation to a green
 # suite, which is what "survived" means here: the tool and the probe agreed each time.
 #
@@ -450,13 +450,19 @@ CONDITIONALS_BOUNDARY internal/ui/components/picker/picker.go:233
 # _history.go and ask.go), which is why it is one entry with twelve lines and not
 # twelve entries. The general shape: `if x < LOOP { x = FLOOR }` cannot distinguish LOOP
 # from FLOOR by its output, because at LOOP the body writes FLOOR back.
+#
+# IT WAS TWELVE AND NONE OF THE TWELVE WAS THIS SHAPE. ere.go:290 and ere.go:306 sat
+# in this list and are not clamps at all: :290 assigns `count - 1`, which is NOT the
+# value activeRow already holds, and :306 is a guard that returns rather than assigns.
+# Grouping by a SHAPE rather than by a PROOF is what put them here, and being in a
+# group with ten sound proofs is exactly why nobody looked at the two that were not.
+# Both are now killed by TestClampRow_ARowJustPastTheEndIsPulledBackToTheLastRow and
+# TestGetSelectedRelationship_ARowJustPastTheEndDeclinesTheIndex.
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:69
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:74
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:77
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:201
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:208
-CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:290
-CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:306
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:329
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:371
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:372
