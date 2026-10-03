@@ -551,6 +551,54 @@ Y una cuarta, de agrupacion:
    grupo de los clamps junto a diez pruebas sound; ninguno era clamp. Estar rodeado de
    pruebas buenas es exactamente por que nadie miro las dos que no lo eran.
 
+### LA MEDICION FINAL (corrida `make mutate`, la autoridad)
+
+    killed 1942   lived 185   eficacia 91.17%   cobertura de mutadores 98.52%
+    NOT COVERED 21 (conjunto exacto)   TIMED OUT 14 (bajo techo)
+    allowlist 185 entradas = exactamente el conjunto de supervivientes
+    43 ficheros gateados, 29 excluidos, 0 sin clasificar
+
+O sea: **90.80% -> 91.17%**, no al 94.7% que se estimo. Y el estimacion era
+optimista por el motivo que sigue.
+
+### EL ERROR DE FONDO: MI PROBE NO REPRODUCE LA ATRIBUCION DEL GATE
+
+El gate ejecuta, **por mutante, los tests que el mismo atribuye a esa linea** — no el
+paquete entero. Eso convierte "la suite se pone roja" en evidencia NECESARIA pero NO
+SUFICIENTE. Un probe que solo mira el exit code esta adivinando, y se equivoco en las
+dos direcciones:
+
+- **No sabia que comparacion murio.** Una linea con `&&` genera un mutante por operando
+  y la clave es `fichero:linea`, asi que UNA entrada cubre los dos. El probe se paraba en
+  el primer operador que dejaba la suite roja y declaraba la linea muerta. Eso borro 13
+  entradas correctas. `table.go:343` es el caso claro:
+  `if available > 0 && len(g.widths) > 0` tiene dos operandos que parecen iguales y no lo
+  son — uno protege una division, el otro un slice.
+- **Un timeout parece un kill.** Con la CPU competida por otro repo, un test no
+  relacionado se paso de tiempo y el exit code distinto de cero se conto como muerte.
+  `modal.go:71` y `:206` se borraron y volvio a ponerlas.
+
+Regla: un probe que no reproduzca la atribucion del gate no puede retirar una entrada.
+Solo puedegviciar a收起las que el gate ya marco como muertas.
+
+### where_filter.go: los 35 supervivientes, agrupados por POR QUE
+
+- **Conjunto redundante** (145, 156, 163, 170): `wf.showPopup && len(wf.suggestions) > 0`.
+  `showPopup` se asigna en un unico sitio como `len(suggestions) > 0`, luego el segundo
+  operando no decide nada. Es **codigo muerto**: lo correcto es borrarlo, no justificarlo
+  por cuarta vez.
+- **Familia clamp** (268, 355, 361, 535, 549, 556, 564, 582, 587): el cuerpo reescribe el
+  valor que ya tiene. En 355 el empate es IMPOSIBLE (hace falta que dos palabras clave
+  empiecen una runa de distancia, lo que su propio texto prohibe) y en 361 `bestPos`
+  nunca es 0 porque es `pos + len >= 4`.
+- **Signo no observable** (462, 586): en 462 las dos ramas son el MISMO slice cuando
+  dispara (`lastSpace+1 == 0`). En 586 **no** es equivalente — la diferencia existe para
+  todo ancho — y queda como hueco real: el detalle se renderiza dentro de un borde de
+  ancho fijo y ningun test lee la celda de ahi.
+- **Limite real sin fixture encima** (164, 242, 353, 386, 455, 498, 619, 624, 646): NO son
+  equivalencias, son huecos. Cada uno tiene el fixture que parece distinguirlo y el gate
+  no lo acredita. Ver TODO de abajo.
+
 ### Siguiente
 
 
