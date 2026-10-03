@@ -28,9 +28,6 @@ func fuzzyMatch(query, target string) (int, bool) {
 			if ti == 0 || t[ti-1] == ' ' || t[ti-1] == '_' || t[ti-1] == '-' {
 				score += 8
 			}
-			if t[ti] >= 'A' && t[ti] <= 'Z' {
-				score += 3
-			}
 			qi++
 			prevMatch = true
 		} else {

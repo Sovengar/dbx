@@ -100,6 +100,13 @@ func (s *Scanner) scanWithWalkDir(root string) []string {
 
 	// Walk errors are handled inside the callback, which never propagates
 	// them, so the returned error is always nil.
+	//
+	// The hidden-directory test is on the PATH, not on the name. Testing the name
+	// skips the root itself whenever the root's own last element starts with a
+	// dot: WalkDir visits the root first, the guard fires, and the whole walk
+	// stops. A project root like /home/x/.config/dev would therefore find nothing
+	// at all. Comparing paths is the only form that can tell "the directory we
+	// were asked to scan" from "a hidden directory inside it".
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -107,7 +114,7 @@ func (s *Scanner) scanWithWalkDir(root string) []string {
 		if !d.IsDir() && d.Name() == ".dbx.toml" {
 			paths = append(paths, path)
 		}
-		if d.IsDir() && strings.HasPrefix(d.Name(), ".") && d.Name() != "." {
+		if d.IsDir() && path != root && strings.HasPrefix(d.Name(), ".") {
 			return filepath.SkipDir
 		}
 		return nil

@@ -83,7 +83,11 @@ func (cr *CellRenderer) RenderRow(values []interface{}, widths []int, activeCol 
 	return strings.Join(cells, "")
 }
 
-func (cr *CellRenderer) RenderSelectedRow(values []interface{}, widths []int, activeCol int) string {
+// RenderSelectedRow paints a whole multi-selected row. It takes no column: a
+// selected row is one thing being acted on, so every cell in it gets the same
+// colour and the cursor is not shown inside it. The cursor's own row has a
+// renderer of its own (RenderCursorSelectedRow) for when the two overlap.
+func (cr *CellRenderer) RenderSelectedRow(values []interface{}, widths []int) string {
 	var cells []string
 	for i, val := range values {
 		raw := cr.FormatValue(val)

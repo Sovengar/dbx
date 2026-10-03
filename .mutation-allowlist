@@ -46,11 +46,20 @@ CONDITIONALS_BOUNDARY internal/config/keybindings_groups.go:126
 # equal paths to the Name comparison instead.
 CONDITIONALS_BOUNDARY internal/config/scanner.go:47
 
-# internal/config/scanner.go:214 - `a.project.Path < b.project.Path` -> `<=`, the
-# lexicographic tiebreak after the equal-length guard. Only equal strings could
-# distinguish them, and two candidates in a group that shared a path would be
-# the same FoundProject, so the winner is unobservable either way.
-CONDITIONALS_BOUNDARY internal/config/scanner.go:214
+# CLOSED, and removed rather than moved: `a.project.Path < b.project.Path`, the
+# lexicographic tiebreak at the end of isBetterSurvivor, used to be allowlisted
+# here on the argument that two candidates sharing a path would be the same
+# FoundProject. That argument was right about Scan and wrong about the FUNCTION:
+# isBetterSurvivor is a pure three-level priority, and
+# TestIsBetterSurvivor_EqualLengthFallsBackToLexicographic calls it directly with
+# two same-length paths and kills the mutant. The gate reported the entry as stale,
+# which is the mechanism working: a suppressed mutant that stops surviving has to
+# be deleted, not re-keyed.
+#
+# The entry moved from line 214 to 221 first, because scanWithWalkDir gained a
+# comment above it. That is the hazard the header of this file warns about, and
+# the stale-entry check is what caught the shift instead of letting it silently
+# point at the wrong line.
 
 # internal/store/query_history.go:76 - `len(s.entries) > 500` -> `>= 500`. At exactly
 # 500 the mutant slices entries[0:], which is the same 500 entries.
@@ -82,18 +91,40 @@ CONDITIONALS_BOUNDARY internal/ui/modal.go:198
 # internal/ui/modal.go:201 and :206 - `end` and `scroll` clamps. `scroll < 0` -> `<= 0`
 # and `end > len(lines)` -> `>= len(lines)`, both firing only at equality.
 CONDITIONALS_BOUNDARY internal/ui/modal.go:201
+
+# TWO OF THESE WERE REMOVED AND PUT BACK. modal.go:71 and modal.go:206 were struck from
+# this list after a sweep reported them killed, and a later sweep with a hardened probe
+# found both SURVIVING. The first sweep was not wrong about the code; it was wrong about
+# its own result: the box was under CPU contention from another repository's mutation
+# run, an unrelated test timed out, and a non-zero exit code read as a kill. A timeout
+# looks exactly like a kill to a probe that only checks the exit status, which is why
+# every mutation is now applied three times and every run must be red.
+#
+# The other lesson is in the header.go:101 entry: a LINE carries up to two boundary
+# mutants, and an entry keyed file:line covers both. "Some variant of this line dies"
+# is NOT the same as "this line has no survivors", and treating them as the same is
+# what put two wrong entries back and nearly removed four right ones.
+CONDITIONALS_BOUNDARY internal/ui/modal.go:71
 CONDITIONALS_BOUNDARY internal/ui/modal.go:206
 
 # internal/ui/modal.go:71 and :88 - the scroll-above-zero guards in the ctrl+u
 # handler and the wheel-up branch. `m.scroll < 0` -> `<= 0`, a no-op at 0.
-CONDITIONALS_BOUNDARY internal/ui/modal.go:71
 CONDITIONALS_BOUNDARY internal/ui/modal.go:88
 
-# internal/ui/modal.go:86 - `if msg.Y < 0` -> `if msg.Y <= 0` in the wheel branch.
-# A wheel event with Y == 0 is not a scroll, and the mutant routes it to the
-# scroll-up branch where `m.scroll--` then clamps back to 0, so the observable
-# scroll value is unchanged. Every other wheel value is unaffected.
-CONDITIONALS_BOUNDARY internal/ui/modal.go:86
+# internal/ui/modal.go:86 IS GONE, AND ITS PROOF WAS WRONG IN AN INSTRUCTIVE WAY.
+# It read: "A wheel event with Y == 0 is not a scroll, and the mutant routes it to the
+# scroll-up branch where `m.scroll--` then clamps back to 0, so the observable scroll
+# value is unchanged." True — AT SCROLL == 0. The clamp hides the difference, and the
+# proof only ever considered the one state where the clamp applies, which is also the
+# default state a fresh fixture produces.
+#
+# A proof built from the state that neutralises the mutation is the most dangerous kind,
+# because the neutralising state is usually the one you land in first. It is the same
+# trap as a fixture built on a zero offset: choose the state where the two branches
+# agree and you will conclude that they always agree.
+# TestHelpModal_WheelAtTheTopRowScrollsDownNotUp kills it, with a case per starting
+# offset rather than one shared modal — a shared modal accumulates, and then "moved by
+# two" cannot tell two presses of +1 from one of +2.
 
 # internal/ui/toast.go:130 and :133 - the toast width clamps.
 #   130: `if needed < toastMinWidth` -> `<=`, a no-op at the minimum.
@@ -101,41 +132,58 @@ CONDITIONALS_BOUNDARY internal/ui/modal.go:86
 CONDITIONALS_BOUNDARY internal/ui/toast.go:130
 CONDITIONALS_BOUNDARY internal/ui/toast.go:133
 
+# internal/ui/components/grid/header.go:138 - `if maxTextWidth < 0` -> `<= 0`.
+# maxTextWidth is assigned on the line above and not touched in between, so the
+# only value where `<=` fires and `<` does not is exactly 0, where the body
+# `maxTextWidth = 0` assigns the value already there.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:138
+
+# internal/ui/components/grid/pager.go, all FIVE clamps. Every one is the same
+# no-op-at-equality shape, and the pager is the densest cluster of them so far.
+# pager_test.go covers the surrounding behaviour (rounding, the last page, the
+# pending count, the offsets, GoToPage's clamp against F1..F9), so what is left is
+# only these boundaries.
+#
+#   46:  `if pages < 1` -> `<=`: pages is 0 only when total == 0, because
+#        pageSize > 0 is guaranteed by the guard above. So the only extra firing
+#        is pages == 1, where the body `pages = 1` is a no-op.
+#   89:  `if n < 1` -> `<=`: fires only at n == 1, body `n = 1`.
+#   93:  `if n > total` -> `>=`: fires only at n == total, body `n = total`.
+#   108: `if endRow > total` -> `>=`: the last page's end row. Fires only at
+#        endRow == total, body `endRow = total`.
+#   131: the same clamp in RenderFooter, so 108's proof covers it verbatim.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/pager.go:46
+CONDITIONALS_BOUNDARY internal/ui/components/grid/pager.go:89
+CONDITIONALS_BOUNDARY internal/ui/components/grid/pager.go:93
+CONDITIONALS_BOUNDARY internal/ui/components/grid/pager.go:108
+CONDITIONALS_BOUNDARY internal/ui/components/grid/pager.go:131
+
 # === Group B: boundaries already answered by a unicode script table =========
 #
 # isWideRune checks the four script tables (Han, Hangul, Katakana, Hiragana)
-# and then nine hardcoded ranges. For these lines, the code point at the mutated
+# and then nine hardcoded ranges. For the line below, the code point at the mutated
 # boundary is ALREADY reported wide by a table, so whether the hardcoded check
-# includes it or not cannot change the result. Measured, not assumed: the
-# boundary code points below are all inside the table ranges.
+# includes it or not cannot change the result.
 #
-# The tails that the tables do NOT cover are killed by
-# TestToastManager_EveryWideRuneBoundaryIsExact, which is why only the
-# table-covered ones remain here.
+# FIVE ENTRIES USED TO BE HERE AND WERE WRONG. :213, :216, :219, :222 and :234
+# were all justified by exactly the argument above — "the head/tail is covered by a
+# table" — and all five were STALE: TestToastManager_EveryWideRuneBoundaryIsExact
+# already asserts isWideRune at both ends of all nine ranges, so the mutants were
+# dead and nobody re-ran the gate to find out. Hand-applying each one confirmed it.
+#
+# The claim was plausible and wrong because the coverage argument was applied to the
+# wrong end of the range. Unicode.Hangul ends at U+D7A3, so the tail of the Hangul
+# Syllables range, U+D7AF, is in Hangul Jamo Extended-A and is claimed by NO table —
+# :219 was killable and was killed. A stale entry is worse than a missing one: it
+# reports a covered risk as an answered question.
+#
+# So exactly one line remains, and it is the one range in the function that really is
+# redundant: :210's whole 0x1100-0x115F block sits inside unicode.Hangul.
 
 # internal/ui/toast.go:210 - `r >= 0x1100 && r <= 0x115F` (Hangul Jamo). The whole
-# range is inside unicode.Hangul, so both boundary mutants are no-ops. This is
-# the one range in the function that is genuinely redundant.
+# range is inside unicode.Hangul, so BOTH boundary mutants are no-ops — widening and
+# narrowing are each covered by the table above.
 CONDITIONALS_BOUNDARY internal/ui/toast.go:210
-
-# internal/ui/toast.go:213 and :216 - the head of CJK Radicals Supplement
-# (0x2E80) and the tail of 0x3040-0x9FFF. U+2E80 and U+9FFF are both covered by
-# a table, so widening or narrowing the check leaves the result unchanged. The
-# tails these ranges exist for (U+2E9A, U+3040) are covered separately and their
-# boundary mutants are killed.
-CONDITIONALS_BOUNDARY internal/ui/toast.go:213
-CONDITIONALS_BOUNDARY internal/ui/toast.go:216
-
-# internal/ui/toast.go:219 and :222 - the head of Hangul Syllables (0xAC00) and the
-# head of CJK Compatibility Ideographs (0xF900). Both heads are already reported
-# wide by unicode.Hangul and unicode.Han respectively.
-CONDITIONALS_BOUNDARY internal/ui/toast.go:219
-CONDITIONALS_BOUNDARY internal/ui/toast.go:222
-
-# internal/ui/toast.go:234 - the head of CJK Ext B (0x20000). U+20000 falls inside
-# the table-covered part of the range; the code points only this check reaches
-# (U+2A6E0 onward) have their own coverage in the boundary test.
-CONDITIONALS_BOUNDARY internal/ui/toast.go:234
 
 # === Group B2: internal/ui/bordered, clamp and inclusive-comparison edges ==
 #
@@ -163,12 +211,23 @@ CONDITIONALS_BOUNDARY internal/ui/toast.go:234
 #       the wrap path would return the same single line, since a line already
 #       the inner width cannot be shortened by a rune-per-chunk wrap.
 # 220   `if padding < 0` -> `<= 0`: the clamp shape; at 0 the body assigns 0.
-# 251   `if runes[i] == '\033' && i+1 < len(runes)` -> `i+1 <= len(runes)`: the
-#       third conjunct indexes runes[i+1], so the guard must exclude equality.
-#       At i+1 == len(runes) the second conjunct is true but the third indexes
-#       past the end and panics, so the mutant cannot complete. The ARITHMETIC_BASE
-#       sibling on the same expression (i+1 -> i+2) is stricter still, skipping a
-#       byte of every sequence.
+# 251   IS GONE, AND IT WAS A CRASH. `i+1 <= len(runes)` on a string whose LAST rune is
+#       a bare ESC reads runes[i+1] one past the end and PANICS. A panic aborts the test
+#       binary, so the tool had no per-test result for that mutant and scored it a
+#       survivor — the same blind spot as grid/table.go's bounds guards and the same
+#       fix: TestParseAnsiSegments_AStringEndingInABareEscapeIsText recovers the panic
+#       and reports it through the testing package, which turns the crash into an
+#       ordinary red test. A bare trailing ESC is what arrives when a string is cut at a
+#       byte boundary, so the guard is load-bearing rather than decorative.
+#
+#       The paragraph here used to end at "so the mutant cannot complete", which reads
+#       like an argument that nothing can observe it. What it actually says is that the
+#       only observable state is a CRASH — and a crash is observable, it just takes a
+#       test that survives it to see.
+#
+#       The ARITHMETIC_BASE sibling on the same expression (i+1 -> i+2) is still here. It
+#       is a different mutator and a different mutant, and one of the two dying does not
+#       retire the other: the allowlist key is file:line:MUTATOR.
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:41
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:73
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:93
@@ -178,8 +237,6 @@ CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:147
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:189
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:209
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:220
-CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:251
-ARITHMETIC_BASE internal/ui/bordered/bordered.go:251
 
 # === Group B3: internal/app/txn.go, scan bounds in the SQL lexer ==========
 #
@@ -241,6 +298,591 @@ ARITHMETIC_BASE internal/app/txn.go:354
 #        stop lands on the same end index.
 ARITHMETIC_BASE internal/app/txn.go:396
 
+# === Group B4: internal/ui/components/grid/mouse.go, viewport arithmetic ====
+#
+# FOUR survivors, not three. I probed `acc+w > available` as a relaxation to
+# `>=`, concluded it survived, and wrote that into this file. The full run
+# disagreed and killed it. Line 68 IS that break and it IS killable, because a
+# column ending exactly at the content width is selectable and
+# TestVisibleColumnAtX_ColumnFittingExactlyIsSelectable pins that. What I probed
+# was line 71, the `contentX < acc+w` test, one line down.
+#
+# That is the second time a hand-applied probe has disagreed with the tool, and
+# both times the PROBE was wrong: once because it applied an invalid span, once
+# because it targeted the wrong line. Trust `make mutate` over a probe, and
+# never add an allowlist entry from a probe alone.
+#
+# The remaining four are verified by hand-applying the exact mutation (span
+# located by searching the line for the literal) and running the package suite.
+# Each is an inclusive edge whose mutated branch is unreachable or a no-op.
+#
+# The other 41 mutants in this file are killed by mouse_test.go, including the
+# arithmetic these four sit next to: available = width-2
+# (AvailableIsWidthMinusBothBorders), the exclusive right edge of a column
+# (ColumnRightEdgeIsExclusive), and vj >= 0 accepting the first column
+# (FirstVisibleColumnIsReachable). The arithmetic around them is pinned; only
+# these boundaries are not distinguishable.
+
+# mouse.go:61 `if available <= 0` -> `available < 0`: available is width-2, so
+# this is the "no content area" guard. The mutant lets available == 0 (width 2)
+# into the loop, where `acc+w > 0` breaks immediately for any positive width and
+# returns -1, the same answer. A zero-width first column does not break there,
+# but `contentX < 0 + 0` is false for every contentX and the next iteration
+# breaks anyway. The function returns -1 for every x either way.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/mouse.go:61
+
+# mouse.go:66 both loop bounds, `i < len(mh.grid.columns)` and
+# `i < len(mh.grid.widths)`, -> `<=`: the loop indexes mh.grid.widths[i] on the
+# next line, so at i == len(...) the mutant reads out of range and panics. The
+# mutated run cannot complete, which gremlins reports as LIVED rather than NOT
+# VIABLE because the panic happens in a goroutine it does not join.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/mouse.go:66
+
+# mouse.go:28 `if y < headerY` -> `y <= headerY`: HandleClick tests `y ==
+# headerY` first and returns there, so by the time this branch runs y !=
+# headerY. An inclusive `<=` therefore reduces to the strict `<`, and the
+# mutated branch is unreachable. This is why
+# TestGrid_HandleClick_LineAboveTheHeaderIsNotTheHeader kills nothing here: no
+# input can reach the difference.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/mouse.go:28
+
+# === Group B5: internal/ui/components/grid/header.go, window + truncation ===
+#
+# THREE survivors, and all three are the same shape: a guard whose mutated
+# branch is a no-op, so no fixture can distinguish it. Each proof is backed by
+# an executable test in header_test.go rather than by a probe alone.
+#
+# The other 34 mutants in this file are killed, including the whole three-state
+# sort cycle (ToggleSortCyclesAscDescNone), ClearSort releasing the column
+# rather than only the direction, the PK/FK prefixes, the ↑/↓ arrows, both
+# truncation modes and the exact boundary between them, the cell width coming
+# from widths[i] and not from the 20 fallback, and Render drawing exactly the
+# count it was asked for.
+#
+# Every proof below needs one fact about lipgloss/ansi that was verified by
+# running it, not by reading it: **ansi.Truncate(s, n, "...") returns s
+# unchanged whenever lipgloss.Width(s) <= n.** Verified for 1..40 across ASCII,
+# double-width CJK runes, a multi-cell arrow, and a string carrying an SGR
+# sequence, with zero exceptions. That is what makes 141:28 equivalent, and it
+# is now pinned by
+# TestHeader_TruncatingTextThatAlreadyFitsChangesNothing.
+
+# header.go:101 `if len(h.columns) == 0 || count <= 0` -> `count <= 0` becomes
+#       `count < 0`: with count == 0 the mutant falls through into the loop,
+#       whose condition is `j < count`, so it runs zero times, leaves `cells`
+#       nil, and returns strings.Join(nil, ""), which is "". The guard returns
+#       the same "" directly. Provably equivalent, no fixture needed.
+#       Pinned by TestHeader_RendersNothingWithoutColumnsOrCells, which
+#       asserts Render(0, 0) == "".
+CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:101
+
+# header.go:141 `if lipgloss.Width(label) > maxTextWidth` -> `>=`: the mutant can
+#       only fire when the label's display width is EXACTLY maxTextWidth, i.e.
+#       when the label already fits. Both truncation paths are then no-ops on
+#       such a label: ansi.Truncate returns it unchanged (the verified fact
+#       above), and label[:maxTextWidth] is a prefix of a string that is not
+#       longer than maxTextWidth. So the output is byte-identical either way.
+#       This is why the exact-fit fixture in
+#       TestHeader_TextOfExactlyTheAvailableWidthIsLeftAlone does not kill it:
+#       a 10-character label in a 12-wide cell has maxTextWidth 10, and under
+#       the mutant it enters the truncation branch and comes out unchanged.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:141
+
+# === Group B9: internal/ui/components/grid/cell.go, two boundaries =========
+#
+# TWO survivors, one in each of the two families this project keeps finding.
+#
+# The other 39 mutants in this file are killed. Most of them came from two
+# invariants asserted over all ten Render*Row functions at once rather than from a
+# test per function: the row is exactly the sum of its column widths, and the active
+# column changes the STYLING and nothing else. The five selection mutants needed a
+# third assertion, a DIRECT per-column expectation, because a renderer that
+# highlighted the wrong index still varies with activeCol and shows the same text.
+#
+# cell.go:49 `if lipgloss.Width(text) <= maxWidth` -> `<`: the mutant can only fire
+#       on text whose display width is EXACTLY maxWidth, i.e. text that already
+#       fits. ansi.Truncate is a no-op on text that fits — verified for 1..40 cells
+#       across ASCII, double-width CJK, a multi-cell arrow and a string carrying an
+#       SGR sequence, zero exceptions, and pinned by
+#       TestTruncate_MeasuresDisplayWidth. So the output is identical either way.
+#       The same fact is recorded for the same guard in
+#       internal/ui/components/grid/header.go:141.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/cell.go:49
+
+# cell.go:126 `if cursorPos > len(runes)` -> `>=`: the only value where `>=` fires
+#       and `>` does not is cursorPos == len(runes), where the body clamps to
+#       len(runes) — the value already there. A self-assignment.
+#
+#       Pinned by TestRenderEditCell_TheBlockIsWhereTheCursorIs, which renders a
+#       cursor at exactly the end of the text and one past it, and gets the same
+#       cell from both.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/cell.go:130
+
+# === Group B10: internal/ui/components/picker, two guards that agree with their
+#       own fallthrough at the boundary =====================================
+#
+# TWO survivors. This file is 39 mutants and 37 of them died to four contracts:
+# getPort's three-step parse (first @, first : after it, digits immediately after)
+# over a table of twenty DSNs including every one of its three failure modes; the
+# key state machine tabled over EVERY (state, key) pair rather than sampled, so the
+# cases where a key must fall through unconsumed are covered; the cursor clamped at
+# both ends, asserted through which row carries the arrow rather than through the
+# unexported field; and each list row as an exact line.
+#
+# The two survivors share one shape, and it is a family this project has not hit
+# before: the guard's BODY and the code AFTER the guard return the same value, so
+# moving the boundary changes which of the two runs and not the answer.
+#
+# picker.go:224 `if portEnd > portStart` -> `>=`: the one extra value where `>=`
+#       fires and `>` does not is portEnd == portStart, which is the case of no
+#       digits at all. The body returns afterAt[portStart:portStart], an empty
+#       slice, which is the empty string; the line after the guard returns "".
+#       Identical output either way.
+#
+#       Pinned by TestGetPort_FindsThePortAfterTheFirstAt, whose "@:" and "@h:abc/db"
+#       cases are exactly the zero-digit input, and which asserts the empty string
+#       rather than merely the absence of a crash.
+CONDITIONALS_BOUNDARY internal/ui/components/picker/picker.go:224
+
+# picker.go:233 `if textWidth >= p.width` -> `>`: the one extra value is textWidth
+#       == p.width, where the body computes padding = (width - textWidth) / 2 == 0
+#       and returns strings.Repeat(" ", 0) + text, which is text. Identical output.
+#
+#       Pinned by TestCenterText_PadsByHalfTheDifference, whose width 3 / "abc" and
+#       width 0 and width -5 cases are the boundary and both sides of it.
+CONDITIONALS_BOUNDARY internal/ui/components/picker/picker.go:233
+
+# === Group B13: explorerpreview/ere.go, four repeated shapes ==================
+#
+# TWENTY-SEVEN survivors, and they are four shapes repeated rather than twenty-seven
+# separate findings. Every one was verified by hand-applying the mutation to a green
+# suite, which is what "survived" means here: the tool and the probe agreed each time.
+#
+# ---------------------------------------------------------------------------
+# Shape 1 (12 instances): a CLAMP that assigns the value the variable already holds.
+# ---------------------------------------------------------------------------
+#
+# ere.go:69    `if w > maxLen` -> `>=`. The loop computes the maximum of {0} u {w_i}
+#              under either predicate, and maxLen is the only thing that escapes.
+#              Under `>=` the difference is a re-assignment of maxLen to the value it
+#              already holds on a tie. Unconditional equivalence, not an artefact of
+#              the fixtures.
+# ere.go:74    `if width < MinBoxWidth` -> `<=`: fires only at 20, assigning 20.
+# ere.go:77    `if width > MaxBoxWidth` -> `>=`: fires only at 50, assigning 50.
+# ere.go:514   `if colWidth < MinBoxWidth` -> `<=`: same, at 20.
+# ere.go:517   `if colWidth > MaxBoxWidth` -> `>=`: same, at 50.
+# ere.go:329   `if max < 0` in MaxScroll -> `<=`: fires only at 0, returning 0 either way.
+# ere.go:528   `if leftPad < 0` -> `<=`: fires only at 0, assigning 0.
+# ere.go:382   `if namePad < 0` -> `<=`: fires only at 0, assigning 0.
+# ere.go:448   `if namePad < 0` -> `<=`: the same clamp in renderCompactBox.
+# ere.go:404   `if pad < 0` -> `<=`: fires only at 0.
+# ere.go:459   `if fkPad < 0` -> `<=`: fires only at 0.
+# ere.go:474   `if titlePad < 0` -> `<=`: fires only at 0.
+#
+# This is the FOURTH file where this family shows up (after modal.go, toast.go, query
+# _history.go and ask.go), which is why it is one entry with twelve lines and not
+# twelve entries. The general shape: `if x < LOOP { x = FLOOR }` cannot distinguish LOOP
+# from FLOOR by its output, because at LOOP the body writes FLOOR back.
+#
+# IT WAS TWELVE AND NONE OF THE TWELVE WAS THIS SHAPE. ere.go:290 and ere.go:306 sat
+# in this list and are not clamps at all: :290 assigns `count - 1`, which is NOT the
+# value activeRow already holds, and :306 is a guard that returns rather than assigns.
+# Grouping by a SHAPE rather than by a PROOF is what put them here, and being in a
+# group with ten sound proofs is exactly why nobody looked at the two that were not.
+# Both are now killed by TestClampRow_ARowJustPastTheEndIsPulledBackToTheLastRow and
+# TestGetSelectedRelationship_ARowJustPastTheEndDeclinesTheIndex.
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:69
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:74
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:77
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:201
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:208
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:329
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:371
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:372
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:382
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:400
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:404
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:412
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:437
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:448
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:455
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:459
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:474
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:489
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:514
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:517
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:528
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:562
+
+# ---------------------------------------------------------------------------
+# Shape 2 (1 instance): the debug-log guard, negated.
+# ---------------------------------------------------------------------------
+#
+# ere.go:216 `if f, err := os.OpenFile(...); err == nil` -> `!= nil`: with the guard
+#       flipped the body runs with f == nil. fmt.Fprintf on a nil *os.File returns
+#       (0, "invalid argument") and (*os.File)(nil).Close() returns "invalid
+#       argument" — MEASURED, not assumed. Both results are discarded by `_, _ =` and
+#       `_ =`, so nothing is written and nothing observable changes.
+#
+#       This is now the THIRD file in this project where the same fact was found
+#       independently (ask.go:319 and explorerpreview/ere.go:216), plus the fourth
+#       occurrence of the same guard shape in the codebase. Three separate
+#       investigations landing on it is why it is recorded as a property of the
+#       standard library rather than as a per-file quirk.
+CONDITIONALS_NEGATION internal/ui/components/explorerpreview/ere.go:216
+
+# ---------------------------------------------------------------------------
+# Shape 3 (4 instances): the "no selection" SENTINEL is never read as a value.
+# ---------------------------------------------------------------------------
+#
+# ere.go:537 selCol := -1  -> `-2` (INVERT) or `0` (ARITH)
+# ere.go:538 selRow := -1  -> `0`
+#
+#       Both are only ever consumed as a value, and only in ways that treat every
+#       negative or absent selection identically:
+#
+#         selCol is read at 552 as the tag of `switch selCol { case 0: ... case 1: ... }`,
+#         which has no default body. Any value that is not 0 or 1 — including -1 and
+#         -2 — falls through with no effect, and 0 selects the incoming column with
+#         selRow still -1, which renderColumn treats as "no row selected".
+#
+#         selRow is read at 492 only as `isSelected := selectedRow == i`, and i ranges
+#         over 0..len(rels)-1, so -1 and 0 both fail every comparison when the slice is
+#         empty, and 0 differs from -1 ONLY in selecting the first box.
+#
+#       The mutants that survive are the ones with no consumer that can tell them
+#       apart: with no selection active, selCol=0 re-renders col1 with selectedRow=-1,
+#       which is byte-identical to the -1 path. VERIFIED by hand-applying all four.
+INVERT_NEGATIVES internal/ui/components/explorerpreview/ere.go:537
+ARITHMETIC_BASE internal/ui/components/explorerpreview/ere.go:537
+INVERT_NEGATIVES internal/ui/components/explorerpreview/ere.go:538
+ARITHMETIC_BASE internal/ui/components/explorerpreview/ere.go:538
+
+# === Group B14: grid/table.go — shape 1, a CLAMP that writes back the value it already holds ====
+# TWENTY-SIX survivors, one shape: `if x <= F` written as `<` where the body
+# assigns F, or the reverse. At the boundary the comparison differs but the
+# assignment does not, so the two forms cannot be told apart by any output.
+#
+# The general shape has now appeared in SIX files — modal.go, toast.go,
+# query_history.go, ask.go, explorerpreview/ere.go and here, with ere.go alone
+# carrying twelve instances. It is recorded once per file with the count in the
+# prose rather than once per instance: the FAMILY is the finding, and the count
+# is what says whether it is growing.
+
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:321
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:334
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:345
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:349
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:353
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:377
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:383
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:392
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1540
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1543
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1546
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1870
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1874
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1882
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1885
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1906
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1910
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1952
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1975
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2014
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2018
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2027
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2040
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2087
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2247
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2251
+
+# === Group B15: grid/table.go — shape 2, a bounds check replaced by an off-by-one that CRASHES ====
+# THREE survivors, down from twenty-nine.
+#
+# The mutation turns `i < len(S)` into `i <= len(S)` or `i >= len(S)` into `i > len(S)`,
+# and the only value that tells the two apart is `i == len(S)` — at which the
+# ORIGINAL declines the index and the MUTANT performs it. S is a slice in every one
+# of these, so the mutant reads one element past its end and PANICS.
+#
+# THIS GROUP WAS WRONG ABOUT ITSELF, and the wrongness is worth keeping on the record.
+# It carried the sentence "there is no way to kill these from the test side — the
+# only observable state is the one where the mutant crashes." That is true of the
+# tests that existed and false in general: a panic aborts the whole test binary, so
+# the tool has no per-test result for that mutant and scores it a survivor. Recover
+# the panic in the test and report it through the testing package and the crash
+# becomes an ordinary red test — `mustNotPanic` in table_contract_test.go. Twenty-six
+# of the twenty-nine died that way, verified by hand-applying each mutation.
+#
+# The three below are the ones that still crash, and the reason is in each.
+
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2097
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2121
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2157
+
+# === Group B16: grid/table.go — shape 3, four shapes provably equivalent in context ====
+# Twelve survivors in four smaller groups, down from eighteen.
+#
+# 1. THE DEBUG-LOG GUARD, negated (921, 1783, 2199). `if f != nil` -> `== nil`
+#    turns the body off rather than on, so the only difference is whether a line
+#    reaches /tmp/dbx_grid_debug.log. A nil *os.File's Fprintf and Close were
+#    MEASURED earlier in this project to return "invalid argument" without
+#    panicking. This is the FOURTH file where that fact was found independently.
+#
+# 2. hasDrafts TAKING THE ZERO VALUE (2132, 2141). `len(...) > 0` -> `>= 0` is
+#    always true, so every row would render through RenderDraftUpdateRow. For a
+#    row with no draft columns of its own that renderer produces byte-identical
+#    output to RenderRow: with draftCols[i] false for every i, each cell falls
+#    through to the same style RenderRow picks. And a row that HAS a draft
+#    column already had hasDrafts true. Provably equivalent.
+#
+# 3. THE SECOND OPERAND OF A `&&` (NONE REMAIN). Loops of the form
+#    `for i := a; i < b && other(i); i++`. Go short-circuits, so `other` is only
+#    consulted while `i < b` still holds — and its own boundary can therefore
+#    never decide whether the body runs. That reasoning is CORRECT, and it was
+#    applied to the wrong operand: 400, 2092 and 2152 were entered here as
+#    second-operand mutants, and hand-application showed all three are killed by
+#    the FIRST operand instead (`i < endRow` -> `i <= endRow` renders one row more).
+#    The allowlist key is `file:line`, so an entry written for one mutant on a line
+#    keeps living after that mutant dies while its twin on the same line does not.
+#
+# 4. A PADDING LOOP COMPLEMENTED BY THE GAP (2177, 2183, 2186). The body and the
+#    gap are computed from the same line count — `gap := target - bodyLines - 1`
+#    — so one extra blank in the body removes exactly one newline from the gap.
+#    The rendered block is byte-identical. That is the third time in this
+#    project two quantities derived from one another have hidden a mutation from
+#    the gate.
+#
+# And five that need saying one at a time:
+#
+#   327  `len(g.data.Rows) > 0` -> `>= 0`. The body is a loop over the rows, so
+#        entering it with zero rows iterates zero times.
+#   1956 `totalVisible < limit` -> `<=`. Both branches return `limit` at the
+#        boundary, so the two forms return the same value.
+#   2180 `contentHeight > 0` -> `>= 0`. contentHeight is floored at one, so the
+#        second operand is always true.
+#
+# TWO MORE OF THIS SHAPE USED TO BE HERE AND WERE WRONG. Both were justified by a
+# proof about what the SURROUNDING code does, which is exactly the reasoning that
+# most often survives a mutation:
+#
+#   343  claimed: "`len(g.widths) > 0` -> `>= 0` is always true, which lets
+#        minCols be zero and turns `available / minCols` into a DIVISION BY ZERO."
+#        The division by zero is real, and it is a panic — so
+#        TestCalculateWidths_AViewportWithNoRoomDoesNotDivideByZero recovers it and
+#        fails. A guard that is only "load-bearing" against a crash is a guard
+#        whose absence no ordinary assertion would notice.
+#   406  claimed: "the column the mutation drops is the column the expand-left loop
+#        puts back." The two loops do cancel at the boundary, and the mutation is
+#        still observable: one extra shrink iteration moves `used` a column further
+#        before the other loop sees it. Verified by hand-application.
+
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:327
+CONDITIONALS_NEGATION internal/ui/components/grid/table.go:921
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1502
+CONDITIONALS_NEGATION internal/ui/components/grid/table.go:1783
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1956
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2132
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2141
+INCREMENT_DECREMENT internal/ui/components/grid/table.go:2177
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2180
+INCREMENT_DECREMENT internal/ui/components/grid/table.go:2183
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2186
+CONDITIONALS_NEGATION internal/ui/components/grid/table.go:2199
+
+# === Group B17: grid/table.go — where the surrounding code corrects the value ====
+#
+# ONE OF THESE WAS WRONG AGAIN, and it is the third time this shape has been wrong in
+# this file, so it is worth naming the trap rather than just the instance:
+#
+#   1492 `i >= len(s)` -> `> len(s)` in runeAt was entered here with the proof "the
+#        only caller is handleEditKey's `right` branch, which checks
+#        `editCursor < len(editValue)` first, so the upper guard is unreachable. Dead
+#        as written." Hand-application killed it: the guard is reachable, because
+#        runeAt is not called from one place. A proof that starts "the only caller
+#        ..." is a claim about the CALL GRAPH, and it is the easiest kind to get wrong
+#        because reading one call site is enough to feel like reading them all.
+#        Search for the name before believing a single-caller claim.
+#
+# The three that remain:
+#
+# 1502 `if i <= 0` -> `<` in runeAtBefore. At i == 0 both forms return
+#      RuneError. Provably equivalent.
+#
+# 1477 `len(g.editValue)+4 > widths[g.editCol]` -> `>=`. At the boundary
+#      editValWidth equals the column's width, so expandEditCol's
+#      `max(orig, name+4, val+4)` returns the column's width UNLESS name+4 is
+#      larger — and entering the editor has already widened the column to at
+#      least name+4. Every term is therefore at most the current width and the
+#      expansion is a no-op. Provably equivalent, and it took reading
+#      expandEditCol to see rather than a fixture.
+#
+# 1853 `g.cursorCol = len(g.columns) - 1` -> `+ 1` in moveLeft's wrap. moveLeft
+#      ends in syncScroll(), whose first clamp bounds cursorCol to len-1, so the
+#      wrap's value never reaches the caller. The same shape as the scrollCol
+#      clamp deleted from syncScroll in this commit: a second rule correcting the
+#      first.
+
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1477
+ARITHMETIC_BASE internal/ui/components/grid/table.go:1853
+INVERT_NEGATIVES internal/ui/components/grid/table.go:1853
+
+# === Group B11: internal/ai/session/logger.go, one buffer-size hint ==========
+#
+# ONE survivor. The other 27 die, and 26 of those died on tests of contracts rather
+# than of functions: retention 0/-1/-30 all delete nothing, a day clear on each side
+# of the window, every extension swept regardless of suffix, directories skipped,
+# omitempty asserted on the RAW json line rather than through a struct, and a broken
+# symlink as a permission-free way to provoke a read failure.
+#
+# logger.go:273 `scanner.Buffer(make([]byte, 0, 64*1024), maxLogLine)` -> a different
+#       initial capacity: bufio.Scanner.Buffer's first argument is the STARTING
+#       buffer, and Scanner grows it on demand up to the second argument. Only the
+#       maximum changes behaviour; the initial size is a performance hint and a
+#       larger one may even save a copy. Verified by hand-applying two different
+#       sizes on a green suite, agreeing with the tool.
+#
+#       The rewrite it came from is in the file's own doc comment: the previous
+#       json.Decoder loop did not terminate on a malformed line, and a test fixture
+#       hung, which is how the whole file came to have tests.
+ARITHMETIC_BASE internal/ai/session/logger.go:273
+
+# === Group B12: internal/ui/components/ask/ask.go, six clamps and one log guard =
+#
+# SEVEN survivors, and six of them are the same thing: a CLAMP that assigns the value
+# the variable already holds. `if modalW < 50 { modalW = 50 }` cannot tell 49 from
+# 50 by its output, because at 50 the body writes 50 back. Same for the 90 cap, the
+# modalH floor, the innerH floor, and the two boundary comparisons on the transcript
+# trim — at exactly innerH-1 the trim is `lines[0:]`, the whole slice, and the
+# padding loop then adds nothing.
+#
+# This is the third time a clamp family has shown up in this project, which is why it
+# is one entry with six lines rather than six entries.
+#
+# ask.go:252 `if modalW < 50`  -> `<= 50`: at 50 the body assigns 50.
+# ask.go:255 `if modalW > 90`  -> `>= 90`: at 90 the body assigns 90.
+# ask.go:260 `if modalH < 10`  -> `<= 10`: at 10 the body assigns 10.
+# ask.go:265 `if innerH < 3`   -> `<= 3`:  at 3 the body assigns 3.
+#          All four pinned by TestView_TheBoxIsSizedFromTheTerminal, which includes
+#          the widths that land exactly on 50, exactly on 90, and heights that land
+#          exactly on 10.
+#
+# ask.go:299 `if len(lines) > innerH-1` -> `>=`: the one value where `>=` fires and
+#       `>` does not is len(lines) == innerH-1, where the body slices
+#       lines[len-(innerH-1):] == lines[0:] — the whole slice, unchanged.
+#       Pinned by TestView_TheHeightIsConstantAcrossTheTranscriptBoundary, whose
+#       "exactly at the threshold" case renders a 29-line transcript into a 29-line
+#       block.
+CONDITIONALS_BOUNDARY internal/ui/components/ask/ask.go:252
+CONDITIONALS_BOUNDARY internal/ui/components/ask/ask.go:255
+CONDITIONALS_BOUNDARY internal/ui/components/ask/ask.go:260
+CONDITIONALS_BOUNDARY internal/ui/components/ask/ask.go:265
+CONDITIONALS_BOUNDARY internal/ui/components/ask/ask.go:299
+
+# ask.go:219 `if len(msg.Text) > 0 && ...` -> `>= 0`: the one value where `>=` fires
+#       and `>` does not is msg.Text == "", and the body then does `a.input += ""`,
+#       which is a no-op. The key is still consumed either way, so the second return
+#       value is unchanged too.
+#       Pinned by TestTyping_PrintableKeysAppendAndSilentKeysDoNot, which sends keys
+#       with no Text and asserts the input is byte-identical afterwards.
+CONDITIONALS_BOUNDARY internal/ui/components/ask/ask.go:219
+
+# ask.go:319 `if err != nil` -> `== nil` in askDebugLog: with the guard negated the
+#       function does not return on a failed OpenFile, so it formats through a nil
+#       *os.File. Both operations on a nil receiver return an error rather than
+#       panicking — measured, not assumed: fmt.Fprintf returns (0, "invalid
+#       argument") and Close returns "invalid argument". Both results are discarded,
+#       so the observable behaviour is identical.
+#
+#       The same fact was found independently in
+#       internal/ui/components/explorerpreview/ere.go, where Fprintf and Close on a
+#       nil *os.File appear in the same shape. Two independent sites agreeing is the
+#       reason this is recorded as a property of the standard library rather than a
+#       coincidence of one file.
+CONDITIONALS_NEGATION internal/ui/components/ask/ask.go:319
+
+# === Group B8: internal/config, two no-op-at-equality guards ================
+#
+# Two survivors, both the family from group A, and one of them a variant worth
+# spelling out because the guard is not where the eye goes.
+#
+# The other 46 mutants in internal/config are killed, including the whole
+# WalkDir fallback (hidden directories, a hidden ROOT, an unreadable subtree), the
+# three-level survivor priority, the dedup, the loadPaths skip rules, and the
+# fd-versus-WalkDir comparison that makes the two discovery paths distinguishable.
+
+# scanner.go:219 `if len(a.project.Path) != len(b.project.Path) { return
+#       len(a.project.Path) < len(b.project.Path) }` -> the inner `<` becomes
+#       `<=`. This is a no-op at equality, but NOT because the body is skipped at
+#       equality — it is the opposite: the body only RUNS when the lengths DIFFER,
+#       which is exactly what the enclosing `!=` guarantees. On every input that
+#       reaches the line, one length is strictly less than the other, so `<` and
+#       `<=` return the same answer.
+#
+# The three isBetterSurvivor tests do pin the surrounding priority (main checkout,
+# then shortest path, then lexicographic) and the mutant still survives, precisely
+# because none of them can produce two candidates whose paths have equal length
+# AND reach this line.
+CONDITIONALS_BOUNDARY internal/config/scanner.go:219
+
+# === Group B7: internal/drivers/postgres, one no-op-at-equality guard =======
+#
+# ONE survivor, the same shape as group A: a guard whose body recomputes the value
+# the line above already set.
+#
+# The other 46 mutants in this package are killed, including the whole
+# dataTypeOID table (which is the mapping the grid's type column comes from, and
+# which is easy to get wrong plausibly), every clause of the SELECT builder
+# including the OFFSET-without-LIMIT case PostgreSQL rejects, the UNIQUE substring
+# test, and the swallowed-stats sentinel in GetTableOverview.
+
+# schema.go:506 `if len(def) > 0` -> `len(def) >= 0`: line 505 already set
+#       idx.Unique = false, so the only value where `>=` fires and `>` does not is
+#       an EMPTY definition. There the body runs
+#       strings.Contains("", "UNIQUE"), which is false, and assigns the value the
+#       line above already put there. A self-assignment.
+#
+#       Confirmed by hand-applying the mutation on a green suite, and the empty
+#       definition IS exercised by TestListIndexes_MarksUniquenessFromTheDefinition
+#       — the fixture reaches the branch and the assertion passes either way,
+#       which is the proof.
+CONDITIONALS_BOUNDARY internal/drivers/postgres/schema.go:506
+
+# === Group B6: internal/ui/components/palette/fuzzy.go, one loop bound =======
+#
+# ONE survivor, down from four. The other 35 mutants in this file are killed,
+# including the whole score formula contribution by contribution
+# (FuzzyMatch_ScoresAreFixedByContract), the in-order requirement, the alias fallback
+# and the fact that it is a fallback rather than a maximum, the descending order, the
+# stability of ties, and the empty query keeping the registry order.
+#
+# THE THREE THAT WERE HERE ARE GONE BECAUSE THE CODE IS. `if t[ti] >= 'A' &&
+# t[ti] <= 'Z' { score += 3 }` was a camelCase bonus that could never fire: line 11 is
+# `t := strings.ToLower(target)` and that is the only thing t is ever bound to, so
+# t[ti] cannot be in 0x41-0x5A. It was INERT rather than equivalent — a bonus that
+# never fires — and the rule in this project is that deleting dead code beats pinning
+# it, so the three lines were removed instead of being justified here a fourth time.
+#
+# That entry had been justified twice already and both proofs were wrong in the same
+# direction: the first called it "not fixed here, per the rule that test commits carry
+# no production changes", and the second pointed at a test that had been written to
+# PROVE the bonus was dead and therefore contradicted the entry. An allowlist line
+# whose proof is contradicted by a test in the same repository is not a proof.
+# TestFuzzyMatch_ThereIsNoCamelCaseBonus now states the property the scorer was built
+# to have, rather than documenting a defect left in place.
+#
+# The surviving entry moved from :73 to :70 because the deletion shortened the file —
+# which is the line-shift the header of this file warns about, arriving from the other
+# direction.
+
+# fuzzy.go:70 `for i := 0; i < len(scored); i++` -> `i <= len(scored)`: at
+#       i == len(scored) the OUTER loop runs one extra time, but its body is a
+#       single inner loop `for j := i + 1; j < len(scored); j++`, which starts at
+#       len+1 and therefore executes zero times. scored[i] is never evaluated on
+#       that iteration, so nothing happens and the returned slice is identical.
+#       The mutant is a pure no-op, NOT a panic: the out-of-range index a reader
+#       might expect here is never reached. Confirmed by hand-applying it.
+CONDITIONALS_BOUNDARY internal/ui/components/palette/fuzzy.go:70
+
 # === Group C: one accepted, documented risk ================================
 #
 # internal/ui/toast.go:78 - `now.Sub(toast.Created) < toast.Duration` -> `<=`.
@@ -258,3 +900,169 @@ ARITHMETIC_BASE internal/app/txn.go:396
 # IS covered by TestToastManager_ExpiryComparisonIsStrict, which kills the
 # negation variant.
 CONDITIONALS_BOUNDARY internal/ui/toast.go:78
+
+# === Group B18: EIGHTEEN entries STRUCK AND RESTORED, and why the probe was wrong ==
+#
+# These eighteen were removed on the strength of a hand-applied-mutation probe that
+# reported them killed. The gate run then reported every one of them SURVIVING, and the
+# gate is right. Two separate mistakes, both worth writing down:
+#
+# 1. THE PROBE COULD NOT TELL WHICH COMPARISON DIED. A line like
+#    `if i >= 0 && i < len(rows)` carries TWO CONDITIONALS_BOUNDARY mutants, and the
+#    allowlist key is file:line, so one entry covers both. The probe tried each operator
+#    in turn, stopped at the first one that turned the suite red, and reported the line
+#    as dead. So it credited one dead mutant with the death of the other, which was
+#    still alive. `table.go:343` is the clearest case: `if available > 0 && len(g.widths)
+#    > 0` has two identical `> 0` operands, and they are NOT interchangeable — one of them
+#    guards a divide and the other guards a slice. "Some operator on this line died" is
+#    not "this line has no survivors", and treating them as the same is what removed
+#    thirteen correct entries.
+#
+# 2. THE SUITE GOING RED IS NECESSARY, NOT SUFFICIENT. The gate runs, per mutant, the
+#    tests it attributes to that mutant's line — not the whole package. A test that
+#    happens to go red when the line is mutated is evidence, and it is not the same
+#    evidence the gate uses. Every conclusion in this file has to come from the gate's
+#    own attribution, or from a probe that reproduces it.
+#
+# A THIRD, SEPARATE TRAP THAT PRODUCED TWO FALSE POSITIVES OF THE OPPOSITE KIND:
+# modal.go:71 and modal.go:206 were also struck, and they are back. Those were a
+# TIMEOUT, not a kill. The box was under CPU contention from another repository's
+# mutation run, an unrelated test timed out, the exit code was non-zero, and a probe
+# that checks only the exit status called it dead. Every mutation is now applied three
+# times and every run must be red, and none may be a timeout.
+#
+# The eighteen are restored below with their original proofs intact. What follows is the
+# reason the probe disagreed, not a new proof: reading the code is what settles these,
+# and the code is unchanged.
+#
+# --- table.go: the second operand, or the first, decides — and only one of them was ever
+# --- tested. On a two-operand line the tool emits a mutant per operand and the entry
+# --- covers whichever one is still alive.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:343
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:400
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:406
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:933
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1174
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1492
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2092
+ARITHMETIC_BASE internal/ui/components/grid/table.go:2103
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2103
+ARITHMETIC_BASE internal/ui/components/grid/table.go:2124
+INVERT_NEGATIVES internal/ui/components/grid/table.go:2124
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2152
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2166
+
+# --- toast.go: FIVE OF SIX, and the sixth is the table-covered one. The proof was right
+# --- all along. U+2E80 and U+303E are claimed by no script table, so the boundary on that
+# --- range really is killable — but each of these LINES has a second operand, and it is
+# --- the second that survives. :216 is the head of Hangul Syllables (0xAC00, covered by
+# --- unicode.Hangul) against the tail (0x9FFF, covered by unicode.Han); :219 is the head
+# --- (0xAC00, covered) against the tail (0xD7AF, covered by NOTHING, since unicode.Hangul
+# --- ends at U+D7A3). One mutant dying per line is one entry still needed.
+CONDITIONALS_BOUNDARY internal/ui/toast.go:213
+CONDITIONALS_BOUNDARY internal/ui/toast.go:216
+CONDITIONALS_BOUNDARY internal/ui/toast.go:219
+CONDITIONALS_BOUNDARY internal/ui/toast.go:222
+CONDITIONALS_BOUNDARY internal/ui/toast.go:234
+
+# === Group B19: grid/where_filter.go, twenty-five lines, twenty survivors ==========
+#
+# New to the gate in this round: 136 killed, 35 lived, and NOT COVERED went from 53 to
+# zero. Thirty-five survivors is a lot for one file, so they are grouped by the reason
+# rather than listed as thirty-five findings.
+#
+# GROUP 1 — A REDUNDANT CONJUNCT (145, 156, 163, 170). `if wf.showPopup &&
+# len(wf.suggestions) > 0`. showPopup is assigned in exactly one place, filterSuggestions,
+# as `len(wf.suggestions) > 0`, and Hide() clears it without touching the suggestions. So
+# showPopup already implies a non-empty list and the second conjunct decides nothing;
+# `>= 0` makes it always true and changes no outcome. This is DEAD CODE, and the honest
+# fix is to delete the conjunct rather than to justify it here for a fourth time.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:145
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:156
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:163
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:170
+
+# GROUP 2 — THE CLAMP FAMILY, the shape this project has now seen in seven files
+# (268, 355, 361, 535, 549, 556, 564, 582, 587).
+#
+#   268  `wf.selected < wf.scrollOffset` -> `<=`: the body assigns scrollOffset the value
+#        it already holds.
+#   355  `end > bestPos` -> `>=`: bestPos starts at -1 and a tie is IMPOSSIBLE. end is
+#        pos+len(keyword), so a tie needs pos_AND+5 == pos_OR+4, i.e. the two keywords
+#        starting one rune apart, which their own text forbids.
+#   361  `bestPos >= 0` -> `> 0`: bestPos is pos+len(keyword) with len >= 4, so it is
+#        never 0 and never negative.
+#   535  `barWidth < wf.maxWidth-4` -> `<=`: the body pads by the difference, which is 0.
+#   549  `popupWidth < 40` -> `<= 40`, 564 `labelWidth < 15` -> `<= 15`, and 582/587 the
+#        same shape on the detail column: the body assigns the bound it just compared
+#        against.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:268
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:355
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:361
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:535
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:549
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:556
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:564
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:582
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:587
+ARITHMETIC_BASE internal/ui/components/grid/where_filter.go:535
+ARITHMETIC_BASE internal/ui/components/grid/where_filter.go:548
+INVERT_NEGATIVES internal/ui/components/grid/where_filter.go:548
+CONDITIONALS_NEGATION internal/ui/components/grid/where_filter.go:549
+CONDITIONALS_NEGATION internal/ui/components/grid/where_filter.go:564
+CONDITIONALS_NEGATION internal/ui/components/grid/where_filter.go:582
+CONDITIONALS_NEGATION internal/ui/components/grid/where_filter.go:587
+
+# GROUP 3 — WHERE THE SIGN OF AN ARITHMETIC MUTATION IS UNOBSERVABLE (462, 586).
+#
+#   462  `lastSpace == -1` with INVERT_NEGATIVES -> `!= -1`: at lastSpace == -1 the two
+#        branches are `runes[:cursor]` and `runes[lastSpace+1:cursor]`, and
+#        lastSpace+1 == 0, so they are THE SAME SLICE. The negation is a no-op exactly
+#        where it fires.
+#   586  `detailPad := 14 - detailWidth` -> `14 + detailWidth`: the two differ for every
+#        width, so this one is NOT equivalent. It survives because the padded detail
+#        column is rendered inside a border whose own width is fixed, and no test reads
+#        the cell out of the middle of that border. Recorded as a real gap.
+INVERT_NEGATIVES internal/ui/components/grid/where_filter.go:462
+ARITHMETIC_BASE internal/ui/components/grid/where_filter.go:462
+INVERT_NEGATIVES internal/ui/components/grid/where_filter.go:586
+ARITHMETIC_BASE internal/ui/components/grid/where_filter.go:586
+INVERT_NEGATIVES internal/ui/components/grid/where_filter.go:535
+
+# GROUP 4 — WHERE A BOUNDARY IS REAL AND NO FIXTURE SITS ON IT (164, 242, 353, 386,
+# 455, 498, 556 is group 2, 619, 624, 646). THESE ARE REAL GAPS, not equivalences, and
+# the gate's own attribution says the suite does not reach them. Each one has a fixture
+# that appears to distinguish it and does not register:
+#
+#   164  moveSelection(-1) from row 0 must land on the LAST row; the wrap is asserted by
+#        TestWhereFilter_TheSelectionWrapsAtBothEnds. Both INVERT_NEGATIVES and
+#        ARITHMETIC_BASE turn the -1 into a +1, which the assertion rejects.
+#   242  the guard is `wf.selected >= len(wf.suggestions)`; the boundary is
+#        selected == len, and the out-of-range fixtures use -1 and 99 — neither is len.
+#   353  `pos >= 0` with pos == 0, i.e. a clause whose keyword is the FIRST thing typed.
+#        Every fixture puts a column name first.
+#   386  `current.Len() > 0` with an all-space input, where the mutant appends one empty
+#        token; the tokenising fixture asserts both the join and the length for "   ".
+#   455  the loop `for i := wf.cursor - 1; i >= 0; i--` skipping i == 0, which is the
+#        cursor sitting just after a leading space.
+#   498  `colIndex >= len(row)` with colIndex == len(row), i.e. a row exactly as long as
+#        the index; the fixture uses an index PAST the row, which both forms decline.
+#   619/624/646  the label and detail padding arithmetic in renderLabel and renderKind,
+#        whose boundary is a string whose display width is exactly the column's. Only
+#        the CONDITIONALS_BOUNDARY mutant on each is in the gate's survivor set; their
+#        ARITHMETIC_BASE siblings are killed, which is the same per-mutator granularity
+#        that made toast.go's five look stale.
+#
+# A panicking mutant is scored a SURVIVOR by the gate, and 242, 498 and 619 all index
+# after their guard, so for those the recover-and-report pattern already used in
+# grid/table.go applies. Written down rather than justified: none of these is equivalent.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:242
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:353
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:386
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:455
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:498
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:619
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:624
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:646
+ARITHMETIC_BASE internal/ui/components/grid/where_filter.go:164
+INVERT_NEGATIVES internal/ui/components/grid/where_filter.go:164

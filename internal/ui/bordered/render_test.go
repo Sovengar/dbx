@@ -1022,3 +1022,76 @@ func TestRenderWithTitle_ContentExactlyOnInnerWidthDoesNotWrap(t *testing.T) {
 		t.Errorf("wrapping broke the box width: %v", widthsOf(got))
 	}
 }
+
+// Scenario: Contenido vacío produce UNA línea de contenido, no cero.
+//
+// The box has a top border, the content and a bottom border, so an empty body
+// still has to be tall enough for the two borders to be on separate lines. A
+// three-line box for empty content and a two-line one look completely different on
+// screen, so the count is pinned rather than just "non-empty".
+func TestRender_EmptyContentStillProducesOneContentLine(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		{"empty", "", []string{"┌──────────┐", "│          │", "└──────────┘"}},
+		{"a single space", "   ", []string{"┌──────────┐", "│          │", "└──────────┘"}},
+		{"one line", "x", []string{"┌──────────┐", "│x         │", "└──────────┘"}},
+		// A newline is two empty lines, not one, and both are kept.
+		{"a bare newline", "\n", []string{"┌──────────┐", "│          │", "│          │", "└──────────┘"}},
+		{"two newlines", "\n\n", []string{"┌──────────┐", "│          │", "│          │", "│          │", "└──────────┘"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lines := strings.Split(RenderWithTitle(lipgloss.NormalBorder(), nil, "", tc.content, 12, 0), "\n")
+			plain := make([]string, len(lines))
+			for i, l := range lines {
+				plain[i] = ansi.Strip(l)
+			}
+			if len(plain) != len(tc.want) {
+				t.Fatalf("got %d lines %q, want %d %q", len(plain), plain, len(tc.want), tc.want)
+			}
+			for i := range plain {
+				if plain[i] != tc.want[i] {
+					t.Errorf("line %d = %q, want %q", i, plain[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+// DEAD BRANCH, pinned because it is invisible: the "ensure at least one line"
+// fallback in buildContentLines never runs.
+//
+// The loop above it iterates `strings.Split(content, "\n")`, and strings.Split
+// ALWAYS returns at least one element — for "" it returns [""], for "\n" it
+// returns ["", ""]. So `len(result) == 0` is unreachable, and the fallback that
+// was presumably written to guard against it is inert.
+//
+// This is pinned as executable proof for the .mutation-notcovered entry, and the
+// test above is the behaviour that makes it inert: an empty body already comes
+// out as exactly one blank content line. Removing the fallback would change
+// nothing.
+func TestRender_TheEnsureAtLeastOneLineFallbackIsUnreachable(t *testing.T) {
+	// The premise, stated directly: Split never yields zero elements.
+	for _, in := range []string{"", " ", "\n", "a", "\n\n\n"} {
+		if n := len(strings.Split(in, "\n")); n == 0 {
+			t.Errorf("strings.Split(%q, \"\\n\") returned zero elements, which is what the fallback assumes can happen", in)
+		}
+	}
+	// And the consequence: every one of those produces a content line.
+	for _, in := range []string{"", " ", "\n", "a", "\n\n\n"} {
+		lines := strings.Split(RenderWithTitle(lipgloss.NormalBorder(), nil, "", in, 12, 0), "\n")
+		plain := make([]string, len(lines))
+		for i, l := range lines {
+			plain[i] = ansi.Strip(l)
+		}
+		// Two borders, so at least three lines means at least one content line.
+		if len(plain) < 3 {
+			t.Errorf("content %q produced %d lines %q, want at least 3", in, len(plain), plain)
+		}
+		if n := len(strings.Split(in, "\n")); len(plain) != n+2 {
+			t.Errorf("content %q split into %d lines produced %d box lines, want %d", in, n, len(plain), n+2)
+		}
+	}
+}

@@ -91,6 +91,19 @@ type Querier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
+// Conn is everything the CLI and the schema exporter need from a database
+// connection: run a query, read a single value, and close.
+//
+// Depending on this rather than on *pgx.Conn is what lets `dbx context`,
+// `dbx pipe` and the schema loader be tested without a live PostgreSQL. The
+// interface is deliberately the three methods actually called, so a fake is
+// three methods wide and not a reimplementation of pgx.
+type Conn interface {
+	Querier
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Close(ctx context.Context) error
+}
+
 func ExecuteQuery(ctx context.Context, q Querier, sql string) (*QueryResult, error) {
 	rows, err := q.Query(ctx, sql)
 	if err != nil {

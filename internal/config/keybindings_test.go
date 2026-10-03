@@ -224,3 +224,74 @@ func TestRegistry_DisplayedKeyResolvesToSameAction(t *testing.T) {
 		}
 	}
 }
+
+// Scenario: Un action id que no existe en el registro se añade tal cual.
+//
+// indexOf returns -1 for an unknown id, and that is the branch that makes a custom
+// binding for an id the registry has never heard of work at all: the action is
+// appended instead of overriding anything. Without the -1 there would be no way to
+// bind an action that a newer config file knows about and this build does not,
+// which is the whole point of the Custom map being open-ended.
+func TestKeybindRegistry_ACustomIdThatIsNotInTheDefaultsIsAppended(t *testing.T) {
+	r := NewKeybindRegistry(KeybindingsConfig{
+		Custom: map[string]string{
+			"action_from_the_future": "ctrl+alt+f12",
+		},
+	})
+
+	found := false
+	for _, a := range r.All() {
+		if a.ID == "action_from_the_future" {
+			found = true
+			if len(a.Keys) != 1 || a.Keys[0] != "ctrl+alt+f12" {
+				t.Errorf("the appended action has keys %v, want [ctrl+alt+f12]", a.Keys)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the custom action was not added to the registry at all")
+	}
+
+	// And it is usable: looking it up finds the key that was configured, not a
+	// default. That is the observable consequence of the append.
+	if got := r.KeysFor("action_from_the_future"); len(got) != 1 || got[0] != "ctrl+alt+f12" {
+		t.Errorf("KeysFor = %v, want the configured key", got)
+	}
+
+	// The defaults are untouched alongside it.
+	if got := r.KeysFor("refresh_schema"); len(got) == 0 {
+		t.Error("adding a custom action removed the default bindings")
+	}
+}
+
+// Scenario: Un action id que SÍ existe reemplaza todas sus teclas, no añade una.
+//
+// The override branch is the one that does NOT append, so a key configured for a
+// known action has to REPLACE its defaults. Appending instead would leave the
+// action with two key sets and make it fire twice.
+func TestKeybindRegistry_ACustomIdInTheDefaultsReplacesTheKeys(t *testing.T) {
+	before := NewKeybindRegistry(KeybindingsConfig{}).KeysFor("refresh_schema")
+	if len(before) == 0 {
+		t.Fatal("fixture is wrong: refresh_schema has no default keys")
+	}
+
+	r := NewKeybindRegistry(KeybindingsConfig{
+		Custom: map[string]string{"refresh_schema": "F9"},
+	})
+
+	got := r.KeysFor("refresh_schema")
+	if len(got) != 1 || got[0] != "F9" {
+		t.Errorf("KeysFor = %v, want exactly [F9]: an override replaces, it does not append", got)
+	}
+
+	// And the action appears once, not twice.
+	count := 0
+	for _, a := range r.All() {
+		if a.ID == "refresh_schema" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("refresh_schema appears %d times in the registry, want once", count)
+	}
+}

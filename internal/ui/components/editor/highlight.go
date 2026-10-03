@@ -94,12 +94,24 @@ func tokenizeSQL(input string) []sqlToken {
 		if ch == '/' && i+1 < n && input[i+1] == '*' {
 			start := i
 			i += 2
+			closed := false
+			// The bound is n-1 because the test below reads input[i+1], so i has
+			// to be a real index for both halves of the pair.
 			for i < n-1 {
 				if input[i] == '*' && input[i+1] == '/' {
 					i += 2
+					closed = true
 					break
 				}
 				i++
+			}
+			// An unterminated comment runs to the end of the input, and i has to be
+			// SAY so. Falling out of the loop leaves it at n-1, which drops the
+			// last byte of the comment and re-emits it as an unstyled token: the
+			// tokens still concatenate back to the input, so nothing complains,
+			// but the tail of the comment is not highlighted as one.
+			if !closed {
+				i = n
 			}
 			tokens = append(tokens, sqlToken{tokenComment, input[start:i], start, i})
 			continue

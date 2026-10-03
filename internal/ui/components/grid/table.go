@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -382,11 +383,12 @@ func (g *Grid) syncScroll() {
 	if g.scrollCol < 0 {
 		g.scrollCol = 0
 	}
-	if g.scrollCol >= len(g.widths) {
-		g.scrollCol = len(g.widths) - 1
-	}
-
 	// If the cursor is left of the window, bring the window to the cursor.
+	//
+	// This is also what makes a separate clamp on scrollCol unnecessary:
+	// the clamp above has already bounded cursorCol to len-1, so any
+	// scrollCol at or past len is greater than the cursor and gets
+	// rewritten here to the same value that clamp would have written.
 	if g.cursorCol < g.scrollCol {
 		g.scrollCol = g.cursorCol
 	}
@@ -807,12 +809,16 @@ func (g *Grid) jumpToBestMatch() {
 	}
 }
 
+// jumpToColumn puts the cursor on a column and leaves the window showing it with as
+// much context to its left as fits.
+//
+// The window is not positioned here. syncScroll's expand-left loop refills from the
+// left for as long as the cursor still fits, so the final window is a function of the
+// cursor and the column widths alone — a scroll start set before that call is either
+// already the value syncScroll computes or is corrected to it. Computing it twice
+// meant two places to keep in step and a pair of clamp mutants guarding a value
+// nothing reads.
 func (g *Grid) jumpToColumn(colIndex int) {
-	scrollStart := colIndex - 2
-	if scrollStart < 0 {
-		scrollStart = 0
-	}
-	g.scrollCol = scrollStart
 	g.cursorCol = colIndex
 	g.syncScroll()
 }
@@ -1432,12 +1438,12 @@ func (g *Grid) handleEditKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	case "left":
 		if g.editCursor > 0 {
-			g.editCursor--
+			g.editCursor -= utf8.RuneLen(runeAtBefore(g.editValue, g.editCursor))
 		}
 		return nil, true
 	case "right":
 		if g.editCursor < len(g.editValue) {
-			g.editCursor++
+			g.editCursor += utf8.RuneLen(runeAt(g.editValue, g.editCursor))
 		}
 		return nil, true
 	case "home", "ctrl+a":
@@ -1448,13 +1454,20 @@ func (g *Grid) handleEditKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	case "backspace":
 		if g.editCursor > 0 {
-			g.editValue = g.editValue[:g.editCursor-1] + g.editValue[g.editCursor:]
-			g.editCursor--
+			// One CHARACTER, not one byte. A byte-wise delete on an
+			// accented letter or an emoji leaves invalid UTF-8 in the
+			// value and the cursor inside the broken sequence — and
+			// that value is the cell content the user is about to
+			// commit.
+			w := utf8.RuneLen(runeAtBefore(g.editValue, g.editCursor))
+			g.editValue = g.editValue[:g.editCursor-w] + g.editValue[g.editCursor:]
+			g.editCursor -= w
 		}
 		return nil, true
 	case "delete":
 		if g.editCursor < len(g.editValue) {
-			g.editValue = g.editValue[:g.editCursor] + g.editValue[g.editCursor+1:]
+			w := utf8.RuneLen(runeAt(g.editValue, g.editCursor))
+			g.editValue = g.editValue[:g.editCursor] + g.editValue[g.editCursor+w:]
 		}
 		return nil, true
 	default:
@@ -1469,6 +1482,31 @@ func (g *Grid) handleEditKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	}
 
 	return nil, false
+}
+
+// runeAt returns the rune starting at byte offset i, or RuneError when the offset
+// is at or past the end. The cell editor indexes by BYTE (which is what makes
+// insertion a two-slice concatenation), so every step that moves the cursor has
+// to step by a whole rune or it lands inside a multi-byte character.
+func runeAt(s string, i int) rune {
+	if i < 0 || i >= len(s) {
+		return utf8.RuneError
+	}
+	r, _ := utf8.DecodeRuneInString(s[i:])
+	return r
+}
+
+// runeAtBefore returns the rune ENDING at byte offset i, i.e. the character
+// backspace would remove.
+func runeAtBefore(s string, i int) rune {
+	if i <= 0 {
+		return utf8.RuneError
+	}
+	r, size := utf8.DecodeLastRuneInString(s[:i])
+	if size == 0 {
+		return utf8.RuneError
+	}
+	return r
 }
 
 func isControlKey(msg tea.KeyPressMsg) bool {
@@ -1486,7 +1524,16 @@ func (g *Grid) expandEditCol() {
 	if g.editCol < 0 || g.editCol >= len(g.widths) {
 		return
 	}
-	g.editOrigWidth = g.widths[g.editCol]
+	// Save the ORIGINAL width once per edit, not once per keystroke.
+	//
+	// expandEditCol runs on every typed character, so overwriting
+	// editOrigWidth here made the "original" track the previous expansion:
+	// restoring after typing 20 characters into a 16-cell column left it at
+	// 24 for good. Only the first expansion of an edit has a width worth
+	// remembering; restoreEditWidth clears it when the edit ends.
+	if g.editOrigWidth == 0 {
+		g.editOrigWidth = g.widths[g.editCol]
+	}
 	colNameWidth := len(g.columns[g.editCol]) + 4
 	editValWidth := len(g.editValue) + 4
 	expandedWidth := g.editOrigWidth
@@ -2089,7 +2136,7 @@ func (g *Grid) renderRecordsView() string {
 				rendered = g.cells.RenderRow(visValues, visWidths, activeCol)
 			}
 		} else if isMultiSelected {
-			rendered = g.cells.RenderSelectedRow(visValues, visWidths, -1)
+			rendered = g.cells.RenderSelectedRow(visValues, visWidths)
 		} else {
 			hasDrafts := len(g.pendingUpdates) > 0
 			if hasDrafts {

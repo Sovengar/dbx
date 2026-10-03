@@ -32,11 +32,28 @@ jobs:
     timeout-minutes: 5
     outputs:
       calibrated: ${{ steps.check.outputs.calibrated }}
+      scope: ${{ steps.scope.outputs.scope }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
+
+      # The scope regexp is an EXCLUSION list, so a file is gated only when
+      # nothing in it matches. That is easy to get wrong in either direction:
+      # a file that should be gated but is not is a silent hole, and one that
+      # should be out but is in turns the gate into a check that rarely fails.
+      # This also fails on any new Go file nobody classified, which is how the
+      # scope rots.
+      - name: Check mutation scope
+        id: scope
+        run: |
+          if python3 scripts/check_mutate_scope.py; then
+            echo "scope=ok" >> "$GITHUB_OUTPUT"
+          else
+            echo "scope=bad" >> "$GITHUB_OUTPUT"
+            echo "::error title=Mutation scope mismatch::MUTATE_EXCLUDE and scripts/check_mutate_scope.py disagree. Add any new Go file to EXPECTED and flip it deliberately."
+          fi
 
       - name: Check calibration
         id: check
@@ -52,7 +69,9 @@ jobs:
   Mutation:
     name: Mutation
     needs: Calibration
-    if: needs.Calibration.outputs.calibrated == 'true'
+    # A scope mismatch is a real failure, not a warning: either direction of the
+    # error defeats the purpose of the gate, so nothing downstream can be trusted.
+    if: needs.Calibration.outputs.calibrated == 'true' && needs.Calibration.outputs.scope == 'ok'
     runs-on: ubuntu-24.04
     # Hard cap. gremlins is never signalled: on SIGTERM it panics
     # ("send on closed channel") and writes no report.json, so a timeout can only
@@ -150,6 +169,25 @@ jobs:
               sed 's/^/- /' /tmp/new_lived.txt
               echo ""
               echo "Add a test that kills them, or - only if provably equivalent - add the line to $ALLOWLIST with a comment saying why."
+            } >> "$S"
+            exit 1
+          fi
+
+      - name: Check unevaluated mutants against .mutation-notcovered
+        # A NOT COVERED or TIMED OUT mutant is one the tool chose not to run, so
+        # it is invisible to the check above: it is not a survivor, and it is not
+        # a kill either. Failing only on survivors therefore lets an untested
+        # branch sit in the gate forever with nothing but a number in the summary.
+        # A TIMED OUT mutant is worse, because it is absent from the counted
+        # totals and so makes the efficacy figure go UP.
+        run: |
+          set -uo pipefail
+          if ! python3 scripts/check_mutate_nc.py; then
+            {
+              echo ""
+              echo "Uncovered mutants - these were never run, so nothing is known about them."
+              echo "Add a test that covers the branch, or - only if it is unreachable or dead -"
+              echo "add the entry to .mutation-notcovered with the reason."
             } >> "$S"
             exit 1
           fi

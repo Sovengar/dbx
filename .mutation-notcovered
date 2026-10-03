@@ -1,0 +1,154 @@
+# .mutation-notcovered - the mutants this project has accounted for as UNEVALUATED.
+#
+# A mutant lands here when the tool did not run it. Two statuses mean that, and
+# they are the same hazard:
+#
+#   NOT COVERED - gremlins believes the surrounding code was never executed.
+#   TIMED OUT   - the mutant makes the code loop forever and the harness gave up.
+#
+# `make mutate` used to print both counts and pass anyway, so an untested branch
+# could sit here indefinitely and the only symptom would be a number in a CI
+# comment. Worse, a TIMED OUT mutant is absent from the counted totals entirely, so
+# it makes the gate's efficacy figure go UP.
+#
+# scripts/check_mutate_nc.py fails on any entry here that is NOT in report.json with
+# one of those two statuses, and on any such mutant that is not here. A new entry
+# is a red build. So is an entry that stops appearing, which is how a suppressed
+# gap is stopped from quietly becoming a real one.
+#
+# Do not regenerate this file wholesale: that would silently re-hide real gaps,
+# which is the whole thing this file exists to prevent.
+#
+# Format:  <file>:<line>:<mutator>
+#
+# ---------------------------------------------------------------------------
+
+# === Group 1: switch-true `case` lines, mis-attributed by the coverage tool ====
+#
+# Every entry below sits on a `case` line of a `switch { ... }`. Go's cover tool
+# attributes a case expression's coverage to the case BODY, so the case line has no
+# block of its own and gremlins' per-line lookup finds nothing to attribute to.
+#
+# This is not a suspicion. `go tool cover` reported exactly 3 uncovered blocks in
+# internal/app/txn.go out of the whole file; gremlins reported 25 uncovered MUTANTS,
+# and all 25 of them are on case lines. Hand-applying txn.go:384:26
+# (`i+1 < len(sql)` -> `i+2 < len(sql)` in the line-comment case) and running the
+# suite KILLS it — gremlins never ran it at all.
+#
+# The same probe showed two that genuinely SURVIVED before the new tests:
+#   348:45, the E-string case bound, and 390:26, the block-comment opener bound.
+# Both need a two-character input (`E'` and `/*`) that the fixtures did not have,
+# and TestMaskNonCode_ATwoByteEStringPrefixIsStillAnEString and
+# TestMaskNonCode_ATwoByteCommentOpenerIsStillAComment now supply one. The rest are
+# killed by the existing suite and are listed here only because the tool declines
+# to run them.
+internal/app/txn.go:333:CONDITIONALS_NEGATION
+internal/app/txn.go:348:ARITHMETIC_BASE
+internal/app/txn.go:348:CONDITIONALS_BOUNDARY
+internal/app/txn.go:348:CONDITIONALS_NEGATION
+internal/app/txn.go:349:ARITHMETIC_BASE
+internal/app/txn.go:349:CONDITIONALS_NEGATION
+internal/app/txn.go:349:INVERT_NEGATIVES
+internal/app/txn.go:369:CONDITIONALS_NEGATION
+internal/app/txn.go:384:ARITHMETIC_BASE
+internal/app/txn.go:384:CONDITIONALS_BOUNDARY
+internal/app/txn.go:384:CONDITIONALS_NEGATION
+internal/app/txn.go:390:ARITHMETIC_BASE
+internal/app/txn.go:390:CONDITIONALS_BOUNDARY
+internal/app/txn.go:390:CONDITIONALS_NEGATION
+internal/app/txn.go:402:CONDITIONALS_NEGATION
+
+# === Group 2: the only remaining genuine gap ================================
+#
+# internal/config/config.go — the three error paths of the viper load:
+#   :23  the `if err != nil` after reading the config file. Needs a config that
+#        exists and cannot be read, which means a permissions case; chmod on a
+#        directory does not stop the owner reading it, and skipping the test when
+#        running as root would make it pass for the wrong reason.
+#   :105 the same load error on the project config.
+#   :124 a viper Unmarshal failure: a config file that parses but has a value of
+#        the wrong type for a known key. This one IS reachable and is the next
+#        thing to close; the fixture has to go through the file because the
+#        unmarshalling happens inside viper.
+internal/config/config.go:105:CONDITIONALS_NEGATION
+internal/config/config.go:124:CONDITIONALS_NEGATION
+
+# === Group 3: one dead branch ===============================================
+#
+# internal/ui/bordered/bordered.go:232 — the "ensure at least one line" fallback
+# in buildContentLines. The loop above it iterates strings.Split(content, "\n"),
+# and strings.Split ALWAYS returns at least one element: for "" it returns [""],
+# for "\n" it returns ["", ""]. So `len(result) == 0` is unreachable and the
+# fallback is inert.
+#
+# Verified rather than assumed, and pinned as executable proof by
+# TestRender_TheEnsureAtLeastOneLineFallbackIsUnreachable, which states both the
+# premise (Split never yields zero elements) and the consequence (every input
+# produces exactly split-lines + 2 box lines). Removing the fallback would change
+# nothing observable.
+internal/ui/bordered/bordered.go:232:ARITHMETIC_BASE
+
+# internal/config/scanner.go:49 — the `Name < Name` tiebreak at the end of the sort
+# in Scan. Unreachable, and the reason is the dedup that runs on the line before:
+# two survivors can only share a Path if they came from the same directory, and
+# FoundProject.Name is derived from the single .dbx.toml in that directory. Same
+# directory, same file, same first-sorted connection name. So by the time the sort
+# runs, equal Path always implies equal Name, and `Name < Name` is false for every
+# input the program can produce.
+#
+# Pinned as an invariant rather than as a fixture by
+# TestScan_DuplicatePathsCollapseSoTheNameTiebreakIsUnreachable, which asserts the
+# converse directly: within one scan, no two survivors share a Path with different
+# Names. A change that broke the invariant would fail there rather than silently
+# start depending on a comparator that can never return true.
+internal/config/scanner.go:49:CONDITIONALS_BOUNDARY
+internal/config/scanner.go:49:CONDITIONALS_NEGATION
+internal/config/config.go:23:CONDITIONALS_NEGATION
+
+# === Group 4: TIMED OUT, unkillable by any test =============================
+#
+# FOUR files, every entry the same shape: a loop guard that is also the only thing
+# advancing the index, whose negation leaves the loop never terminating.
+#
+#   internal/ui/components/editor/highlight.go   86 line-comment scan, 142 and 150/152
+#                                                the word scan, 186 punctuation, 193 unknown
+#   internal/app/txn.go                          386 the line-comment scan, 407 the blank loop
+#   internal/config/keybindings_groups.go        39  the group scan
+#   internal/ui/bordered/bordered.go             251 and 268 the ANSI-escape scan
+#
+# A test cannot kill an infinite loop. The only outcomes are a hang — which the
+# harness abandons, leaving the mutant absent from report.json and therefore
+# indistinguishable from a kill — or a failure, which requires the test to DETECT the
+# hang first. tokenizeWithin and highlightWithin in highlight_test.go do that, with
+# a budget chosen to fire before the harness's own, and they catch most of
+# highlight.go's. They cannot catch all of them: each hanging test burns its full
+# budget and the harness's budget for the whole package is smaller than the sum.
+#
+# The count is NOT deterministic — highlight.go reported 9 timeouts on one run and 7
+# on the next with an identical suite, because it depends on how much of the budget
+# each test consumes and on CPU contention with the other workers. So these are
+# CEILINGS, not an exact set. scripts/check_mutate_nc.py fails if a file exceeds its
+# ceiling, fails if a file with timeouts has no ceiling at all, and prints the set
+# for information.
+#
+# Ceilings are set at roughly TWICE the highest count observed, because the count
+# moves with machine load: bordered.go produced 3 on one run and 4 on the next, and
+# a ceiling sitting on the observed maximum is a ceiling that will flake. At twice
+# the maximum an ordinary slow run passes, and a genuine increase — a new hang, or
+# a change that makes more of the suite reach a mutated path — is still caught.
+#
+# The right long-term answer is a property/fuzz test with a per-input timeout
+# enforced by the testing framework itself, which this project does not use yet.
+TIMEOUT_MAX internal/ui/components/editor/highlight.go 16 the tokenizer loop guards are the only thing advancing the index
+# grid/table.go times out on THREE mutants, all of them loop index advances:
+# the F-key page lookup (for i := 1; i <= 9; i++) and the blank padding at the
+# bottom of the row block (for i := visibleCount; i < contentHeight; i++), plus
+# the negation of that loop's bound. Removing the advance makes either loop spin
+# forever with no test able to bound it, which is the same shape as every other
+# entry in this file and the reason the coefficient is 20 rather than the
+# default 3. The ceiling is set at twice the observed count so that a genuine
+# regression above three is a red build rather than a flake.
+TIMEOUT_MAX internal/ui/components/grid/table.go 6 the page-lookup and row-padding loops; their index advance is the only thing terminating them
+TIMEOUT_MAX internal/app/txn.go 10 the SQL lexer line-comment and blank loops
+TIMEOUT_MAX internal/config/keybindings_groups.go 6 the group scan in digitRange
+TIMEOUT_MAX internal/ui/bordered/bordered.go 8 the ANSI-escape scan

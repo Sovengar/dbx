@@ -6,16 +6,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/buble/dbx/internal/ui/components/explorer"
 )
 
 type SchemaLoader struct {
-	conn *pgx.Conn
+	conn Conn
 }
 
-func NewSchemaLoader(conn *pgx.Conn) *SchemaLoader {
+func NewSchemaLoader(conn Conn) *SchemaLoader {
 	return &SchemaLoader{conn: conn}
 }
 
