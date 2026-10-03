@@ -111,11 +111,20 @@ CONDITIONALS_BOUNDARY internal/ui/modal.go:206
 # handler and the wheel-up branch. `m.scroll < 0` -> `<= 0`, a no-op at 0.
 CONDITIONALS_BOUNDARY internal/ui/modal.go:88
 
-# internal/ui/modal.go:86 - `if msg.Y < 0` -> `if msg.Y <= 0` in the wheel branch.
-# A wheel event with Y == 0 is not a scroll, and the mutant routes it to the
-# scroll-up branch where `m.scroll--` then clamps back to 0, so the observable
-# scroll value is unchanged. Every other wheel value is unaffected.
-CONDITIONALS_BOUNDARY internal/ui/modal.go:86
+# internal/ui/modal.go:86 IS GONE, AND ITS PROOF WAS WRONG IN AN INSTRUCTIVE WAY.
+# It read: "A wheel event with Y == 0 is not a scroll, and the mutant routes it to the
+# scroll-up branch where `m.scroll--` then clamps back to 0, so the observable scroll
+# value is unchanged." True — AT SCROLL == 0. The clamp hides the difference, and the
+# proof only ever considered the one state where the clamp applies, which is also the
+# default state a fresh fixture produces.
+#
+# A proof built from the state that neutralises the mutation is the most dangerous kind,
+# because the neutralising state is usually the one you land in first. It is the same
+# trap as a fixture built on a zero offset: choose the state where the two branches
+# agree and you will conclude that they always agree.
+# TestHelpModal_WheelAtTheTopRowScrollsDownNotUp kills it, with a case per starting
+# offset rather than one shared modal — a shared modal accumulates, and then "moved by
+# two" cannot tell two presses of +1 from one of +2.
 
 # internal/ui/toast.go:130 and :133 - the toast width clamps.
 #   130: `if needed < toastMinWidth` -> `<=`, a no-op at the minimum.
@@ -202,12 +211,23 @@ CONDITIONALS_BOUNDARY internal/ui/toast.go:210
 #       the wrap path would return the same single line, since a line already
 #       the inner width cannot be shortened by a rune-per-chunk wrap.
 # 220   `if padding < 0` -> `<= 0`: the clamp shape; at 0 the body assigns 0.
-# 251   `if runes[i] == '\033' && i+1 < len(runes)` -> `i+1 <= len(runes)`: the
-#       third conjunct indexes runes[i+1], so the guard must exclude equality.
-#       At i+1 == len(runes) the second conjunct is true but the third indexes
-#       past the end and panics, so the mutant cannot complete. The ARITHMETIC_BASE
-#       sibling on the same expression (i+1 -> i+2) is stricter still, skipping a
-#       byte of every sequence.
+# 251   IS GONE, AND IT WAS A CRASH. `i+1 <= len(runes)` on a string whose LAST rune is
+#       a bare ESC reads runes[i+1] one past the end and PANICS. A panic aborts the test
+#       binary, so the tool had no per-test result for that mutant and scored it a
+#       survivor — the same blind spot as grid/table.go's bounds guards and the same
+#       fix: TestParseAnsiSegments_AStringEndingInABareEscapeIsText recovers the panic
+#       and reports it through the testing package, which turns the crash into an
+#       ordinary red test. A bare trailing ESC is what arrives when a string is cut at a
+#       byte boundary, so the guard is load-bearing rather than decorative.
+#
+#       The paragraph here used to end at "so the mutant cannot complete", which reads
+#       like an argument that nothing can observe it. What it actually says is that the
+#       only observable state is a CRASH — and a crash is observable, it just takes a
+#       test that survives it to see.
+#
+#       The ARITHMETIC_BASE sibling on the same expression (i+1 -> i+2) is still here. It
+#       is a different mutator and a different mutant, and one of the two dying does not
+#       retire the other: the allowlist key is file:line:MUTATOR.
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:41
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:73
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:93
@@ -217,7 +237,6 @@ CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:147
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:189
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:209
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:220
-CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:251
 ARITHMETIC_BASE internal/ui/bordered/bordered.go:251
 
 # === Group B3: internal/app/txn.go, scan bounds in the SQL lexer ==========
