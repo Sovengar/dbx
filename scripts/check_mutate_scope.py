@@ -58,7 +58,6 @@ EXPECTED = [
     ("internal/ui/components/palette/palette.go", False),
     ("internal/ui/components/grid/consts.go", False),
     ("internal/ui/components/grid/handled.go", False),
-    ("internal/ui/components/grid/where_filter.go", False),
     # newly admitted
     ("internal/ui/components/grid/mouse.go", True),
     ("internal/ui/components/grid/header.go", True),
@@ -78,6 +77,12 @@ EXPECTED = [
     ("internal/ui/components/grid/table.go", True),
     ("internal/ui/components/explorerpreview/ere.go", True),
     ("internal/ai/session/logger.go", True),
+    # Admitted despite scoring 79.5% on its own, which is BELOW the gate's
+    # overall efficacy. Excluding a file because its number is unflattering is
+    # the same move as hiding a real gap in the allowlist: it reports a
+    # coverage choice as a coverage fact. 53 NOT COVERED -> 0 is worth more than
+    # the three points of efficacy it costs.
+    ("internal/ui/components/grid/where_filter.go", True),
     ("internal/drivers/postgres/query.go", True),
     ("internal/drivers/postgres/schema.go", True),
     # test-support fakes are never gated: they exist to be exercised by

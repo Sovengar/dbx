@@ -506,7 +506,54 @@ Reglas del barrido (`/tmp/opencode/sweep_allowlist.py`):
 - La ficha por LINEA no distingue dos mutantes de la misma linea: al re-verificar hay
   que intentar AMBOS.
 
+### Estado: allowlist 172 -> 133
+
+- 34 **entradas obsoletas** borradas (los tests ya las mataban). Verificadas 3/3.
+- 3 borradas por **codigo muerto** eliminado (`fuzzy.go:31`, el bonus camelCase).
+- 4 matadas con tests nuevos: `table.go` (20 guardas), `ere.go:290`, `ere.go:306`,
+  `modal.go:86`, `bordered.go:251`.
+- 2 **restauradas** por falso positivo del barredor: `modal.go:71`, `modal.go:206`.
+
+### Lo que la aritmética del gate NO permite
+
+De nada sirve admitir mas ficheros para subir la cifra (ver arriba). Y de los 133 que
+quedan, la mayoria son **equivalentes por construccion** y ningun test los mata:
+
+- ~50 clamps `if x < N { x = N }` donde el cuerpo reescribe el valor que ya hay
+- caps cuyo umbral es su propia constante: `len(x) > Max` con `len(x) == Max` hace
+  `x[:Max]` (= todos) y `len - Max` (= 0) — **identico**. `ere.go:201/208` y
+  `query_history.go:76` son de esta forma, y mi primera lectura de ellos estaba mal
+- comparaciones con una guardia encima, o el segundo operando de un `&&` (cortocircuito)
+- `toast.go:210`: la runa del limite la cubre `unicode.Hangul`
+
+Techo real alrededor de **92-93%**, no 94.7%: la estimacion de "~80 matables" era
+optimista. Los 34 obsoletas mas los ~10 nuevos dan ~44, no 80.
+
+### Las tres trampas que costaron mas tiempo (y aparecen en este proyecto por 3a vez)
+
+1. **Un timeout parece un kill.** Con la CPU competida por otro repo, un test no
+   relacionado se paso de tiempo, el codigo de salida fue distinto de cero, y el probe
+   lo conto como muerte. `header.go:101` fue dado por muerto dos veces. Ahora cada
+   mutacion se aplica 3 veces y las 3 tienen que ser rojas, y ninguna puede ser timeout.
+
+2. **Una linea genera hasta DOS mutantes** y la clave es `fichero:linea`. "Alguna
+   variante de esta linea muere" NO es "esta linea no tiene supervivientes" — es lo que
+   casi borro 4 entradas correctas y lo que devolvio 2 incorrectas.
+
+3. **Una prueba construida desde el estado que NEUTRALIZA el mutante.** `modal.go:86`
+   estaba "justificado" porque en `scroll == 0` el clamp esconde la diferencia — y 0 es
+   justo el estado por defecto que produce un fixture nuevo. Es la misma trampa que un
+   fixture con offset cero.
+
+Y una cuarta, de agrupacion:
+
+4. **Agrupar por FORMA en vez de por PRUEBA.** `ere.go:290` y `:306` estaban bajo el
+   grupo de los clamps junto a diez pruebas sound; ninguno era clamp. Estar rodeado de
+   pruebas buenas es exactamente por que nadie miro las dos que no lo eran.
+
 ### Siguiente
+
+
 
 - [ ] Barrer las 152 `CONDITIONALS_BOUNDARY` a mano y borrar las que mueren
 - [ ] Los otros 20 (`ARITHMETIC_BASE`, `CONDITIONALS_NEGATION`, `INVERT_NEGATIVES`,

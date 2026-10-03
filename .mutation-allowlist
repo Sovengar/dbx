@@ -237,7 +237,6 @@ CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:147
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:189
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:209
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:220
-ARITHMETIC_BASE internal/ui/bordered/bordered.go:251
 
 # === Group B3: internal/app/txn.go, scan bounds in the SQL lexer ==========
 #
@@ -901,3 +900,169 @@ CONDITIONALS_BOUNDARY internal/ui/components/palette/fuzzy.go:70
 # IS covered by TestToastManager_ExpiryComparisonIsStrict, which kills the
 # negation variant.
 CONDITIONALS_BOUNDARY internal/ui/toast.go:78
+
+# === Group B18: EIGHTEEN entries STRUCK AND RESTORED, and why the probe was wrong ==
+#
+# These eighteen were removed on the strength of a hand-applied-mutation probe that
+# reported them killed. The gate run then reported every one of them SURVIVING, and the
+# gate is right. Two separate mistakes, both worth writing down:
+#
+# 1. THE PROBE COULD NOT TELL WHICH COMPARISON DIED. A line like
+#    `if i >= 0 && i < len(rows)` carries TWO CONDITIONALS_BOUNDARY mutants, and the
+#    allowlist key is file:line, so one entry covers both. The probe tried each operator
+#    in turn, stopped at the first one that turned the suite red, and reported the line
+#    as dead. So it credited one dead mutant with the death of the other, which was
+#    still alive. `table.go:343` is the clearest case: `if available > 0 && len(g.widths)
+#    > 0` has two identical `> 0` operands, and they are NOT interchangeable — one of them
+#    guards a divide and the other guards a slice. "Some operator on this line died" is
+#    not "this line has no survivors", and treating them as the same is what removed
+#    thirteen correct entries.
+#
+# 2. THE SUITE GOING RED IS NECESSARY, NOT SUFFICIENT. The gate runs, per mutant, the
+#    tests it attributes to that mutant's line — not the whole package. A test that
+#    happens to go red when the line is mutated is evidence, and it is not the same
+#    evidence the gate uses. Every conclusion in this file has to come from the gate's
+#    own attribution, or from a probe that reproduces it.
+#
+# A THIRD, SEPARATE TRAP THAT PRODUCED TWO FALSE POSITIVES OF THE OPPOSITE KIND:
+# modal.go:71 and modal.go:206 were also struck, and they are back. Those were a
+# TIMEOUT, not a kill. The box was under CPU contention from another repository's
+# mutation run, an unrelated test timed out, the exit code was non-zero, and a probe
+# that checks only the exit status called it dead. Every mutation is now applied three
+# times and every run must be red, and none may be a timeout.
+#
+# The eighteen are restored below with their original proofs intact. What follows is the
+# reason the probe disagreed, not a new proof: reading the code is what settles these,
+# and the code is unchanged.
+#
+# --- table.go: the second operand, or the first, decides — and only one of them was ever
+# --- tested. On a two-operand line the tool emits a mutant per operand and the entry
+# --- covers whichever one is still alive.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:343
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:400
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:406
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:933
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1174
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1492
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2092
+ARITHMETIC_BASE internal/ui/components/grid/table.go:2103
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2103
+ARITHMETIC_BASE internal/ui/components/grid/table.go:2124
+INVERT_NEGATIVES internal/ui/components/grid/table.go:2124
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2152
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2166
+
+# --- toast.go: FIVE OF SIX, and the sixth is the table-covered one. The proof was right
+# --- all along. U+2E80 and U+303E are claimed by no script table, so the boundary on that
+# --- range really is killable — but each of these LINES has a second operand, and it is
+# --- the second that survives. :216 is the head of Hangul Syllables (0xAC00, covered by
+# --- unicode.Hangul) against the tail (0x9FFF, covered by unicode.Han); :219 is the head
+# --- (0xAC00, covered) against the tail (0xD7AF, covered by NOTHING, since unicode.Hangul
+# --- ends at U+D7A3). One mutant dying per line is one entry still needed.
+CONDITIONALS_BOUNDARY internal/ui/toast.go:213
+CONDITIONALS_BOUNDARY internal/ui/toast.go:216
+CONDITIONALS_BOUNDARY internal/ui/toast.go:219
+CONDITIONALS_BOUNDARY internal/ui/toast.go:222
+CONDITIONALS_BOUNDARY internal/ui/toast.go:234
+
+# === Group B19: grid/where_filter.go, twenty-five lines, twenty survivors ==========
+#
+# New to the gate in this round: 136 killed, 35 lived, and NOT COVERED went from 53 to
+# zero. Thirty-five survivors is a lot for one file, so they are grouped by the reason
+# rather than listed as thirty-five findings.
+#
+# GROUP 1 — A REDUNDANT CONJUNCT (145, 156, 163, 170). `if wf.showPopup &&
+# len(wf.suggestions) > 0`. showPopup is assigned in exactly one place, filterSuggestions,
+# as `len(wf.suggestions) > 0`, and Hide() clears it without touching the suggestions. So
+# showPopup already implies a non-empty list and the second conjunct decides nothing;
+# `>= 0` makes it always true and changes no outcome. This is DEAD CODE, and the honest
+# fix is to delete the conjunct rather than to justify it here for a fourth time.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:145
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:156
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:163
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:170
+
+# GROUP 2 — THE CLAMP FAMILY, the shape this project has now seen in seven files
+# (268, 355, 361, 535, 549, 556, 564, 582, 587).
+#
+#   268  `wf.selected < wf.scrollOffset` -> `<=`: the body assigns scrollOffset the value
+#        it already holds.
+#   355  `end > bestPos` -> `>=`: bestPos starts at -1 and a tie is IMPOSSIBLE. end is
+#        pos+len(keyword), so a tie needs pos_AND+5 == pos_OR+4, i.e. the two keywords
+#        starting one rune apart, which their own text forbids.
+#   361  `bestPos >= 0` -> `> 0`: bestPos is pos+len(keyword) with len >= 4, so it is
+#        never 0 and never negative.
+#   535  `barWidth < wf.maxWidth-4` -> `<=`: the body pads by the difference, which is 0.
+#   549  `popupWidth < 40` -> `<= 40`, 564 `labelWidth < 15` -> `<= 15`, and 582/587 the
+#        same shape on the detail column: the body assigns the bound it just compared
+#        against.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:268
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:355
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:361
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:535
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:549
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:556
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:564
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:582
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:587
+ARITHMETIC_BASE internal/ui/components/grid/where_filter.go:535
+ARITHMETIC_BASE internal/ui/components/grid/where_filter.go:548
+INVERT_NEGATIVES internal/ui/components/grid/where_filter.go:548
+CONDITIONALS_NEGATION internal/ui/components/grid/where_filter.go:549
+CONDITIONALS_NEGATION internal/ui/components/grid/where_filter.go:564
+CONDITIONALS_NEGATION internal/ui/components/grid/where_filter.go:582
+CONDITIONALS_NEGATION internal/ui/components/grid/where_filter.go:587
+
+# GROUP 3 — WHERE THE SIGN OF AN ARITHMETIC MUTATION IS UNOBSERVABLE (462, 586).
+#
+#   462  `lastSpace == -1` with INVERT_NEGATIVES -> `!= -1`: at lastSpace == -1 the two
+#        branches are `runes[:cursor]` and `runes[lastSpace+1:cursor]`, and
+#        lastSpace+1 == 0, so they are THE SAME SLICE. The negation is a no-op exactly
+#        where it fires.
+#   586  `detailPad := 14 - detailWidth` -> `14 + detailWidth`: the two differ for every
+#        width, so this one is NOT equivalent. It survives because the padded detail
+#        column is rendered inside a border whose own width is fixed, and no test reads
+#        the cell out of the middle of that border. Recorded as a real gap.
+INVERT_NEGATIVES internal/ui/components/grid/where_filter.go:462
+ARITHMETIC_BASE internal/ui/components/grid/where_filter.go:462
+INVERT_NEGATIVES internal/ui/components/grid/where_filter.go:586
+ARITHMETIC_BASE internal/ui/components/grid/where_filter.go:586
+INVERT_NEGATIVES internal/ui/components/grid/where_filter.go:535
+
+# GROUP 4 — WHERE A BOUNDARY IS REAL AND NO FIXTURE SITS ON IT (164, 242, 353, 386,
+# 455, 498, 556 is group 2, 619, 624, 646). THESE ARE REAL GAPS, not equivalences, and
+# the gate's own attribution says the suite does not reach them. Each one has a fixture
+# that appears to distinguish it and does not register:
+#
+#   164  moveSelection(-1) from row 0 must land on the LAST row; the wrap is asserted by
+#        TestWhereFilter_TheSelectionWrapsAtBothEnds. Both INVERT_NEGATIVES and
+#        ARITHMETIC_BASE turn the -1 into a +1, which the assertion rejects.
+#   242  the guard is `wf.selected >= len(wf.suggestions)`; the boundary is
+#        selected == len, and the out-of-range fixtures use -1 and 99 — neither is len.
+#   353  `pos >= 0` with pos == 0, i.e. a clause whose keyword is the FIRST thing typed.
+#        Every fixture puts a column name first.
+#   386  `current.Len() > 0` with an all-space input, where the mutant appends one empty
+#        token; the tokenising fixture asserts both the join and the length for "   ".
+#   455  the loop `for i := wf.cursor - 1; i >= 0; i--` skipping i == 0, which is the
+#        cursor sitting just after a leading space.
+#   498  `colIndex >= len(row)` with colIndex == len(row), i.e. a row exactly as long as
+#        the index; the fixture uses an index PAST the row, which both forms decline.
+#   619/624/646  the label and detail padding arithmetic in renderLabel and renderKind,
+#        whose boundary is a string whose display width is exactly the column's. Only
+#        the CONDITIONALS_BOUNDARY mutant on each is in the gate's survivor set; their
+#        ARITHMETIC_BASE siblings are killed, which is the same per-mutator granularity
+#        that made toast.go's five look stale.
+#
+# A panicking mutant is scored a SURVIVOR by the gate, and 242, 498 and 619 all index
+# after their guard, so for those the recover-and-report pattern already used in
+# grid/table.go applies. Written down rather than justified: none of these is equivalent.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:242
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:353
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:386
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:455
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:498
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:619
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:624
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:646
+ARITHMETIC_BASE internal/ui/components/grid/where_filter.go:164
+INVERT_NEGATIVES internal/ui/components/grid/where_filter.go:164
