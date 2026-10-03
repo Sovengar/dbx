@@ -110,13 +110,15 @@ func TestFuzzyMatch_RequiresTheQueryInOrder(t *testing.T) {
 // which is 10 + 8 + 10, and would be 31 with the bonus alive. Any future change
 // that makes t case-preserving will change these scores, and this test is what
 // will notice.
-func TestFuzzyMatch_CamelCaseBonusIsUnreachable(t *testing.T) {
+func TestFuzzyMatch_ThereIsNoCamelCaseBonus(t *testing.T) {
 	for _, tc := range []struct {
 		query, target string
 		want          int
 	}{
-		// 'c' at position 0 of a camelCase name. With the bonus alive it would
-		// be 31.
+		// 'c' at position 0 of a camelCase name. With a live camelCase
+		// bonus this would be 31; the bonus was DEAD CODE — the target is
+		// lower-cased before the scorer ever sees it — so the three lines
+		// that granted it were deleted rather than allowlisted.
 		{"c", "camelCase", 28},
 		// 'c' in the middle of one, with no word start.
 		{"c", "PascalCase", 10},
@@ -136,15 +138,17 @@ func TestFuzzyMatch_CamelCaseBonusIsUnreachable(t *testing.T) {
 		})
 	}
 
-	// The explicit statement of the defect: an all-caps name is no better than a
-	// lower-case one, which is the opposite of what the +3 was for.
+	// The explicit statement of the fact: an all-caps name scores exactly the same
+	// as a lower-case one, because scoring is case-blind. This is now a property
+	// the scorer was BUILT to have rather than a defect left in place — there is
+	// no capital-letter branch left to be wrong about.
 	upper, okU := fuzzyMatch("x", "XMLHttp")
 	lower, okL := fuzzyMatch("x", "xmlhttp")
 	if !okU || !okL {
 		t.Fatalf("the probe queries did not match: %v %v", okU, okL)
 	}
 	if upper != lower {
-		t.Errorf("an upper-case target scores %d and a lower-case one %d; the camelCase bonus IS live, so the allowlist proof for lines 31-32 is wrong", upper, lower)
+		t.Errorf("an upper-case target scores %d and a lower-case one %d: scoring is case-blind by construction now, so these must agree", upper, lower)
 	}
 }
 
