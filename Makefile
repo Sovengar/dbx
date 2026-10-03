@@ -55,7 +55,7 @@ MUTATE_BASE ?= main
 # testcontainers, which is correct but slow. See the note above `mutate`.
 MUTATE_DSN ?=
 
-MUTATE_EXCLUDE ?= internal/testsupport/|internal/ui/keydisplay/|internal/ui/components/explorerpreview/(preview|tabbar|handled)\.go|internal/ui/components/(gridpreview|gridsidebarpreview|querybrowser)/|internal/ui/components/grid/(consts|handled|where_filter)\.go|internal/ui/components/editor/(autocomplete|handled|sql)\.go|internal/ui/components/(explorer/(explorer|handled|tree)|palette/palette)\.go|internal/app/(app|messages)\.go|internal/ai/nl2sql/(compatible|provider|prompt)\.go|cmd/|main\.go|internal/theme/
+MUTATE_EXCLUDE ?= internal/testsupport/|internal/ui/keydisplay/|internal/ui/components/explorerpreview/(preview|tabbar|handled)\.go|internal/ui/components/(gridpreview|gridsidebarpreview|querybrowser)/|internal/ui/components/grid/(consts|handled)\.go|internal/ui/components/editor/(autocomplete|handled|sql)\.go|internal/ui/components/(explorer/(explorer|handled|tree)|palette/palette)\.go|internal/app/(app|messages)\.go|internal/ai/nl2sql/(compatible|provider|prompt)\.go|cmd/|main\.go|internal/theme/
 
 build:
 	go build $(LDFLAGS) -o .local/bin/dbx .
