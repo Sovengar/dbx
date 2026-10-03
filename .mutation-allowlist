@@ -92,6 +92,21 @@ CONDITIONALS_BOUNDARY internal/ui/modal.go:198
 # and `end > len(lines)` -> `>= len(lines)`, both firing only at equality.
 CONDITIONALS_BOUNDARY internal/ui/modal.go:201
 
+# TWO OF THESE WERE REMOVED AND PUT BACK. modal.go:71 and modal.go:206 were struck from
+# this list after a sweep reported them killed, and a later sweep with a hardened probe
+# found both SURVIVING. The first sweep was not wrong about the code; it was wrong about
+# its own result: the box was under CPU contention from another repository's mutation
+# run, an unrelated test timed out, and a non-zero exit code read as a kill. A timeout
+# looks exactly like a kill to a probe that only checks the exit status, which is why
+# every mutation is now applied three times and every run must be red.
+#
+# The other lesson is in the header.go:101 entry: a LINE carries up to two boundary
+# mutants, and an entry keyed file:line covers both. "Some variant of this line dies"
+# is NOT the same as "this line has no survivors", and treating them as the same is
+# what put two wrong entries back and nearly removed four right ones.
+CONDITIONALS_BOUNDARY internal/ui/modal.go:71
+CONDITIONALS_BOUNDARY internal/ui/modal.go:206
+
 # internal/ui/modal.go:71 and :88 - the scroll-above-zero guards in the ctrl+u
 # handler and the wheel-up branch. `m.scroll < 0` -> `<= 0`, a no-op at 0.
 CONDITIONALS_BOUNDARY internal/ui/modal.go:88
