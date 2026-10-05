@@ -384,9 +384,20 @@ func TestRenderCompactBox_SaysExactlyWhatItCarries(t *testing.T) {
 			// The selector is added BEFORE the truncation, so a long name loses
 			// its tail INSIDE the selector rather than dropping the closing
 			// " ◄" and leaving a bracket open.
+			//
+			// The expected length CHANGED. It used to be named(13), which is 16 columns
+			// against an inner width of 18 — because the truncation sliced by BYTES and the
+			// "► " selector is four bytes but two columns, so the slice came up two
+			// columns short and the box padded the rest with blanks. Slicing by display
+			// columns fills the budget exactly: 15 name characters plus the ellipsis, with
+			// the closing " ◄" gone either way.
+			//
+			// The ASCII cases around it are unchanged, which is the tell: a byte slice and
+			// a column slice only disagree once a multi-byte character is involved, and the
+			// selector glyph is one.
 			name:    "a selected over-wide name is truncated inside the selector",
 			boxName: named(30), fk: "x", width: 20, selected: true,
-			nameRow: "► " + named(13) + "…", fkRow: "FK x",
+			nameRow: "► " + named(15) + "…", fkRow: "FK x",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2044,5 +2055,155 @@ func TestRenderBox_NarrowWidthsTruncateTheNameToOneCharacter(t *testing.T) {
 				t.Errorf("the bottom border is %d cells, want %d", got, tc.width)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// I5: los limites exactos del render
+// ---------------------------------------------------------------------------
+
+// Scenario: Un nombre del ANCHO EXACTO de la caja no se trunca.
+//
+// renderBox and renderCompactBox cut a name only when it is WIDER than the inner width,
+// never when it is exactly as wide. The boundary is a name whose display width equals
+// innerWidth exactly, and getting it wrong shows up as a name one character short with
+// an ellipsis where there was nothing to elide — a name that was never too long.
+//
+// The width has to be built rather than picked, because innerWidth is width-2 and the
+// name goes through TruncateTableName first, so the fixture asks for the box width that
+// makes a given name land exactly on the boundary and then asserts the name survives
+// whole. Two boxes are needed because the two functions decorate the name differently:
+// renderCompactBox adds "*" for a junction and "► ... ◄" for the selected row, so the
+// name that lands on the boundary is a different string in each.
+func TestRenderBox_ANameExactlyAsWideAsTheBoxIsNotTruncated(t *testing.T) {
+	// innerWidth is width-2, so a box of width 20 has 18 cells of name room.
+	const width, inner = 20, 18
+
+	t.Run("a name exactly innerWidth is left whole", func(t *testing.T) {
+		line := strings.Split(renderBox(strings.Repeat("n", inner), nil, width, false), "\n")[1]
+		if strings.Contains(line, "\u2026") {
+			t.Errorf("a name exactly %d cells wide came out as %q: it must not be cut", inner, line)
+		}
+		if !strings.Contains(line, strings.Repeat("n", inner)) {
+			t.Errorf("the name line is %q, want it to contain all %d characters", line, inner)
+		}
+	})
+
+	// The control, and it is what makes the case above a boundary rather than a
+	// general refusal to truncate.
+	t.Run("a name one cell over is cut", func(t *testing.T) {
+		line := strings.Split(renderBox(strings.Repeat("n", inner+1), nil, width, false), "\n")[1]
+		if !strings.Contains(line, "\u2026") {
+			t.Errorf("a name one cell over came out as %q, want it cut", line)
+		}
+	})
+
+	// The compact box, where the boundary name is the DECORATED one: the selection
+	// markers add four cells, so a bare name of innerWidth-4 lands exactly on the
+	// limit. Two different boundaries in one fixture, because renderCompactBox
+	// decorates before it measures and renderBox does not decorate at all.
+	t.Run("the decorated name exactly innerWidth", func(t *testing.T) {
+		name := strings.Repeat("n", inner-4)
+		line := strings.Split(renderCompactBox(name, "fk", width, false, true), "\n")[1]
+		if strings.Contains(line, "\u2026") {
+			t.Errorf("a decorated name exactly %d cells wide came out as %q: it must not be cut", inner, line)
+		}
+		if !strings.Contains(line, name) {
+			t.Errorf("the name line is %q, want it to contain the whole name %q", line, name)
+		}
+		over := strings.Split(renderCompactBox(strings.Repeat("n", inner-3), "fk", width, false, true), "\n")[1]
+		if !strings.Contains(over, "\u2026") {
+			t.Errorf("a decorated name one cell over came out as %q, want it cut", over)
+		}
+	})
+}
+
+// Scenario: Una caja de UNA sola celda interior muestra un punto y solo uno.
+//
+// Both renderers guard the truncation with `if innerWidth > 1`, because cutting to
+// innerWidth-1 cells and appending an ellipsis is only sensible when there is room for
+// at least one character plus the ellipsis. At innerWidth == 1 the guard's else branch
+// prints "…" on its own.
+//
+// The boundary is innerWidth == 1, i.e. width == 3. Note what the widened guard would
+// do here: displayName[:innerWidth-1] with innerWidth 1 is displayName[:0], which is
+// "", so it would also print "…". The two are the same string — which is why :372 and
+// :437 are equivalences and not gaps, and why this fixture is here to pin the OUTPUT
+// rather than to kill a mutant.
+func TestRenderBox_ANarrowerThanANameCellShowsASingleEllipsis(t *testing.T) {
+	for _, width := range []int{3, 4, 5} {
+		t.Run(fmt.Sprintf("width %d", width), func(t *testing.T) {
+			for _, name := range []string{"a_very_long_table_name_indeed", "x"} {
+				centre := strings.Split(renderBox(name, nil, width, false), "\n")[1]
+				if got := strings.Count(centre, "…"); got > 1 {
+					t.Errorf("renderBox(%q) at width %d printed %d ellipses in %q, want at most one",
+						name, width, got, centre)
+				}
+				compact := strings.Split(renderCompactBox(name, "fk", width, false, false), "\n")[1]
+				if got := strings.Count(compact, "…"); got > 1 {
+					t.Errorf("renderCompactBox(%q) at width %d printed %d ellipses in %q, want at most one",
+						name, width, got, compact)
+				}
+				// And every line is still the requested width, which is the
+				// invariant these tests exist to protect.
+				for _, line := range strings.Split(renderBox(name, nil, width, false), "\n") {
+					if got := ansi.StringWidth(line); got != width {
+						t.Errorf("renderBox(%q) at width %d produced a line %d cells wide: %q", name, width, got, line)
+					}
+				}
+			}
+		})
+	}
+}
+
+// Scenario: El "+N more" va PEGADO a la ultima caja, y separado si hay varias.
+//
+// renderColumn appends a blank line before the "+N more" summary, but only when the
+// column already holds more than one line — with a single box there is nothing to
+// separate from, and the blank would be a line of nothing. The boundary is
+// len(lines) == 1, which is a title plus nothing else: a column whose neighbours were
+// all cut, with an overflow count to report.
+//
+// Both shapes are asserted because the guard is `>`, and a `>=` would put a blank line
+// in the one-box case where the original puts none.
+func TestRenderColumn_TheOverflowSummaryIsSeparatedOnlyWhenThereIsSomethingToSeparate(t *testing.T) {
+	one := renderColumn("1:N", nil, 3, 24, -1)
+	// Title, then the summary directly under it: no blank between.
+	if len(one) != 2 {
+		t.Fatalf("a column with no boxes and an overflow rendered %d lines (%q), want just the title and the summary",
+			len(one), strings.Join(one, "\\n"))
+	}
+	if one[1] != " +3 more" {
+		t.Errorf("the summary line is %q, want %q", one[1], " +3 more")
+	}
+
+	// One box, so three lines before the summary, and the blank is there.
+	one_box := renderColumn("1:N", []Relationship{{
+		FromColumn: "user_id", ToTable: "users", Cardinality: "N:1",
+	}}, 3, 24, -1)
+	summary := len(one_box) - 1
+	if one_box[summary] != " +3 more" {
+		t.Fatalf("the last line is %q, want the summary", one_box[summary])
+	}
+	if one_box[summary-1] != "" {
+		t.Errorf("with a box above it the summary is preceded by %q, want a blank line", one_box[summary-1])
+	}
+
+	// Two boxes: still exactly one blank, not one per box.
+	two := renderColumn("1:N", []Relationship{
+		{FromColumn: "user_id", ToTable: "users", Cardinality: "N:1"},
+		{FromColumn: "org_id", ToTable: "orgs", Cardinality: "N:1"},
+	}, 3, 24, -1)
+	blanks := 0
+	for _, l := range two {
+		if l == "" {
+			blanks++
+		}
+	}
+	if two[len(two)-1] != " +3 more" {
+		t.Errorf("the last line is %q, want the summary", two[len(two)-1])
+	}
+	if blanks != 2 { // one between the two boxes, one before the summary
+		t.Errorf("two boxes plus a summary produced %d blank lines, want 2", blanks)
 	}
 }

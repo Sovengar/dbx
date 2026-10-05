@@ -30,19 +30,19 @@ type ExportSelectedMsg struct {
 }
 
 type ExportPicker struct {
-	styles    *theme.Styles
-	visible   bool
-	cursor    int
-	schema    string
-	table     string
-	width     int
-	height    int
-	options   []exportOption
-	row       []interface{}   // single row for clipboard export
-	rows      [][]interface{} // multiple rows for file export
-	columns   []string
-	fileMode  bool // true = save to file, false = copy to clipboard
-	yankMode  bool // true = yank (always clipboard), false = normal export
+	styles   *theme.Styles
+	visible  bool
+	cursor   int
+	schema   string
+	table    string
+	width    int
+	height   int
+	options  []exportOption
+	row      []interface{}   // single row for clipboard export
+	rows     [][]interface{} // multiple rows for file export
+	columns  []string
+	fileMode bool // true = save to file, false = copy to clipboard
+	yankMode bool // true = yank (always clipboard), false = normal export
 }
 
 type exportOption struct {

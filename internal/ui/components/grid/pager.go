@@ -8,10 +8,10 @@ import (
 )
 
 type Pager struct {
-	styles      *theme.Styles
-	page        int
-	totalRows   int
-	pageSize    int
+	styles       *theme.Styles
+	page         int
+	totalRows    int
+	pageSize     int
 	pendingCount int
 }
 

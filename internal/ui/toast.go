@@ -207,9 +207,11 @@ func isWideRune(r rune) bool {
 	if unicode.Is(unicode.Hiragana, r) {
 		return true
 	}
-	if r >= 0x1100 && r <= 0x115F {
-		return true
-	}
+	// NO explicit U+1100–U+115F range here, and there used to be one. The Hangul check above
+	// already covers that block completely: measured over all 96 code points, ZERO of them are
+	// outside unicode.Hangul, so the range could never be the thing that answered. TestTheJamo
+	//RangeIsRedundant re-measures it, so a future Unicode table that made the range matter
+	// would fail that test rather than leave this comment lying.
 	if r >= 0x2E80 && r <= 0x303E {
 		return true
 	}
@@ -232,6 +234,27 @@ func isWideRune(r rune) bool {
 		return true
 	}
 	if r >= 0x20000 && r <= 0x2FA1F {
+		return true
+	}
+	// Emoji, which are double-width in every terminal that has a font for them.
+	//
+	// They were missing, and the consequence is a line that drifts by one column per emoji:
+	// a value with an emoji in it puts the toast border through the text, and a grid cell
+	// runs into its neighbour. Every other wide block was already here — including CJK
+	// Extension B at U+20000, which is FURTHER from U+1F600 than Hangul is — so the gap was
+	// an omission rather than a decision.
+	//
+	// Deliberately NOT the dingbats at U+2600–U+27BF. Those (a check mark, a cross, a
+	// warning sign) are single-width in some fonts and double in others, so any answer here
+	// is wrong for somebody. Guessing wide would break every toast that uses a check mark,
+	// which is all of them.
+	if r >= 0x1F300 && r <= 0x1F5FF {
+		return true
+	}
+	if r >= 0x1F600 && r <= 0x1F9FF {
+		return true
+	}
+	if r >= 0x1FA70 && r <= 0x1FAFF {
 		return true
 	}
 	return false

@@ -11,15 +11,27 @@ import (
 )
 
 type DeepSeek struct {
-	apiKey string
-	model  string
+	apiKey  string
+	model   string
+	baseURL string
 }
 
 func NewDeepSeek(apiKey, model string) *DeepSeek {
 	if model == "" {
 		model = "deepseek-chat"
 	}
-	return &DeepSeek{apiKey: apiKey, model: model}
+	return NewDeepSeekAt(apiKey, model, deepSeekDefaultBaseURL)
+}
+
+// deepSeekDefaultBaseURL is DeepSeek's chat completions endpoint.
+const deepSeekDefaultBaseURL = "https://api.deepseek.com/v1"
+
+// NewDeepSeekAt is NewDeepSeek with an explicit endpoint. See NewAnthropicAt.
+func NewDeepSeekAt(apiKey, model, baseURL string) *DeepSeek {
+	if model == "" {
+		model = "deepseek-chat"
+	}
+	return &DeepSeek{apiKey: apiKey, model: model, baseURL: strings.TrimRight(baseURL, "/") + "/chat/completions"}
 }
 
 func (d *DeepSeek) Name() string { return "deepseek" }
@@ -58,7 +70,7 @@ func (d *DeepSeek) Generate(ctx context.Context, prompt string, schema string) (
 		MaxTokens: 1024,
 	})
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.deepseek.com/v1/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", d.baseURL, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -95,6 +107,9 @@ func (d *DeepSeek) Generate(ctx context.Context, prompt string, schema string) (
 	}
 
 	sql := strings.TrimSpace(result.Choices[0].Message.Content)
-	sql = cleanSQL(sql)
+	sql, err = requireSQL("deepseek", sql)
+	if err != nil {
+		return "", err
+	}
 	return sql, nil
 }

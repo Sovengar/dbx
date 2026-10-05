@@ -54,26 +54,47 @@ func gitRepoIdentity(dir, root string) repoIdentity {
 }
 
 // findDotGit walks up from dir looking for a `.git` entry (file or directory),
-// stopping at root (inclusive). If dir is not inside root, no ancestor of dir is
-// inspected: the walk never escapes root.
+// bounded by root. If dir is not inside root, no ancestor of dir is inspected: the walk
+// never escapes root.
+//
+// root is inspected ONLY when dir IS root. That is the whole point of the bound and it
+// used to be checked one step too late: the loop tried `root/.git` and only then asked
+// whether it had reached root, so a repository AT root was found from anywhere below it.
+// The case that matters is a dotfiles repository at $HOME, which is the repository that
+// used to absorb every project under the home directory — every project sharing one
+// identity means one project's active flag, drafts and query history applied to the
+// others, and no way to tell which project the state belonged to.
+//
+// A project that IS root still gets root's own repository: the check is `cur == dir`, not
+// `cur == root`, so a checkout at the scanned root is unaffected.
 func findDotGit(dir, root string) (string, bool) {
 	cur := dir
 	for {
+		// At root, and we walked up to get here: stop before inspecting it.
+		if cur == root && cur != dir {
+			return "", false
+		}
+
 		candidate := filepath.Join(cur, ".git")
 		if _, err := os.Lstat(candidate); err == nil {
 			return candidate, true
 		}
 
-		// Stop at root, or as soon as we would leave it.
+		// Stop once we would leave root, or as soon as we are outside it.
 		if cur == root || !pathWithin(cur, root) {
 			return "", false
 		}
 
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			return "", false
-		}
-		cur = parent
+		// No terminator, and it used to have one: filepath.Dir returns its own argument for
+		// exactly one path, the filesystem root, and the guard above has already returned
+		// unless cur is root or a descendant of it. So the walk only ever visits proper
+		// descendants, each of which strictly shortens, and termination follows from the
+		// path's finite depth rather than from a test.
+		//
+		// The premise is asserted by TestTheTwoGuardsThatCannotBeReached, so the argument
+		// cannot rot unnoticed: if Dir ever stopped shortening a proper descendant, that
+		// test fails instead of this scan hanging.
+		cur = filepath.Dir(cur)
 	}
 }
 

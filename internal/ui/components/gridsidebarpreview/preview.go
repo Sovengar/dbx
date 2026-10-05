@@ -37,8 +37,21 @@ func (p *Preview) ScrollUp() {
 	}
 }
 
+// contentHeight is how many document lines fit in the panel. Four lines of chrome sit
+// around them, so the two callers that need this number — ScrollDown's bound and
+// Render's window — read it from here rather than each writing their own arithmetic.
+// They used to disagree by two, and the difference was the two lines at the end of the
+// document that no amount of scrolling could reach: the last value and the closing brace.
+func (p *Preview) contentHeight() int {
+	h := p.height - 4
+	if h < 0 {
+		h = 0
+	}
+	return h
+}
+
 func (p *Preview) ScrollDown() {
-	maxScroll := len(p.lines) - p.height + 2
+	maxScroll := len(p.lines) - p.contentHeight()
 	if maxScroll < 0 {
 		maxScroll = 0
 	}
@@ -102,10 +115,24 @@ func (p *Preview) Render() string {
 		return ""
 	}
 
-	contentHeight := p.height - 4
+	contentHeight := p.contentHeight()
+
+	// The referenced table is NAMED, because SetFKRow stores it and Render used to
+	// ignore it: the sidebar showed a row from another table with no indication of
+	// which one, and when the two tables share column names — `id` and `name` is the
+	// ordinary case for a foreign key — the panel is indistinguishable from the current
+	// row. Same shape as the six config keys that were declared and read by nothing.
+	//
+	// Built BEFORE the empty-row check, because an empty referenced row is exactly the
+	// case where the user most needs to know which table came back with nothing.
+	var rendered []string
+	if p.fkRefTable != "" {
+		rendered = append(rendered, p.styles.Help.Render("  → "+p.fkRefTable))
+	}
 
 	if len(p.lines) == 0 {
-		return p.styles.Text.Render("  No data")
+		rendered = append(rendered, p.styles.Text.Render("  No data"))
+		return strings.Join(rendered, "\n")
 	}
 
 	start := p.scrollY
@@ -114,7 +141,6 @@ func (p *Preview) Render() string {
 		end = len(p.lines)
 	}
 
-	var rendered []string
 	for _, line := range p.lines[start:end] {
 		rendered = append(rendered, p.highlightJSON(line))
 	}

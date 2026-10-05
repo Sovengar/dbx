@@ -2,12 +2,13 @@ package querybrowser
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
 	"charm.land/lipgloss/v2"
+	"github.com/buble/dbx/internal/debuglog"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/buble/dbx/internal/store"
@@ -125,8 +126,12 @@ func (b *QueryBrowser) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			b.refreshEntries()
 			return nil, true
 		case "backspace":
-			if len(b.filter) > 0 {
-				b.filter = b.filter[:len(b.filter)-1]
+			// The filter is TEXT, not bytes: an accented character is one
+			// keystroke carrying several bytes, and slicing one byte off leaves
+			// half a rune behind — which then matches nothing and renders as a
+			// replacement character.
+			if runes := []rune(b.filter); len(runes) > 0 {
+				b.filter = string(runes[:len(runes)-1])
 				b.refreshEntries()
 			}
 			return nil, true
@@ -191,16 +196,20 @@ func (b *QueryBrowser) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 		return nil, true
 
-	case "f":
+	case "f", "d":
+		// The entry, NOT the cursor's index. b.entries is the FILTERED list while a
+		// filter is on and the FAVORITES-only list on that tab, and both are
+		// subsequences of the store's All() — so b.cursor is an index into a
+		// different list and names a different query. Pressing "d" then deleted
+		// the wrong saved query, with no filter involved at all once the Favorites
+		// tab was showing. ToggleFavoriteEntry and DeleteEntry match on the query
+		// itself, which is what "the row the user is looking at" means.
 		if b.cursor >= 0 && b.cursor < len(b.entries) {
-			b.store.ToggleFavorite(b.cursor)
-			b.refreshEntries()
-		}
-		return nil, true
-
-	case "d":
-		if b.cursor >= 0 && b.cursor < len(b.entries) {
-			b.store.Delete(b.cursor)
+			if key == "f" {
+				b.store.ToggleFavoriteEntry(b.entries[b.cursor])
+			} else {
+				b.store.DeleteEntry(b.entries[b.cursor])
+			}
 			b.refreshEntries()
 		}
 		return nil, true
@@ -229,11 +238,10 @@ func (b *QueryBrowser) maxVisibleEntries() int {
 	if modalH < 10 {
 		modalH = 10
 	}
-	h := modalH - 4 // title + tabs + filter + footer
-	if h < 3 {
-		h = 3
-	}
-	return h
+	// No floor on h, and there used to be one. modalH has a floor of 10 three lines above, so
+	// h is at least 6 and `if h < 3` could never fire. Two floors for one quantity, and the
+	// second was written as if the first were not there.
+	return modalH - 4 // title + tabs + filter + footer
 }
 
 func (b *QueryBrowser) View() string {
@@ -329,12 +337,7 @@ func (b *QueryBrowser) View() string {
 }
 
 func qbDebugLog(format string, args ...interface{}) {
-	f, err := os.OpenFile("/tmp/dbx_qb_debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "QueryBrowser: "+format+"\n", args...)
+	debuglog.Write("qb", "QueryBrowser", format, args...)
 }
 
 func (b *QueryBrowser) renderEntry(idx int, e store.QueryEntry, maxW int) string {

@@ -33,7 +33,52 @@ func Resolve(cfg Config) (Provider, error) {
 		return nil, fmt.Errorf("no AI provider detected: set ANTHROPIC_API_KEY, OPENAI_API_KEY, or configure opencode/jcode")
 	}
 
-	// Check for OpenAI-compatible providers
+	// A BUILT-IN NAME IS BUILT-IN, even when the config also carries an entry for
+	// it. The providers table exists to name ADDITIONAL endpoints — a self-hosted
+	// model, a gateway — and an entry for a built-in used to shadow it: setting
+	// `ai.providers.anthropic.model` sent "anthropic" down the OpenAI-compatible
+	// arm, where the API key variable is whatever the entry says and is empty
+	// unless the user also set it. So the one thing a user could do to pick a
+	// model was the one thing that broke their provider.
+	switch name {
+	case "opencode", "opencode-go":
+		return resolveOpenCode(cfg.Model)
+	case "pi":
+		return resolvePi(cfg.Model)
+	case "hermes":
+		return resolveHermes(cfg.Model)
+	case "jcode":
+		return resolveJCode(cfg.Model)
+	case "anthropic":
+		apiKey := os.Getenv("ANTHROPIC_API_KEY")
+		if apiKey == "" {
+			return nil, fmt.Errorf("API key not found: set ANTHROPIC_API_KEY env var")
+		}
+		return NewAnthropic(apiKey, modelFor(cfg, name)), nil
+	case "openai":
+		apiKey := os.Getenv("OPENAI_API_KEY")
+		if apiKey == "" {
+			return nil, fmt.Errorf("API key not found: set OPENAI_API_KEY env var")
+		}
+		return NewOpenAI(apiKey, modelFor(cfg, name)), nil
+	case "deepseek":
+		apiKey := os.Getenv("DEEPSEEK_API_KEY")
+		if apiKey == "" {
+			return nil, fmt.Errorf("API key not found: set DEEPSEEK_API_KEY env var")
+		}
+		return NewDeepSeek(apiKey, modelFor(cfg, name)), nil
+	case "qwen":
+		apiKey := os.Getenv("DASHSCOPE_API_KEY")
+		if apiKey == "" {
+			return nil, fmt.Errorf("API key not found: set DASHSCOPE_API_KEY env var")
+		}
+		// This arm used to read only the providers table, so `ai.model` did
+		// nothing here while it worked for the three arms above it.
+		return NewQwen(apiKey, modelFor(cfg, name)), nil
+	}
+
+	// Not a built-in: the config table names it, and that is the whole point of
+	// the table.
 	if pcfg, ok := cfg.Providers[name]; ok {
 		apiKey := os.Getenv(pcfg.APIKeyEnv)
 		if apiKey == "" {
@@ -43,58 +88,24 @@ func Resolve(cfg Config) (Provider, error) {
 		if baseURL == "" {
 			baseURL = defaultBaseURL(name)
 		}
-		return NewOpenAICompatible(name, apiKey, pcfg.Model, baseURL), nil
+		return NewOpenAICompatible(name, apiKey, modelFor(cfg, name), baseURL), nil
 	}
 
-	// Auto-detect from configs
-	switch name {
-	case "opencode", "opencode-go":
-		return resolveOpenCode(cfg.Model)
-	case "pi":
-		return resolvePi()
-	case "hermes":
-		return resolveHermes()
-	case "jcode":
-		return resolveJCode()
-	case "anthropic":
-		apiKey := os.Getenv("ANTHROPIC_API_KEY")
-		if apiKey == "" {
-			return nil, fmt.Errorf("API key not found: set ANTHROPIC_API_KEY env var")
-		}
-		model := cfg.Model
-		if model == "" {
-			model = cfg.Providers["anthropic"].Model
-		}
-		return NewAnthropic(apiKey, model), nil
-	case "openai":
-		apiKey := os.Getenv("OPENAI_API_KEY")
-		if apiKey == "" {
-			return nil, fmt.Errorf("API key not found: set OPENAI_API_KEY env var")
-		}
-		model := cfg.Model
-		if model == "" {
-			model = cfg.Providers["openai"].Model
-		}
-		return NewOpenAI(apiKey, model), nil
-	case "deepseek":
-		apiKey := os.Getenv("DEEPSEEK_API_KEY")
-		if apiKey == "" {
-			return nil, fmt.Errorf("API key not found: set DEEPSEEK_API_KEY env var")
-		}
-		model := cfg.Model
-		if model == "" {
-			model = cfg.Providers["deepseek"].Model
-		}
-		return NewDeepSeek(apiKey, model), nil
-	case "qwen":
-		apiKey := os.Getenv("DASHSCOPE_API_KEY")
-		if apiKey == "" {
-			return nil, fmt.Errorf("API key not found: set DASHSCOPE_API_KEY env var")
-		}
-		return NewQwen(apiKey, cfg.Providers["qwen"].Model), nil
-	default:
-		return nil, fmt.Errorf("unknown provider: %s", name)
+	return nil, fmt.Errorf("unknown provider: %s", name)
+}
+
+// modelFor picks the model for a provider: the global `ai.model` when it is set,
+// and the provider's own `ai.providers.<name>.model` when it is not.
+//
+// One rule, one place, every provider. It used to be written out four times with
+// qwen left out, which is how the qwen arm ended up ignoring the global setting —
+// and the duplication is why nobody noticed that the fifth path, the providers
+// table, ignored it too.
+func modelFor(cfg Config, name string) string {
+	if cfg.Model != "" {
+		return cfg.Model
 	}
+	return cfg.Providers[name].Model
 }
 
 func autoDetect() string {
@@ -142,38 +153,51 @@ func defaultBaseURL(name string) string {
 	}
 }
 
+// The four file-and-environment backed providers, and the one rule they share: a model
+// configured by hand overrides whatever the detector found, and when none is configured
+// the detector's own model is used.
+//
+// Only resolveOpenCode took the configured model as an argument; the other three read the
+// detector's value and stopped, so `ai.model` silently did nothing for pi, hermes and
+// jcode. Three copies of the same six lines, each written slightly differently, which is
+// what let the fourth be different.
 func resolveOpenCode(configModel string) (Provider, error) {
 	apiKey, model, baseURL, found := DetectOpenCodeConfig()
 	if !found {
 		return nil, fmt.Errorf("OpenCode not detected: set OPENCODE_API_KEY or ZEN_API_KEY")
 	}
-	// Use config model if provided, otherwise use detected model
-	if configModel != "" {
-		model = configModel
-	}
-	return NewOpenAICompatible("opencode-go", apiKey, model, baseURL), nil
+	return NewOpenAICompatible("opencode-go", apiKey, overrideModel(model, configModel), baseURL), nil
 }
 
-func resolvePi() (Provider, error) {
+func resolvePi(configModel string) (Provider, error) {
 	apiKey, model, _, found := DetectPiConfig()
 	if !found {
 		return nil, fmt.Errorf("pi not detected: set INFLECTION_API_KEY")
 	}
-	return NewPi(apiKey, model), nil
+	return NewPi(apiKey, overrideModel(model, configModel)), nil
 }
 
-func resolveHermes() (Provider, error) {
+func resolveHermes(configModel string) (Provider, error) {
 	apiKey, model, baseURL, found := DetectHermesConfig()
 	if !found {
 		return nil, fmt.Errorf("hermes not detected: set NOUS_API_KEY or HERMES_API_KEY")
 	}
-	return NewOpenAICompatible("hermes", apiKey, model, baseURL), nil
+	return NewOpenAICompatible("hermes", apiKey, overrideModel(model, configModel), baseURL), nil
 }
 
-func resolveJCode() (Provider, error) {
+func resolveJCode(configModel string) (Provider, error) {
 	provider, apiKey, model, baseURL, found := DetectJCodeConfig()
 	if !found {
 		return nil, fmt.Errorf("jcode not detected: no provider configured in ~/.jcode/config.json")
 	}
-	return NewOpenAICompatible("jcode/"+provider, apiKey, model, baseURL), nil
+	return NewOpenAICompatible("jcode/"+provider, apiKey, overrideModel(model, configModel), baseURL), nil
+}
+
+// overrideModel is the whole rule: a hand-configured model wins, and the detected one is
+// the fallback.
+func overrideModel(detected, configured string) string {
+	if configured != "" {
+		return configured
+	}
+	return detected
 }

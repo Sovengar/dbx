@@ -178,6 +178,15 @@ func (f *fakeConn) Ping(ctx context.Context) error {
 	return f.pingErr
 }
 
+// Exec exists because postgres.Conn grew the method, not because a CLI path needs it.
+// This fake and pgxfake.Conn are two implementations of the same interface with overlapping
+// fixtures, which is the duplication worth fixing; pinned in TODO.md rather than collapsed
+// here, because collapsing it is a round of its own and this was only a compile error.
+func (f *fakeConn) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	f.queried = append(f.queried, sql)
+	return pgconn.NewCommandTag("EXEC 1"), nil
+}
+
 type fakeRow struct {
 	name string
 	err  error

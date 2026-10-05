@@ -114,8 +114,12 @@ func (p *Palette) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		p.updateFiltered()
 		return nil, true
 	case "backspace":
-		if len(p.query) > 0 {
-			p.query = p.query[:len(p.query)-1]
+		// The query is TEXT, not bytes: a terminal delivers an accented
+		// character as one keystroke carrying several bytes, and slicing one
+		// byte off leaves half a rune behind — which renders as a replacement
+		// character and filters against bytes that spell nothing.
+		if runes := []rune(p.query); len(runes) > 0 {
+			p.query = string(runes[:len(runes)-1])
 			p.updateFiltered()
 		}
 		return nil, true
@@ -220,12 +224,20 @@ func (p *Palette) View() string {
 		}
 	}
 
-	// clamp scrollOffset
+	// Clamp scrollOffset — two branches, not three. The `else if p.scrollOffset >
+	// totalLines-maxVisible` one used to be here and could never fire: the branch above
+	// always runs (cmdLineMap has exactly one entry per filtered command, and updateFiltered
+	// keeps the cursor inside that range, so `p.cursor >= 0 && p.cursor < len(cmdLineMap)`
+	// holds for every state the palette can be in), and it assigns
+	// `cursorLine - maxVisible + 1`, where cursorLine is at most totalLines-1. So the value
+	// it writes is at most totalLines-maxVisible already.
+	//
+	// Which means the invariant the third branch was checking is maintained by the writer,
+	// and TestTheScrollOffsetIsAlwaysLegal is what holds it now: it walks every cursor
+	// position at every list length rather than trusting the arithmetic above.
 	totalLines := len(listLines)
 	if totalLines <= maxVisible {
 		p.scrollOffset = 0
-	} else if p.scrollOffset > totalLines-maxVisible {
-		p.scrollOffset = totalLines - maxVisible
 	}
 	if p.scrollOffset < 0 {
 		p.scrollOffset = 0

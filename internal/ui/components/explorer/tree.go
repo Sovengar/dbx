@@ -47,9 +47,38 @@ func (t *Tree) flattenNodes() {
 		t.flatten(t.nodes)
 	}
 	t.applyFilter()
-	t.clampOffset()
+	t.clampCursor()
+	t.scrollToCursor()
 }
 
+// clampCursor pulls the cursor back inside the list.
+//
+// This is HERE, at the one point every list change goes through, because it used to
+// be written in each of the three places that shrink the list — toggleExpand, collapse
+// and the explorer's toggleColumns — and the fourth, SetFilter, did not have it. The
+// result was a crash reachable by hand: arrow to the last table, press /, type a
+// filter that matches fewer rows than the cursor's index, and the next Selected()
+// indexed past the end and took the process with it. clampOffset only ever clamped
+// the scroll, so nothing else caught it.
+func (t *Tree) clampCursor() {
+	if len(t.filtered) == 0 {
+		t.cursor = 0
+		return
+	}
+	if t.cursor < 0 {
+		t.cursor = 0
+	}
+	if t.cursor >= len(t.filtered) {
+		t.cursor = len(t.filtered) - 1
+	}
+}
+
+// clampOffset keeps the window inside the list. It does NOT keep the CURSOR inside the
+// window — that is scrollToCursor's other half, and the split is why this function is not
+// enough on its own: with nothing holding the invariant, a filter change that left the
+// list long enough could park the window on row 5 with the cursor on row 0, and every
+// keypress would look like it did nothing because the cursor was above the top of the
+// pane.
 func (t *Tree) clampOffset() {
 	if t.height <= 0 || len(t.filtered) <= t.height {
 		t.offset = 0
@@ -149,21 +178,39 @@ func (t *Tree) Update(msg tea.Msg) (tea.Cmd, bool) {
 	return nil, false
 }
 
+// scrollToCursor moves the window so the cursor is inside it.
+//
+// This is HERE because it was in moveDown and nowhere else, and the one place that
+// needed it most was the one without it: go_last put the cursor on the last row and
+// then called clampOffset, which only ever pulls the window BACK. In a list taller
+// than the pane that left the cursor — and the row just selected — scrolled off the
+// bottom, so pressing G in a long schema showed you the top of the schema instead of
+// the table you asked for.
+func (t *Tree) scrollToCursor() {
+	if t.height > 0 {
+		if t.cursor >= t.offset+t.height {
+			t.offset = t.cursor - t.height + 1
+		}
+		if t.cursor < t.offset {
+			t.offset = t.cursor
+		}
+	}
+	// clampOffset runs even at no height, because its first arm is what puts
+	// the offset back to zero when the list is shorter than the pane.
+	t.clampOffset()
+}
+
 func (t *Tree) moveDown() {
 	if t.cursor < len(t.filtered)-1 {
 		t.cursor++
-		if t.height > 0 && t.cursor >= t.offset+t.height {
-			t.offset = t.cursor - t.height + 1
-		}
+		t.scrollToCursor()
 	}
 }
 
 func (t *Tree) moveUp() {
 	if t.cursor > 0 {
 		t.cursor--
-		if t.cursor < t.offset {
-			t.offset = t.cursor
-		}
+		t.scrollToCursor()
 	}
 }
 
@@ -174,10 +221,7 @@ func (t *Tree) toggleExpand() tea.Cmd {
 	node := t.filtered[t.cursor]
 	if !node.IsLeaf() {
 		node.ToggleExpand()
-		t.flattenNodes()
-		if t.cursor >= len(t.filtered) {
-			t.cursor = len(t.filtered) - 1
-		}
+		t.flattenNodes() // clamps the cursor with the rest
 	}
 	return nil
 }
@@ -189,23 +233,38 @@ func (t *Tree) collapse() tea.Cmd {
 	node := t.filtered[t.cursor]
 	if node.Expanded {
 		node.Expanded = false
-		t.flattenNodes()
-		if t.cursor >= len(t.filtered) {
-			t.cursor = len(t.filtered) - 1
-		}
+		t.flattenNodes() // clamps the cursor with the rest
 	} else if node.Parent != nil {
+		// Moving to the parent does NOT change the list, so it does not go
+		// through flattenNodes and has to find its own index. If the parent is
+		// not in the list the cursor is left alone — there is nowhere better to
+		// send it, and leaving it put keeps it in range.
 		for i, n := range t.filtered {
 			if n == node.Parent {
 				t.cursor = i
 				break
 			}
 		}
+		// The cursor can land a long way from where the window is — collapsing a
+		// table takes you to its schema, which may be several rows up — so the
+		// window has to follow HERE too. It did not, and in a one-row window
+		// pressing collapse moved the cursor off the top of the pane while the
+		// pane kept showing the bottom: the row you were about to act on was not
+		// the row you could see.
+		t.scrollToCursor()
 	}
 	return nil
 }
 
+// Selected is the node under the cursor, or nil when the list is empty.
+//
+// The bounds check is not belt-and-braces for the clamp in flattenNodes: a public
+// accessor that indexes a slice is a crash waiting for the next caller that sets the
+// cursor directly. The clamp is what KEEPS the cursor honest, and a separate test
+// asserts the cursor is in range after every kind of list change — so a broken clamp
+// fails loudly there instead of being hidden by this nil.
 func (t *Tree) Selected() *Node {
-	if len(t.filtered) == 0 {
+	if t.cursor < 0 || t.cursor >= len(t.filtered) {
 		return nil
 	}
 	return t.filtered[t.cursor]

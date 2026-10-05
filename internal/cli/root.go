@@ -29,13 +29,30 @@ var rootCmd = &cobra.Command{
 //
 // The production values are the obvious ones; nothing here changes behaviour.
 var (
-	loadConfig = config.Load
-	buildModel = func(cfg *config.Config) tea.Model { return app.NewModel(cfg) }
-	runProgram = func(m tea.Model) (tea.Model, error) { return tea.NewProgram(m).Run() }
-	pgxConnect = func(ctx context.Context, dsn string) (pgconnPing, error) {
+	loadConfig  = config.Load
+	buildModel  = func(cfg *config.Config) tea.Model { return app.NewModel(cfg) }
+	programOpts []tea.ProgramOption
+	runProgram  = func(m tea.Model) (tea.Model, error) { return tea.NewProgram(m, programOpts...).Run() }
+	pgxConnect  = func(ctx context.Context, dsn string) (pgconnPing, error) {
 		return pgx.Connect(ctx, dsn)
 	}
 )
+
+// programOpts are the options a real run is given, and an EMPTY slice is the whole answer:
+// tea.NewProgram with no options uses the real terminal, which is what an interactive TUI
+// wants.
+//
+// It is a variable because of the one thing that cannot be tested otherwise. A bubbletea
+// program opens /dev/tty, so runProgram's default body could only ever execute on a machine
+// with a controlling terminal — not in CI, and not on a developer's editor — which left the
+// last uncovered line of the repository sitting in the one place it could not be reached from.
+//
+// Naming the options makes the difference one line: a test sets programOpts to
+// tea.WithInput(nil) — which is bubbletea's own "there is no input to read" — and the PRODUCTION
+// body runs for real, against the same closure a user runs. Nothing about the default is
+// stubbed; only the terminal is swapped for a file.
+//
+// See TestTheDefaultProgramRunnerRunsWithoutATerminal.
 
 // pgconnPing is what getConnection needs from a live connection: the three
 // postgres.Conn methods plus Ping, which only the real connection has. It is an

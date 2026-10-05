@@ -648,3 +648,120 @@ func indexOfSQL(entries []QueryEntry, sql string) int {
 	}
 	return -1
 }
+
+// ---------------------------------------------------------------------------
+// The entry-addressed forms, which exist because an INDEX names the wrong row
+// ---------------------------------------------------------------------------
+
+// Scenario: Las formas por ENTRADA tocan esa consulta, y solo esa.
+//
+// ToggleFavoriteEntry and DeleteEntry take the entry itself rather than a position,
+// because a caller showing a filtered or favorites-only list has no index that means
+// anything: those lists are subsequences of All(), so row i of one is row j of the other
+// for some j >= i, and j stops being i as soon as anything has been filtered out.
+//
+// The fixtures therefore go through the ORDERING, not through a hand-picked index, and
+// they assert on which query survived — the only thing a user can observe about a delete.
+func TestQueryStore_TheEntryFormsActOnTheNamedQuery(t *testing.T) {
+	t.Run("ToggleFavoriteEntry flips the named query and no other", func(t *testing.T) {
+		s := NewQueryStore(t.TempDir())
+		for _, q := range []string{"first", "second", "third"} {
+			s.Add(q)
+		}
+		// All() is newest-first, so "second" is at index 1 and "third" at 0.
+		target := s.All()[1]
+		if target.SQL != "second" {
+			t.Fatalf("the fixture's index 1 is %q, want \"second\"", target.SQL)
+		}
+
+		s.ToggleFavoriteEntry(target)
+
+		var favorites []string
+		for _, e := range s.All() {
+			if e.Favorite {
+				favorites = append(favorites, e.SQL)
+			}
+		}
+		if len(favorites) != 1 || favorites[0] != "second" {
+			t.Errorf("favorites are %v, want just [second]", favorites)
+		}
+
+		// And again, to prove it is a toggle and not a set.
+		s.ToggleFavoriteEntry(target)
+		if got := len(s.Favorites()); got != 0 {
+			t.Errorf("after toggling back there are %d favorites, want 0", got)
+		}
+	})
+
+	t.Run("DeleteEntry removes the named query and no other", func(t *testing.T) {
+		s := NewQueryStore(t.TempDir())
+		for _, q := range []string{"first", "second", "third"} {
+			s.Add(q)
+		}
+		// Reach for the OLDEST entry, which is the one whose index is furthest
+		// from the front — a fixture that deleted index 0 could not tell the two
+		// forms apart.
+		target := s.All()[2]
+		if target.SQL != "first" {
+			t.Fatalf("the fixture's index 2 is %q, want \"first\"", target.SQL)
+		}
+
+		s.DeleteEntry(target)
+
+		if s.Len() != 2 {
+			t.Fatalf("after the delete the store holds %d entries, want 2", s.Len())
+		}
+		for _, e := range s.All() {
+			if e.SQL == "first" {
+				t.Error("the named query survived the delete")
+			}
+		}
+	})
+
+	t.Run("both forms ignore an entry the store does not have", func(t *testing.T) {
+		s := NewQueryStore(t.TempDir())
+		s.Add("real")
+
+		// A copy with no timestamp is not the stored one, and a blank SQL is not
+		// either. Neither may flip a flag or remove anything: these are the
+		// guards that keep a stale list — a browser showing entries that were
+		// deleted in another window — from doing damage.
+		stranger := QueryEntry{SQL: "real"} // right text, wrong instant
+		s.ToggleFavoriteEntry(stranger)
+		if got := len(s.Favorites()); got != 0 {
+			t.Errorf("an unknown entry favorited something: %d favorites", got)
+		}
+		s.DeleteEntry(stranger)
+		if s.Len() != 1 {
+			t.Errorf("an unknown entry deleted something: %d entries left", s.Len())
+		}
+		if got := s.Len(); got != 1 {
+			t.Errorf("the store holds %d entries, want the 1 it had", got)
+		}
+	})
+
+	t.Run("the index forms still work, and agree with the entry forms", func(t *testing.T) {
+		s := NewQueryStore(t.TempDir())
+		for _, q := range []string{"a", "b", "c"} {
+			s.Add(q)
+		}
+		// Same query, addressed two ways: the index form and the entry form. The
+		// assertion reads the STORE and not the copy, because All() returns copies
+		// — checking the local variable would report the flag this test never
+		// changed, and pass.
+		s.ToggleFavorite(1)
+		byIndex := s.All()[1]
+		if len(s.Favorites()) != 1 {
+			t.Fatalf("ToggleFavorite(1) did not favorite exactly one entry, got %d", len(s.Favorites()))
+		}
+		s.ToggleFavoriteEntry(byIndex)
+		if got := len(s.Favorites()); got != 0 {
+			t.Errorf("ToggleFavoriteEntry did not undo what ToggleFavorite did: %d favorites left", got)
+		}
+
+		s.Delete(1)
+		if s.Len() != 2 {
+			t.Errorf("Delete(1) left %d entries, want 2", s.Len())
+		}
+	})
+}

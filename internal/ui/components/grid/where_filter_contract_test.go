@@ -1501,3 +1501,279 @@ func TestWhereFilter_OnlyPrintableCharactersAreWritten(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// I5: the boundaries the arithmetic actually has
+// ---------------------------------------------------------------------------
+
+// Scenario: Las flechas se mueven HACIA su propia direccion, no simplemente cambian.
+//
+// The key handler does not wrap — moveSelection does. So the handler's own contribution
+// is the SIGN of the delta it passes, and a handler that passed the wrong sign would
+// still be caught by the test above, which only asserts the selection CHANGED. From the
+// first row, up and down both move; from the middle, up and down differ. Both positions
+// are needed, because the first only shows that a wrap happens and the second only that
+// something moved: only the pair pins the direction.
+func TestWhereFilter_TheArrowKeysMoveInTheirOwnDirection(t *testing.T) {
+	for _, tc := range []struct {
+		key  strKey
+		want int // the delta the key must apply
+	}{
+		{"up", -1}, {"k", -1},
+		{"down", 1}, {"j", 1},
+	} {
+		t.Run(string(tc.key), func(t *testing.T) {
+			wf := newWFBig(t) // sixteen suggestions, so a wrap is not the only option
+			if !wf.showPopup {
+				t.Fatalf("the fixture has no popup to navigate (%s)", joinL(wf.suggestions))
+			}
+			n := len(wf.suggestions)
+
+			// From the FIRST row, where up wraps to the last and down steps in.
+			wf.selected = 0
+			if handled, _ := wf.HandleKey(tc.key); !handled {
+				t.Fatalf("%s with a popup was not handled", tc.key)
+			}
+			if want := (n + tc.want) % n; wf.selected != want {
+				t.Errorf("from the first row %s left the selection at %d of %d, want %d",
+					tc.key, wf.selected, n, want)
+			}
+
+			// From the MIDDLE, where nothing wraps and the two directions part.
+			wf.selected = n / 2
+			if handled, _ := wf.HandleKey(tc.key); !handled {
+				t.Fatalf("%s from the middle was not handled", tc.key)
+			}
+			if want := n/2 + tc.want; wf.selected != want {
+				t.Errorf("from the middle %s left the selection at %d, want %d",
+					tc.key, wf.selected, want)
+			}
+		})
+	}
+}
+
+// Scenario: Un popup MARCADO pero VACIO no se come las teclas.
+//
+// Every key arm guards on `wf.showPopup && len(wf.suggestions) > 0`, and the second
+// conjunct looks redundant: showPopup is set to `len(suggestions) > 0` by
+// updateSuggestions and cleared to false by the two paths that hide the popup, so no
+// line ever sets it true over an empty list. That is why this state cannot be built
+// through the widget — and why the conjunct looks like dead code to a reader.
+//
+// It is still the only thing standing between a marked-but-empty popup and a key that
+// vanishes into the filter: with the conjunct dropped, "up" on an empty list would
+// report itself handled and move nothing. This test builds the state directly, which is
+// the only way to reach it, and pins what the guard decides.
+//
+// The dismissed-popup case is the mirror image and is asserted too, because it is the
+// one a user can actually hit: escape closes the popup but keeps the list, so the keys
+// must fall through to the grid rather than act on a list nobody is looking at.
+func TestWhereFilter_APopupWithNothingInItDoesNotSwallowTheKeys(t *testing.T) {
+	// emptyPopup returns a filter marked as showing a popup that has nothing in
+	// it: the state the conjunct exists to decline.
+	emptyPopup := func(t *testing.T) *WhereFilter {
+		t.Helper()
+		wf := newWFBig(t)
+		if len(wf.suggestions) == 0 {
+			t.Fatal("the fixture has no suggestions to empty")
+		}
+		wf.suggestions = nil
+		wf.showPopup = true
+		return wf
+	}
+
+	t.Run("tab and the arrows reach the grid instead", func(t *testing.T) {
+		for _, key := range []strKey{"tab", "up", "k", "down", "j"} {
+			t.Run(string(key), func(t *testing.T) {
+				wf := emptyPopup(t)
+				sel := wf.selected
+				handled, changed := wf.HandleKey(key)
+				if handled || changed {
+					t.Errorf("%s over an empty popup reported handled=%v changed=%v, want both false so the key reaches the grid",
+						key, handled, changed)
+				}
+				if wf.ShouldApply() {
+					t.Errorf("%s over an empty popup applied the clause", key)
+				}
+				if wf.selected != sel {
+					t.Errorf("%s over an empty popup moved the selection to %d", key, wf.selected)
+				}
+			})
+		}
+	})
+
+	t.Run("enter applies the clause instead of accepting nothing", func(t *testing.T) {
+		wf := emptyPopup(t)
+		wf.input = "id = 1"
+
+		if handled, _ := wf.HandleKey(strKey("enter")); !handled {
+			t.Fatal("enter over an empty popup was not handled")
+		}
+		if !wf.ShouldApply() {
+			t.Error("enter over an empty popup did not arm the apply")
+		}
+		if wf.Input() != "id = 1" {
+			t.Errorf("enter applied %q, want what was typed", wf.Input())
+		}
+	})
+
+	// The mirror: popup dismissed, list intact. Same outcome — the keys reach
+	// the grid — from the opposite side of the guard.
+	t.Run("a dismissed popup lets the keys through too", func(t *testing.T) {
+		for _, key := range []strKey{"tab", "up", "k", "down", "j"} {
+			t.Run(string(key), func(t *testing.T) {
+				wf := newWFBig(t)
+				wf.HandleKey(strKey("esc"))
+				if wf.showPopup {
+					t.Fatal("escape did not close the popup")
+				}
+				if len(wf.suggestions) == 0 {
+					t.Fatal("escape emptied the suggestion list, so this half proves nothing")
+				}
+				if !wf.Visible() {
+					t.Fatal("escape closed the whole filter, so the keys never reach the popup path")
+				}
+				line, sel := wf.input, wf.selected
+				handled, changed := wf.HandleKey(key)
+				if handled || changed {
+					t.Errorf("%s with the popup dismissed reported handled=%v changed=%v, want both false",
+						key, handled, changed)
+				}
+				if wf.input != line || wf.selected != sel {
+					t.Errorf("%s with the popup dismissed changed the line to %q or the selection to %d",
+						key, wf.input, wf.selected)
+				}
+			})
+		}
+	})
+}
+
+// Scenario: Aceptar con la seleccion JUSTO pasado el final no toca nada.
+//
+// The guard exists for a selection that is one past the list. Reaching that state
+// through the keys is impossible — moveSelection wraps and filterSuggestions rebuilds
+// the list — so the boundary has to be set directly, which is exactly what a guard
+// against an out-of-range index is for. mustNotPanic is load-bearing here: the mutant
+// that turns `>=` into `>` does not return a wrong answer, it indexes past the end.
+func TestWhereFilter_AcceptingOutsideTheListIsDeclinedNotFatal(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		selected func(n int) int
+	}{
+		{"one past the last", func(n int) int { return n }},
+		{"one before the first", func(n int) int { return -1 }},
+		{"far past the end", func(n int) int { return 99 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wf := newWFBig(t)
+			before := wf.input
+			cursor := wf.cursor
+			wf.selected = tc.selected(len(wf.suggestions))
+
+			mustNotPanic(t, "accepting a suggestion from outside the list", func() {
+				wf.acceptSuggestion()
+			})
+			if wf.input != before {
+				t.Errorf("accepting from outside the list wrote %q, want the line untouched at %q", wf.input, before)
+			}
+			if wf.cursor != cursor {
+				t.Errorf("accepting from outside the list moved the cursor to %d", wf.cursor)
+			}
+		})
+	}
+}
+
+// Scenario: Una clausula que EMPIEZA por palabra clave tiene una clausula detras.
+//
+// extractLastClause looks for the last keyword and returns everything after it, so a
+// leading keyword has to split too — the filter is fresh, the user has typed nothing,
+// and a leading AND is a clause boundary, not part of a word. `pos == 0` is the
+// boundary: `strings.LastIndex` reports it, and `pos >= 0` accepts it.
+func TestWhereFilter_ALeadingKeywordAlsoStartsAFreshClause(t *testing.T) {
+	wf := newWFBig(t)
+	for _, tc := range []struct {
+		name, input, want string
+	}{
+		{"a leading AND", " AND name = 2", "name = 2"},
+		{"a leading OR", " OR name = 2", "name = 2"},
+		{"a leading NOT", " NOT name = 2", "name = 2"},
+		// And the three-step version, where the LAST keyword is still the one
+		// that wins even though the first is at position zero.
+		{"a leading keyword does not outrank a later one", " AND a = 1 OR b = 2", "b = 2"},
+		// The boundary is zero, so one character in front of it must NOT split.
+		{"a character in front keeps the keyword whole", "x AND b = 2", "b = 2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := wf.extractLastClause(tc.input); got != tc.want {
+				t.Errorf("extractLastClause(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+// Scenario: El token empieza en la primera posicion, no en la segunda.
+//
+// currentInputToken walks back from the cursor looking for a space, and the walk has to
+// REACH index zero. The boundary is a cursor sitting at offset one with a space at
+// offset zero — reachable, because a clause can start with a space (" AND x") and the
+// cursor can be walked back onto it. Getting it wrong returns the space as if it were
+// the word being typed, and every suggestion then filters against " ".
+func TestWhereFilter_TheTokenUnderTheCursorStartsAtTheFirstCharacter(t *testing.T) {
+	wf := newWF(t, "")
+	// Type a space, then a word, then walk the cursor back onto the space.
+	// The line is " x" with the cursor at 1.
+	for _, key := range []strKey{"space", "x", "left"} {
+		wf.HandleKey(key)
+	}
+	if wf.input != " x" || wf.cursor != 1 {
+		t.Fatalf("the fixture is %q with the cursor at %d, want \" x\" at 1", wf.input, wf.cursor)
+	}
+	if got := wf.currentInputToken(); got != "" {
+		t.Errorf("with the cursor just after the leading space the token is %q, want it empty: there is no word yet", got)
+	}
+
+	// One character further along the same line the token IS the word, which
+	// is what makes the empty one above a boundary rather than a constant.
+	same := newWF(t, "")
+	for _, key := range []strKey{"space", "x"} {
+		same.HandleKey(key)
+	}
+	if got := same.currentInputToken(); got != "x" {
+		t.Errorf("with the cursor past the word the token is %q, want %q", got, "x")
+	}
+}
+
+// Scenario: Una columna cuyo indice es JUSTO el final de una fila se salta.
+//
+// DistinctValues guards against indexing past a row, and a ragged projection — a query
+// that returns fewer values than the result has columns — is the normal case it exists
+// for. The boundary is colIndex == len(row): one past the last value the row HAS, not
+// past the end of the slice the guard thinks about. mustNotPanic is load-bearing: the
+// mutant that turns `>=` into `>` reaches row[colIndex] and panics.
+func TestWhereFilter_AColumnIndexAtTheEndOfAShortRowIsSkipped(t *testing.T) {
+	// Rows one value long: index 1 is exactly past the end of each row.
+	ragged := [][]interface{}{{"a"}, {"b"}, {"c"}}
+
+	mustNotPanic(t, "a column index exactly at the end of a short row", func() {
+		if got := DistinctValues(1, ragged, 10); len(got) != 0 {
+			t.Errorf("an index at the end of every row returned %q, want nothing", got)
+		}
+	})
+
+	// The same index against rows that DO have it, so the assertion above is
+	// about the boundary and not about the index being out of range always.
+	mustNotPanic(t, "a column index at the end of rows long enough", func() {
+		if got := DistinctValues(1, [][]interface{}{{"a", "x"}, {"b", "y"}}, 10); strings.Join(got, "|") != "x|y" {
+			t.Errorf("the last column of a two-value row returned %q, want x|y", got)
+		}
+	})
+
+	// A row that is long enough next to one that is not: the guard has to
+	// decide PER ROW, not for the whole result.
+	mixed := [][]interface{}{{"a", "x"}, {"b"}, {"c", "z"}}
+	mustNotPanic(t, "a short row among long ones", func() {
+		if got := DistinctValues(1, mixed, 10); strings.Join(got, "|") != "x|z" {
+			t.Errorf("a short row among long ones returned %q, want x|z", got)
+		}
+	})
+}

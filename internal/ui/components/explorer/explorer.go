@@ -133,7 +133,10 @@ func (e *Explorer) handleAction(action config.ActionID) (tea.Cmd, bool) {
 		if e.tree.cursor < 0 {
 			e.tree.cursor = 0
 		}
-		e.tree.clampOffset()
+		// scrollToCursor, NOT clampOffset: clampOffset only ever pulls the
+		// window back, so jumping to the last row of a list taller than the
+		// pane left the cursor — and the table just selected — off the bottom.
+		e.tree.scrollToCursor()
 		return nil, true
 	case "collapse_node":
 		return e.tree.collapse(), true
@@ -202,7 +205,7 @@ func (e *Explorer) toggleColumns() tea.Cmd {
 		if node.Parent != nil && node.Parent.Type == NodeSchema {
 			schemaNode := node.Parent
 			schemaNode.Expanded = false
-			e.tree.flattenNodes()
+			e.tree.flattenNodes() // clamps the cursor; the loop below moves it after
 			for i, n := range e.tree.filtered {
 				if n == schemaNode {
 					e.tree.cursor = i
@@ -216,10 +219,6 @@ func (e *Explorer) toggleColumns() tea.Cmd {
 	if node.Type == NodeSchema {
 		node.ToggleExpand()
 		e.tree.flattenNodes()
-		if e.tree.cursor >= len(e.tree.filtered) {
-			e.tree.cursor = len(e.tree.filtered) - 1
-		}
-		e.tree.clampOffset()
 	}
 	return nil
 }
@@ -235,9 +234,15 @@ func (e *Explorer) handleFilterKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		e.filtering = false
 		return nil, true
 	case "backspace":
-		filter := e.tree.filter
-		if len(filter) > 0 {
-			e.tree.SetFilter(filter[:len(filter)-1])
+		// RUNE-AWARE, and this is the fifth place in this repo where a byte
+		// length was applied to a rune-indexed string — the grid cell editor,
+		// ask.go, the palette, the jq line, and now this. Every one of the
+		// other four was "unreachable until somebody typed an accent", which
+		// is not the same as unreachable: SetFilter is public, so a filter
+		// holding a multi-byte character is reachable today even though the
+		// key handler below cannot produce one.
+		if r := []rune(e.tree.filter); len(r) > 0 {
+			e.tree.SetFilter(string(r[:len(r)-1]))
 		}
 		return nil, true
 	default:
@@ -297,9 +302,17 @@ func (e *Explorer) HandleClick(y int) bool {
 	if e.filtering || e.tree.filter != "" {
 		listY-- // skip the filter line
 	}
+	// Below the top of the pane. The bounds check on the INDEX alone is not
+	// enough: with the tree scrolled, a click on the border or on the filter
+	// line made listY negative, and offset+listY then pointed at a row that was
+	// scrolled off the top — a row nobody can see, which Enter would then act
+	// on. The border and the filter line are not rows, so they select nothing.
+	if listY < 0 {
+		return false
+	}
 
 	filteredIndex := e.tree.offset + listY
-	if filteredIndex < 0 || filteredIndex >= len(e.tree.filtered) {
+	if filteredIndex >= len(e.tree.filtered) {
 		return false
 	}
 	e.tree.cursor = filteredIndex
@@ -344,10 +357,7 @@ func (e *Explorer) ToggleExpand() tea.Cmd {
 		}
 
 		node.ToggleExpand()
-		e.tree.flattenNodes()
-		if e.tree.cursor >= len(e.tree.filtered) {
-			e.tree.cursor = len(e.tree.filtered) - 1
-		}
+		e.tree.flattenNodes() // clamps the cursor
 
 		// DEBUG
 		f, _ := os.Create("/tmp/dbx_explorer_debug.log")
@@ -368,8 +378,5 @@ func (e *Explorer) ToggleExpand() tea.Cmd {
 
 	node.ToggleExpand()
 	e.tree.flattenNodes()
-	if e.tree.cursor >= len(e.tree.filtered) {
-		e.tree.cursor = len(e.tree.filtered) - 1
-	}
 	return nil
 }

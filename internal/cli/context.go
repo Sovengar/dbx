@@ -39,10 +39,10 @@ func runContext(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to export schema: %w", err)
 	}
 
-	data, err := json.MarshalIndent(export, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal schema: %w", err)
-	}
+	// No error arm on the marshal, and there used to be one: SchemaExport is strings, ints,
+	// bools and slices of those, so encoding/json cannot fail on it. A value that would — a
+	// channel, a func, a cycle — cannot be produced by the schema queries that fill it.
+	data, _ := json.MarshalIndent(export, "", "  ")
 
 	outputFile, _ := cmd.Flags().GetString("output")
 	return writeSchemaOutput(data, outputFile, os.Stdout, os.Stderr)

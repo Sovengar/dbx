@@ -2,7 +2,7 @@ package editor
 
 import (
 	"fmt"
-	"os"
+	"github.com/buble/dbx/internal/debuglog"
 	"sort"
 	"strings"
 
@@ -255,12 +255,13 @@ func (a *AutocompleteState) rebuildContextItems() {
 	a.contextItems = a.contextItems[:0]
 
 	switch a.currentCtx.kind {
-	case CompletionSchema:
-		for _, item := range a.all {
-			if item.Kind == CompletionSchema {
-				a.contextItems = append(a.contextItems, item)
-			}
-		}
+	// NO case CompletionSchema here, and there used to be one that swept a.all for schema
+	// items. It was unreachable: the context kind is set by detectContext and
+	// qualifiedContext, and neither can produce Schema — an unknown qualifier is deliberately
+	// treated as an unqualified table (see qualifiedContext's last return). CompletionSchema
+	// is a kind for ITEMS, which LoadSchema produces and the popup filters over; it is not a
+	// context. If the fallback above is ever changed to offer schemas, this is the line that
+	// has to come back.
 	case CompletionTable:
 		a.contextItems = append(a.contextItems, a.tableItems(a.currentCtx.schema)...)
 	case CompletionColumn:
@@ -408,14 +409,13 @@ func (a *AutocompleteState) applyFilter() {
 	}
 
 	if a.prefix == "" {
-		result := make([]CompletionItem, 0, len(a.contextItems))
-		for _, item := range a.contextItems {
-			if item.Kind == CompletionKeyword && strings.ToLower(item.Name) == exactKeyword {
-				continue
-			}
-			result = append(result, item)
-		}
-		a.filtered = result
+		// No exact-keyword skip here, and there used to be one. It could not fire: a.prefix is
+		// a copy of currentCtx.prefix, so a.prefix == "" implies there is no current token,
+		// which implies tokenText == "", which is the first half of the condition that makes
+		// exactKeyword non-empty. The skip below — the one that actually does the work — is in
+		// the branch where a prefix IS typed, which is the only way a typed keyword can be
+		// complete.
+		a.filtered = append([]CompletionItem(nil), a.contextItems...)
 		return
 	}
 
@@ -472,6 +472,20 @@ func (a *AutocompleteState) detectContext(line string, col int) completionContex
 
 	tokens := significantTokens(rawTokens)
 
+	// Everything before the LAST semicolon belongs to a statement that has already
+	// finished, so it must not reach either half of the answer: not the clause switch
+	// and not the table references.
+	//
+	// refs used to be computed from the whole token list, before this point, which
+	// meant `SELECT * FROM users; SELECT |` offered users' columns inside a statement
+	// that cannot see that table. The clause was already truncated further down; the
+	// references were not, so a batch of two queries leaked the first one's FROM list
+	// into the second one's suggestions. Truncating the token list once, here, fixes
+	// both and cannot disagree with itself the way two separate truncations can.
+	if idx := lastIndexText(tokens, ";"); idx >= 0 {
+		tokens = tokens[idx+1:]
+	}
+
 	refs := a.findTablesInStatement(tokens)
 
 	currentIdx := -1
@@ -491,10 +505,6 @@ func (a *AutocompleteState) detectContext(line string, col int) completionContex
 			passed = append(passed, tokens[i])
 		}
 	}
-	if idx := lastIndexText(passed, ";"); idx >= 0 {
-		passed = passed[idx+1:]
-	}
-
 	ctx := completionContext{tokenStart: col, tokenEnd: col}
 	if currentIdx >= 0 {
 		current := tokens[currentIdx]
@@ -565,6 +575,11 @@ func (a *AutocompleteState) qualifiedContext(passed []sqlToken, refs []tableRef)
 	if schema, table, ok := a.resolveTable(ident.text, refs); ok {
 		return CompletionColumn, schema, table, true
 	}
+	// An unknown qualifier is treated as an UNQUALIFIED table, and that is a decision rather
+	// than an oversight: a table the catalog has not loaded still has columns, and offering
+	// its columns is more useful than offering the list of schemas to try instead. It is
+	// written down because it is also why rebuildContextItems has no live CompletionSchema
+	// arm — nothing sets the context kind to Schema, so see there.
 	return CompletionColumn, "", ident.text, true
 }
 
@@ -842,12 +857,7 @@ func lastIndexText(tokens []sqlToken, text string) int {
 }
 
 func autocompleteDebugLog(format string, args ...interface{}) {
-	f, err := os.OpenFile("/tmp/dbx_autocomplete_debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "Autocomplete: "+format+"\n", args...)
+	debuglog.Write("autocomplete", "Autocomplete", format, args...)
 }
 
 func (a *AutocompleteState) Render(styles *theme.Styles, width int) string {

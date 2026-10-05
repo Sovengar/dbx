@@ -8,8 +8,10 @@ import (
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+
 	"charm.land/lipgloss/v2"
 	"github.com/buble/dbx/internal/config"
+	"github.com/buble/dbx/internal/debuglog"
 	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/buble/dbx/internal/theme"
 	"github.com/buble/dbx/internal/ui/bordered"
@@ -467,7 +469,7 @@ func (g *Grid) SelectedRow() []interface{} {
 	if g.activeTab != 0 {
 		return nil
 	}
-	if g.data == nil || len(g.data.Rows) == 0 {
+	if !g.hasRows() {
 		return nil
 	}
 	absRow := g.scrollRow + g.cursorRow + g.pager.Offset()
@@ -699,12 +701,7 @@ func (g *Grid) dispatchAction(action config.ActionID) (tea.Cmd, bool) {
 				g.editing = true
 				g.editRow = len(g.data.Rows) + idx
 				g.editCol = g.cursorCol
-				val := g.pendingRows[idx][g.cursorCol]
-				if val == nil {
-					g.editValue = ""
-				} else {
-					g.editValue = fmt.Sprintf("%v", val)
-				}
+				g.editValue = cellText(g.pendingRows[idx][g.cursorCol])
 				g.editStartValue = g.editValue
 				g.editCursor = len(g.editValue)
 				g.expandEditCol()
@@ -715,12 +712,7 @@ func (g *Grid) dispatchAction(action config.ActionID) (tea.Cmd, bool) {
 			g.restoreEditWidth()
 			g.editing = true
 			g.editCol = g.pendingCol
-			val := g.pendingRows[g.pendingRow][g.pendingCol]
-			if val == nil {
-				g.editValue = ""
-			} else {
-				g.editValue = fmt.Sprintf("%v", val)
-			}
+			g.editValue = cellText(g.pendingRows[g.pendingRow][g.pendingCol])
 			g.editCursor = len(g.editValue)
 			g.expandEditCol()
 			return nil, true
@@ -873,8 +865,27 @@ func (g *Grid) TotalRows() int {
 	return g.data.Count
 }
 
+// cellText is how a stored value becomes the text in the edit buffer.
+//
+// A NULL cell has no text, and the text of a NULL must be EMPTY: `fmt.Sprintf("%v", nil)`
+// is the four characters "<nil>", and typing nothing then saving writes those four
+// characters into a column that was NULL. That is data corruption caused by opening the
+// editor on a null cell and pressing Enter.
+//
+// This decision was written three times — twice for pending draft rows in dispatchAction's
+// edit_cell arm, and once for committed rows in startEdit — and the third had no nil guard
+// at all. The committed path is the one a user hits with a plain SELECT, so it is the one
+// that mattered. One function now, because two of three being right is the exact state this
+// repository kept arriving at.
+func cellText(val interface{}) string {
+	if val == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", val)
+}
+
 func (g *Grid) startEdit() {
-	if g.data == nil || len(g.data.Rows) == 0 {
+	if !g.hasRows() {
 		return
 	}
 	absRow := g.scrollRow + g.cursorRow + g.pager.Offset()
@@ -889,14 +900,14 @@ func (g *Grid) startEdit() {
 	g.editing = true
 	g.editRow = absRow
 	g.editCol = g.cursorCol
-	g.editValue = fmt.Sprintf("%v", g.data.Rows[g.editRow][g.editCol])
+	g.editValue = cellText(g.data.Rows[g.editRow][g.editCol])
 	g.editStartValue = g.editValue
 	g.editCursor = len(g.editValue)
 	g.expandEditCol()
 }
 
 func (g *Grid) startInsertRow() (tea.Cmd, bool) {
-	if g.data == nil || len(g.columns) == 0 {
+	if !g.hasColumns() {
 		return nil, false
 	}
 
@@ -916,25 +927,42 @@ func (g *Grid) startInsertRow() (tea.Cmd, bool) {
 	g.editStartValue = ""
 	g.editCursor = 0
 
-	// DEBUG
-	f, _ := os.OpenFile("/tmp/dbx_mode_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if f != nil {
-		_, _ = fmt.Fprintf(f, "startInsertRow: inserting=true pendingRows=%d editRow=%d\n", len(g.pendingRows), g.editRow)
-		_ = f.Close()
-	}
+	debuglog.Write("mode", "Grid", "startInsertRow: inserting=true pendingRows=%d editRow=%d", len(g.pendingRows), g.editRow)
 
 	return func() tea.Msg { return nil }, true
 }
 
+// fkAtColumn returns the foreign key declared on the column at idx, or nil when that column is
+// not a key.
+//
+// ONE lookup, and it replaces two. navigateFK used to ask the ICON map whether the cursor was
+// on a key and then walk foreignKeysData again to find out WHICH key — and the icon map is
+// BUILT from foreignKeysData, in SetMetadata, in the same function:
+//
+//	for _, fk := range g.foreignKeysData { if idx, ok := colIndex[fk.Column]; ok { icons[idx] = KeyFK } }
+//
+// So "this column shows a key icon" and "this column has a key" were the same fact written
+// twice, and the second copy carried a nil guard for the case where they disagreed. They
+// cannot disagree: there is no path that sets one without the other, which is why that guard
+// could not fire and why it is the reason navigateFK's own refusal is now a lookup returning
+// nil — a thing that DOES happen, every time the cursor moves onto a column that is not a key.
+func (g *Grid) fkAtColumn(idx int) *postgres.ForeignKeyInfo {
+	if idx < 0 || idx >= len(g.columns) {
+		return nil
+	}
+	for i := range g.foreignKeysData {
+		if g.foreignKeysData[i].Column == g.columns[idx] {
+			return &g.foreignKeysData[i]
+		}
+	}
+	return nil
+}
+
 func (g *Grid) navigateFK() (tea.Cmd, bool) {
-	if g.data == nil || len(g.data.Rows) == 0 {
+	if !g.hasRows() {
 		return nil, false
 	}
 	if g.cursorCol < 0 || g.cursorCol >= len(g.columns) {
-		return nil, false
-	}
-	icon, ok := g.keyIcons[g.cursorCol]
-	if !ok || icon != KeyFK {
 		return nil, false
 	}
 
@@ -943,13 +971,7 @@ func (g *Grid) navigateFK() (tea.Cmd, bool) {
 		return nil, false
 	}
 
-	var fkInfo *postgres.ForeignKeyInfo
-	for i := range g.foreignKeysData {
-		if g.foreignKeysData[i].Column == g.columns[g.cursorCol] {
-			fkInfo = &g.foreignKeysData[i]
-			break
-		}
-	}
+	fkInfo := g.fkAtColumn(g.cursorCol)
 	if fkInfo == nil {
 		return nil, false
 	}
@@ -973,7 +995,7 @@ func (g *Grid) navigateFK() (tea.Cmd, bool) {
 }
 
 func (g *Grid) startYank() (tea.Cmd, bool) {
-	if g.data == nil || len(g.columns) == 0 {
+	if !g.hasColumns() {
 		return nil, false
 	}
 
@@ -1018,7 +1040,7 @@ func (g *Grid) StartExport() (tea.Cmd, bool) {
 }
 
 func (g *Grid) startExport() (tea.Cmd, bool) {
-	if g.data == nil || len(g.columns) == 0 {
+	if !g.hasColumns() {
 		return nil, false
 	}
 
@@ -1050,7 +1072,7 @@ func (g *Grid) startExport() (tea.Cmd, bool) {
 }
 
 func (g *Grid) startDelete() (tea.Cmd, bool) {
-	if g.data == nil || len(g.columns) == 0 {
+	if !g.hasColumns() {
 		return nil, false
 	}
 
@@ -1069,10 +1091,15 @@ func (g *Grid) startDelete() (tea.Cmd, bool) {
 		return nil, true
 	}
 
+	// NO `if row == nil` guard, and there used to be one. SelectedRow returns nil only when
+	// there are no rows at all, and dispatchAction refuses every action when
+	// len(g.data.Rows) == 0 — so by the time startDelete runs there is a row under the cursor,
+	// and clampCursor is what keeps the cursor's absolute index inside the result set.
+	//
+	// The invariant is now held by a test rather than by a guard: TestDeletingEveryRowWorks
+	// walks the cursor to both ends of a paginated grid and deletes at every stop, so a cursor
+	// that could ever sit outside the rows fails there rather than panicking here.
 	row := g.SelectedRow()
-	if row == nil {
-		return nil, false
-	}
 	rowCopy := make([]interface{}, len(row))
 	copy(rowCopy, row)
 	g.pendingDeletes = append(g.pendingDeletes, PendingDelete{
@@ -1197,7 +1224,7 @@ func (g *Grid) UndoRowDrafts() int {
 }
 
 func (g *Grid) handleRefreshKey() (tea.Cmd, bool) {
-	if g.data == nil || len(g.columns) == 0 {
+	if !g.hasColumns() {
 		return nil, false
 	}
 
@@ -1308,7 +1335,7 @@ func BuildDeleteQuery(schema, table string, columns []string, row []interface{},
 }
 
 func (g *Grid) toggleRowSelection() {
-	if g.data == nil || len(g.data.Rows) == 0 {
+	if !g.hasRows() {
 		return
 	}
 
@@ -1345,6 +1372,17 @@ func (g *Grid) SelectedRows() [][]interface{} {
 func (g *Grid) SelectionCount() int {
 	return len(g.selectedRows)
 }
+
+// PagerLimit and YankMaxRows report the two sizes NewModel derives from the config.
+//
+// They exist so the WIRING is observable: ui.page_size and ui.yank_max_rows were declared,
+// given defaults, and read by nothing, and reading them in one `if` each is not a thing a
+// test can see without a way to ask what the model was built with. ForeignKeys() is the same
+// kind of seam for the same reason — the effect of a message handler is otherwise only
+// visible as a rendered glyph.
+func (g *Grid) PagerLimit() int { return g.pager.Limit() }
+
+func (g *Grid) YankMaxRows() int { return g.yankMaxRows }
 
 func (g *Grid) SetYankMaxRows(n int) {
 	if n > 0 {
@@ -1474,7 +1512,12 @@ func (g *Grid) handleEditKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		if msg.Text != "" && !isControlKey(msg) {
 			g.editValue = g.editValue[:g.editCursor] + msg.Text + g.editValue[g.editCursor:]
 			g.editCursor += len(msg.Text)
-			if len(g.editValue)+4 > g.widths[g.editCol] {
+			// The bound is checked, not assumed. `widths` is empty whenever the grid
+			// has never been sized, and this used to index it unguarded — so typing the
+			// first character into a cell took the app down with "index out of range
+			// [0] with length 0". Skipping the widening costs a slightly narrow editor;
+			// not guarding costs the process.
+			if g.editCol < len(g.widths) && len(g.editValue)+4 > g.widths[g.editCol] {
 				g.expandEditCol()
 			}
 			return nil, true
@@ -1498,14 +1541,29 @@ func runeAt(s string, i int) rune {
 
 // runeAtBefore returns the rune ENDING at byte offset i, i.e. the character
 // backspace would remove.
+//
+// The guard checks BOTH ends of the range, and that is not thoroughness: runeAt, the
+// sibling three lines above, checks both (`i < 0 || i >= len(s)`) for the same reason and
+// the same comment applies to both — the editor indexes by byte, so every step that moves
+// the cursor has to land on a whole rune. This one checked only `i <= 0`, so `s[:i]` with
+// i past the end panicked with "slice bounds out of range", and the two adjacent functions
+// were left to drift apart.
+//
+// Not reachable from a key press today: every writer of editCursor keeps it at or below
+// len(editValue), and the two that could not — a shrinking value and an unbounded right
+// step — do not happen. So this is a preventive fix rather than a reported bug, and the
+// test that pins it is the reason it is not a guess: it drives i = len(s) + 1 directly and
+// gets RuneError instead of a panic. The one caller is handleEditKey's backspace, whose
+// whole job is to slice at this offset.
 func runeAtBefore(s string, i int) rune {
-	if i <= 0 {
+	if i <= 0 || i > len(s) {
 		return utf8.RuneError
 	}
-	r, size := utf8.DecodeLastRuneInString(s[:i])
-	if size == 0 {
-		return utf8.RuneError
-	}
+	// No size == 0 arm, and there used to be one. The guard above returns for i <= 0, so
+	// s[:i] is never empty, and DecodeLastRuneInString reports size 0 ONLY for an empty
+	// string — for an invalid byte it reports 1, and for any real rune more. So the branch
+	// could not fire, and the two cursor helpers that use this one are left to rely on that.
+	r, _ := utf8.DecodeLastRuneInString(s[:i])
 	return r
 }
 
@@ -1779,12 +1837,8 @@ func (g *Grid) CommitAllDrafts() tea.Cmd {
 	g.discardPending = false
 	g.pager.SetPendingCount(0)
 
-	f, _ := os.OpenFile("/tmp/dbx_grid_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if f != nil {
-		for i, query := range q {
-			_, _ = fmt.Fprintf(f, "CommitAll[%d]: %s args=%v\n", i, query, a[i])
-		}
-		_ = f.Close()
+	for i, query := range q {
+		debuglog.Write("grid", "Grid", "CommitAll[%d]: %s args=%v", i, query, a[i])
 	}
 
 	return func() tea.Msg {
@@ -1860,20 +1914,46 @@ func (g *Grid) moveToFirst() {
 	g.scrollRow = 0
 }
 
-func (g *Grid) moveToLast() {
-	totalRows := g.visibleRows()
-	if totalRows == 0 {
-		return
-	}
-	ch := g.contentHeight()
+// pinToLastRow puts the cursor on the last row, scrolling just far enough to reach it.
+//
+// It is the arithmetic that "go to the end" needs, and it used to be written out three times —
+// byte for byte — by moveToLast, halfPageDown and clampCursor. The same operation in three
+// places is how two of them came to be guarded by a totalRows check and the third not, and
+// how the three would drift the moment one of them was edited.
+//
+// The cursorRow clamp is not decoration. With a content height of ZERO — a window too short to
+// show a single row — scrollRow lands on totalRows and the computed cursor row is -1: a row
+// above the first one, and an index into a slice that would panic on the next access. A window
+// that short is reachable — a terminal resized to nothing while the grid is focused.
+//
+// TestPinningToTheLastRowWithNoRoomForARow is what holds it.
+// The cursorRow clamp is NOT here, and there used to be one. It cannot fire: contentHeight
+// has a floor of 1, so ch >= 1, and the two cases are
+//
+//	ch <= totalRows  ->  scrollRow = totalRows-ch,  cursorRow = ch-1        >= 0
+//	ch >  totalRows  ->  scrollRow = 0,              cursorRow = totalRows-1 >= 0
+//
+// — with totalRows == 0 excluded by every caller's own early return. So the cursor row is a
+// legal index from the scroll clamp above, and the second floor was the same mistake as the
+// two this codebase keeps making elsewhere: a floor applied earlier making a later one
+// redundant.
+//
+// The scrollRow clamp above IS live, and is the whole of the overflow case: a window shorter
+// than the data gives totalRows-ch < 0, which is every "too many rows for this pane" moment.
+func (g *Grid) pinToLastRow(totalRows, ch int) {
 	g.scrollRow = totalRows - ch
 	if g.scrollRow < 0 {
 		g.scrollRow = 0
 	}
 	g.cursorRow = totalRows - g.scrollRow - 1
-	if g.cursorRow < 0 {
-		g.cursorRow = 0
+}
+
+func (g *Grid) moveToLast() {
+	totalRows := g.visibleRows()
+	if totalRows == 0 {
+		return
 	}
+	g.pinToLastRow(totalRows, g.contentHeight())
 }
 
 func (g *Grid) halfPageUp() {
@@ -1902,14 +1982,7 @@ func (g *Grid) halfPageDown() {
 	}
 	absRow := g.scrollRow + g.cursorRow
 	if absRow >= totalRows {
-		g.scrollRow = totalRows - ch
-		if g.scrollRow < 0 {
-			g.scrollRow = 0
-		}
-		g.cursorRow = totalRows - g.scrollRow - 1
-		if g.cursorRow < 0 {
-			g.cursorRow = 0
-		}
+		g.pinToLastRow(totalRows, ch)
 	}
 }
 
@@ -1937,26 +2010,56 @@ func (g *Grid) toggleSort() tea.Cmd {
 	}
 }
 
-func (g *Grid) visibleRows() int {
+// hasRows and hasColumns are the two "is there anything to work on" guards, and they were
+// fourteen inline copies: four of `g.data == nil || len(g.data.Rows) == 0` and six of
+// `g.data == nil || len(g.columns) == 0`, plus the four nil-only ones.
+//
+// They are separate predicates on purpose. A table with columns and NO rows is a real
+// state — it is an empty table — and inserting its first row has to work there, which is
+// why startInsertRow asks hasColumns and not hasRows. Any function that merges the two
+// would break the empty-table insert.
+func (g *Grid) hasRows() bool {
+	return g.data != nil && len(g.data.Rows) > 0
+}
+
+func (g *Grid) hasColumns() bool {
+	return g.data != nil && len(g.columns) > 0
+}
+
+// rowsAfterOffset is how many REAL rows this page has left to show: everything from the
+// page's offset to the end of the loaded data, clamped at zero.
+//
+// It was three inline copies of `total - offset` with a `if < 0 { = 0 }` clamp, and the
+// copies had drifted: only visibleRows() nil-checked g.data first, while cursorRowType()
+// and pendingInsertIndex() dereferenced it unguarded. The clamp is not decoration either —
+// the data can shrink under a non-zero offset when a delete or a filter reduces the row
+// count on a page the user is already on, and an unclamped negative would make every
+// `absRow >= remaining` comparison true at once.
+//
+// One definition, so the three callers cannot disagree about what "the rest of the page"
+// means.
+func (g *Grid) rowsAfterOffset() int {
 	if g.data == nil {
 		return 0
 	}
-	total := len(g.data.Rows)
+	remaining := len(g.data.Rows) - g.pager.Offset()
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+func (g *Grid) visibleRows() int {
+	total := g.rowsAfterOffset()
 	if total == 0 && len(g.pendingRows) == 0 {
 		return 0
 	}
 
-	offset := g.pager.Offset()
-	limit := g.pager.Limit()
-	remaining := total - offset
-	if remaining < 0 {
-		remaining = 0
-	}
-	totalVisible := remaining + len(g.pendingRows)
-	if totalVisible < limit {
+	totalVisible := total + len(g.pendingRows)
+	if totalVisible < g.pager.Limit() {
 		return totalVisible
 	}
-	return limit
+	return g.pager.Limit()
 }
 
 func (g *Grid) contentHeight() int {
@@ -2010,36 +2113,20 @@ func (g *Grid) clampCursor() {
 	ch := g.contentHeight()
 	absRow := g.scrollRow + g.cursorRow
 	if absRow >= totalRows {
-		g.scrollRow = totalRows - ch
-		if g.scrollRow < 0 {
-			g.scrollRow = 0
-		}
-		g.cursorRow = totalRows - g.scrollRow - 1
-		if g.cursorRow < 0 {
-			g.cursorRow = 0
-		}
+		g.pinToLastRow(totalRows, ch)
 	}
 }
 
 func (g *Grid) cursorRowType() string {
-	offset := g.pager.Offset()
-	remaining := len(g.data.Rows) - offset
-	if remaining < 0 {
-		remaining = 0
-	}
 	absRow := g.scrollRow + g.cursorRow
-	if absRow >= remaining {
+	if absRow >= g.rowsAfterOffset() {
 		return "insert"
 	}
 	return "real"
 }
 
 func (g *Grid) pendingInsertIndex() int {
-	offset := g.pager.Offset()
-	remaining := len(g.data.Rows) - offset
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining := g.rowsAfterOffset()
 	absRow := g.scrollRow + g.cursorRow
 	if absRow >= remaining {
 		idx := absRow - remaining
@@ -2051,7 +2138,7 @@ func (g *Grid) pendingInsertIndex() int {
 }
 
 func (g *Grid) View() string {
-	if g.data == nil || len(g.columns) == 0 {
+	if !g.hasColumns() {
 		return g.styles.Text.Render("  No data loaded")
 	}
 
@@ -2082,6 +2169,19 @@ func (g *Grid) renderRecordsView() string {
 	var rows []string
 	offset := g.pager.Offset()
 	startRow := offset + g.scrollRow
+	// Clamped HERE rather than trusted from the five places that assign scrollRow, each of
+	// which has its own arithmetic and its own idea of whether it can go negative. A negative
+	// startRow reaches `g.data.Rows[i]` on the first iteration and panics the renderer,
+	// and a panic in the view is not a crash the user can recover from — the whole screen
+	// goes.
+	//
+	// It is not reachable today: every assignment clamps. But "every assignment clamps" is
+	// an invariant held in five places by five different expressions, and the row loop below
+	// is the only place that knows a negative index is fatal. One clamp at the boundary is
+	// cheaper than auditing five callers every time a sixth is added.
+	if startRow < 0 {
+		startRow = 0
+	}
 	limit := g.pager.Limit()
 	endRow := offset + limit
 	if endRow > len(g.data.Rows) {
@@ -2194,12 +2294,7 @@ func (g *Grid) renderRecordsView() string {
 		modeIndicator = g.styles.ModeNormal.Render(" NORMAL ")
 	}
 
-	// DEBUG
-	f, _ := os.OpenFile("/tmp/dbx_mode_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if f != nil {
-		_, _ = fmt.Fprintf(f, "renderRecordsView: inserting=%v pendingRows=%d editing=%v\n", g.inserting, len(g.pendingRows), g.editing)
-		_ = f.Close()
-	}
+	debuglog.Write("mode", "Grid", "renderRecordsView: inserting=%v pendingRows=%d editing=%v", g.inserting, len(g.pendingRows), g.editing)
 
 	var prefix string
 	if g.commitPending {

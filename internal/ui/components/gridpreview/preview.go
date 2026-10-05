@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -215,19 +216,30 @@ func (p *GridPreview) parseKeyFromLine(line string) string {
 	if !strings.HasPrefix(trimmed, `"`) {
 		return ""
 	}
-	end := strings.Index(trimmed[1:], `"`)
-	if end == -1 {
-		return ""
+	// The closing quote is the next one that is not ESCAPED. A plain
+	// strings.Index found the escaped quote inside a key like `say \"hi\"` and
+	// returned the fragment `say \` — a path that names a key which does not exist,
+	// so clicking that line silently selected nothing. The preview's own renderer is
+	// json.MarshalIndent, which escapes quotes in keys, so it can produce exactly
+	// that line.
+	body := trimmed[1:]
+	for i := 0; i < len(body); i++ {
+		switch body[i] {
+		case '\\':
+			i++ // skip whatever the backslash escapes
+		case '"':
+			return body[:i]
+		}
 	}
-	return trimmed[1 : end+1]
+	return ""
 }
 
 // isExpandableFK checks if a dotted path refers to an unexpanded FK column.
 func (p *GridPreview) isExpandableFK(path string) *postgres.ForeignKeyInfo {
+	// No empty-parts guard, and there used to be one: strings.Split always returns at least
+	// one element, so len(parts) == 0 is unreachable. The empty path IS handled — it arrives
+	// as one empty part and falls through to "no foreign key named that", which is right.
 	parts := strings.Split(path, ".")
-	if len(parts) == 0 {
-		return nil
-	}
 
 	// Root level: check p.foreignKeys
 	if len(parts) == 1 {
@@ -262,19 +274,16 @@ func (p *GridPreview) isExpandableFK(path string) *postgres.ForeignKeyInfo {
 	return nil
 }
 
-// resolveValue gets the value at a dotted path from rowData/displayData.
+// resolveValue gets the value at a path from the DISPLAY data — the row with its
+// expanded foreign keys already merged in, which is what the user sees rather than what
+// the database returned.
+//
+// It is navigateJSON with the input supplied. It used to be a second walker of its own,
+// split on "." and doing plain map lookups, so a path with a bracket in it — `items[0]` —
+// resolved to nothing here while the identical path worked everywhere else. One walker
+// now, so the path syntax a suggestion offers is the path syntax that resolves.
 func (p *GridPreview) resolveValue(path string) interface{} {
-	data := p.displayData()
-	parts := strings.Split(path, ".")
-	var current interface{} = data
-	for _, part := range parts {
-		m, ok := current.(map[string]interface{})
-		if !ok {
-			return nil
-		}
-		current = m[part]
-	}
-	return current
+	return p.navigateJSON(p.displayData(), path)
 }
 
 func (p *GridPreview) handleExpand() (tea.Cmd, bool) {
@@ -437,11 +446,11 @@ func (p *GridPreview) applyJQ() {
 		output = results
 	}
 
-	jsonBytes, err := json.MarshalIndent(output, "", "  ")
-	if err != nil {
-		p.lines = []string{fmt.Sprintf("jq output error: %v", err)}
-		return
-	}
+	// No error arm on the marshal, and there used to be one. Everything gojq yields is
+	// nil, bool, float64, int, string, []interface{} or map[string]interface{} — the JSON
+	// value space — so encoding/json cannot fail on it. A value that would (a channel, a
+	// func, a cycle) cannot come out of a jq program.
+	jsonBytes, _ := json.MarshalIndent(output, "", "  ")
 
 	p.lines = strings.Split(string(jsonBytes), "\n")
 	p.scrollY = 0
@@ -489,8 +498,22 @@ func (p *GridPreview) handleJQInput(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case "ctrl+space":
+		// The state BEFORE the recomputation decides the toggle.
+		//
+		// updateJQSuggestions does not merely compute the list: it starts by
+		// clearing jqSugVisible and ends by setting it true whenever it found
+		// anything. So `p.jqSugVisible = !p.jqSugVisible` after it read the value the
+		// function had just SET, and inverted a true into a false — so pressing
+		// ctrl+space with suggestions available turned them OFF, and pressing it
+		// again turned them off too. The one key that is supposed to reveal the
+		// list could never reveal it. (The suggestions did appear, which is why this
+		// looked alive: len(jqSugs) went from 0 to 3.)
+		wasVisible := p.jqSugVisible
 		p.updateJQSuggestions()
-		p.jqSugVisible = !p.jqSugVisible
+		p.jqSugVisible = !wasVisible && len(p.jqSugs) > 0
+		if !p.jqSugVisible {
+			p.jqSugSelected = 0
+		}
 		return nil, true
 
 	case "up":
@@ -635,8 +658,21 @@ func (p *GridPreview) rootSuggestions(input interface{}) []JQSuggestion {
 				Type: jsonType(val),
 			})
 		}
+		// SORTED, because Go iterates a map in a random order and this list has
+		// a selected entry that enter and tab ACCEPT. Unsorted, pressing tab on
+		// the same document twice picked a different field, and the list
+		// reordered itself under the cursor on every recomputation.
+		sortJQSuggestions(sugs)
 		return sugs
 	case []interface{}:
+		// NOT sorted, unlike the two map branches, and deliberately: those iterate a map,
+		// which Go randomises. This is a fixed pair of literals, so it is already
+		// deterministic and sorting it would only move the iterator off the default tab
+		// stop.
+		//
+		// A version of this added the sort on the reasoning that "every other branch has
+		// one" — which is the drift pattern run backwards, fixing a branch that could not
+		// drift and breaking the one thing the order was for.
 		return []JQSuggestion{
 			{Path: ".[]", Type: "array-iter"},
 			{Path: ".[0]", Type: jsonType(indexArray(v, 0))},
@@ -657,6 +693,8 @@ func (p *GridPreview) childSuggestions(parent interface{}, prefix string) []JQSu
 				})
 			}
 		}
+		// Sorted for the same reason as at the root.
+		sortJQSuggestions(sugs)
 		return sugs
 	case []interface{}:
 		var sugs []JQSuggestion
@@ -669,6 +707,8 @@ func (p *GridPreview) childSuggestions(parent interface{}, prefix string) []JQSu
 		if strings.HasPrefix("length", prefix) {
 			sugs = append(sugs, JQSuggestion{Path: "length", Type: "number"})
 		}
+		// Three fixed literals, so the order is deterministic — see rootSuggestions for why
+		// this branch has no sort and the map branches do.
 		return sugs
 	}
 	return nil
@@ -712,15 +752,38 @@ func (p *GridPreview) navigateJSON(input interface{}, path string) interface{} {
 				rest = rest[end+1:]
 
 				if arr, ok := current.([]interface{}); ok {
-					if idxStr == "" || idxStr == ":" {
-						if len(arr) > 0 {
-							current = arr[0]
-						} else {
+					switch idxStr {
+					case "length":
+						// `length` is offered by childSuggestions and used to resolve to
+						// nothing here, so accepting that suggestion produced a filter that
+						// matched nothing and rendered as an empty document — with no error
+						// anywhere, because "resolved to nil" is the same answer as "the path
+						// is wrong".
+						//
+						// It is not a bracket index, so it belongs in this switch rather than in
+						// the index parse below. jq's `.tags.length` is the count, and this is
+						// the only single-value answer that has any use in a preview.
+						current = len(arr)
+					case "", ":":
+						// `[]` is ITERATION in jq: it yields every element. It used to yield
+						// element zero, which made it the same answer as `[0]` — so the
+						// suggestion bar offered two entries that did the same thing, and
+						// `.tags[] == "y"` silently answered for the first element only.
+						//
+						// The navigator returns a single value, so the whole array is the honest
+						// equivalent of iteration: it is what gets rendered, and it is what a
+						// filter over the field should see.
+						current = arr
+					default:
+						// Sscanf LEAVES idx at zero when it matches nothing, so
+						// ".arr[abc]" used to resolve to the FIRST element — a
+						// typo silently reading element zero, which is worse than
+						// reading nothing because it looks like it worked. The
+						// count says whether anything was consumed.
+						idx := 0
+						if n, _ := fmt.Sscanf(idxStr, "%d", &idx); n != 1 {
 							return nil
 						}
-					} else {
-						idx := 0
-						_, _ = fmt.Sscanf(idxStr, "%d", &idx)
 						if idx >= 0 && idx < len(arr) {
 							current = arr[idx]
 						} else {
@@ -731,12 +794,27 @@ func (p *GridPreview) navigateJSON(input interface{}, path string) interface{} {
 					return nil
 				}
 			}
+		} else if part == "length" {
+			// The bare-word form, which is what childSuggestions offers for a map as well as
+			// for an array. Same reason as the bracketed arm: it was offered and did not work.
+			switch v := current.(type) {
+			case map[string]interface{}:
+				current = len(v)
+			case []interface{}:
+				current = len(v)
+			default:
+				return nil
+			}
 		} else {
 			if m, ok := current.(map[string]interface{}); ok {
 				current = m[part]
 			} else if arr, ok := current.([]interface{}); ok {
+				// Same reasoning as the bracketed arm: an index that is not a
+				// number is not the number zero.
 				idx := 0
-				_, _ = fmt.Sscanf(part, "%d", &idx)
+				if n, _ := fmt.Sscanf(part, "%d", &idx); n != 1 {
+					return nil
+				}
 				if idx >= 0 && idx < len(arr) {
 					current = arr[idx]
 				} else {
@@ -799,7 +877,20 @@ func (p *GridPreview) jqHistoryNavigate(delta int) {
 		p.jqInput = p.jqHistory[newIdx]
 	}
 	p.jqCursor = len([]rune(p.jqInput))
+	// A recalled expression shows NO suggestions. updateJQSuggestions makes the
+	// list visible whenever there is anything to suggest, and the arrows check
+	// that visibility BEFORE deciding what they drive — so re-showing the list
+	// here made the SECOND up-arrow navigate the popup instead of continuing
+	// through the history. The user pressed up three times and got one step.
 	p.updateJQSuggestions()
+	p.jqSugVisible = false
+}
+
+// sortJQSuggestions orders a suggestion list by path, which is the order the keys are in
+// and therefore the order a user reading them expects. Stable for equal paths so a
+// recomputation never reshuffles the list under the selection.
+func sortJQSuggestions(sugs []JQSuggestion) {
+	sort.SliceStable(sugs, func(i, j int) bool { return sugs[i].Path < sugs[j].Path })
 }
 
 func (p *GridPreview) addToHistory(expr string) {
@@ -856,10 +947,9 @@ func (p *GridPreview) saveJQHistory() {
 		return
 	}
 
-	data, err := json.MarshalIndent(p.jqHistory, "", "  ")
-	if err != nil {
-		return
-	}
+	// No error arm on the marshal, and there used to be one: jqHistory is a []string, and
+	// encoding/json cannot fail on a slice of strings.
+	data, _ := json.MarshalIndent(p.jqHistory, "", "  ")
 
 	// Best-effort persistence: the in-memory history is already updated.
 	_ = os.WriteFile(path, data, 0o644)
@@ -1056,15 +1146,22 @@ func (p *GridPreview) renderJQPrompt() string {
 }
 
 func (p *GridPreview) renderJQSuggestions() string {
+	// The emptiness guard lives HERE, not only at the call site. With it only at the
+	// call site, calling this directly with nothing to show drew a three-line empty
+	// box — a border with no content in it, which reads as a broken panel.
+	if len(p.jqSugs) == 0 {
+		return ""
+	}
+
 	maxWidth := p.width - 8
 	if maxWidth < 30 {
 		maxWidth = 30
 	}
 
+	// No floor on pathWidth, and there used to be one: maxWidth has a floor of 30 three lines
+	// above, so pathWidth is at least 16 — the same two-floors-for-one-quantity mistake this
+	// codebase keeps making, and the fourth time in this file alone.
 	pathWidth := maxWidth - 14
-	if pathWidth < 15 {
-		pathWidth = 15
-	}
 
 	var lines []string
 	for i, sug := range p.jqSugs {

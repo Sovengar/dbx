@@ -22,8 +22,13 @@ type TableDetail struct {
 	Type     string
 	RowCount int
 	Columns  []ColumnInfo
-	Indexes  []IndexInfoFull
-	FKs      []ForeignKeyInfo
+	// Indexes and FKs used to be fields here as well, and nothing ever wrote or read
+	// either one: indexes and keys reach the app through ListIndexesFullBySchema and
+	// ListForeignKeysBySchema, keyed by schema and then by table. A field that looks
+	// like where the data lives and is always empty is worse than no field, because
+	// the next caller fills it in and then the export — which reads the maps — quietly
+	// ignores it. Same shape as fkRefTable, which the sidebar stored and never
+	// rendered, and as the six config keys that were declared and read by nothing.
 }
 
 type SchemaDetail struct {
@@ -371,17 +376,40 @@ func (s *SchemaLoader) ListColumns(ctx context.Context, schema, table string) ([
 	return columns, rows.Err()
 }
 
+// ListConstraints reports every constraint on a table: primary keys, foreign keys, unique
+// constraints and CHECK constraints.
+//
+// It reads pg_constraint rather than information_schema.table_constraints joined to
+// key_column_usage. The join is the obvious way to write it and it silently drops every
+// CHECK: key_column_usage only lists constraints that are KEY-based, so a CHECK — which
+// constrains an expression, not a key — has no row to join to and disappears from the
+// result. The pane has a Constraints tab, so the visible effect was a table whose CHECK
+// constraints did not exist as far as dbx was concerned, which is exactly the class of
+// constraint a user forgets about and then trips over.
+//
+// pg_constraint carries all four kinds with their columns in conkey, so one query covers
+// them and the tab can be honest.
 func (s *SchemaLoader) ListConstraints(ctx context.Context, schema, table string) ([]ConstraintInfo, error) {
 	query := `
-		SELECT tc.constraint_name, tc.constraint_type,
-			string_agg(DISTINCT kcu.column_name, ', ' ORDER BY kcu.column_name)
-		FROM information_schema.table_constraints tc
-		JOIN information_schema.key_column_usage kcu
-			ON tc.constraint_name = kcu.constraint_name
-			AND tc.table_schema = kcu.table_schema
-		WHERE tc.table_schema = $1 AND tc.table_name = $2
-		GROUP BY tc.constraint_name, tc.constraint_type
-		ORDER BY tc.constraint_name
+		SELECT c.conname,
+			CASE c.contype
+				WHEN 'p' THEN 'PRIMARY KEY'
+				WHEN 'f' THEN 'FOREIGN KEY'
+				WHEN 'u' THEN 'UNIQUE'
+				WHEN 'c' THEN 'CHECK'
+				ELSE c.contype::text
+			END,
+			COALESCE((
+				SELECT string_agg(a.attname, ', ' ORDER BY k.ord)
+				FROM unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord)
+				JOIN pg_attribute a
+					ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+			), '')
+		FROM pg_constraint c
+		JOIN pg_namespace n ON n.oid = c.connamespace
+		JOIN pg_class t ON t.oid = c.conrelid
+		WHERE n.nspname = $1 AND t.relname = $2 AND c.contype IN ('p', 'f', 'u', 'c')
+		ORDER BY c.conname
 	`
 
 	rows, err := s.conn.Query(ctx, query, schema, table)

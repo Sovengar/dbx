@@ -11,15 +11,27 @@ import (
 )
 
 type Qwen struct {
-	apiKey string
-	model  string
+	apiKey  string
+	model   string
+	baseURL string
 }
 
 func NewQwen(apiKey, model string) *Qwen {
 	if model == "" {
 		model = "qwen-turbo"
 	}
-	return &Qwen{apiKey: apiKey, model: model}
+	return NewQwenAt(apiKey, model, qwenDefaultBaseURL)
+}
+
+// qwenDefaultBaseURL is Qwen's OpenAI-compatible endpoint.
+const qwenDefaultBaseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+// NewQwenAt is NewQwen with an explicit endpoint. See NewAnthropicAt.
+func NewQwenAt(apiKey, model, baseURL string) *Qwen {
+	if model == "" {
+		model = "qwen-turbo"
+	}
+	return &Qwen{apiKey: apiKey, model: model, baseURL: strings.TrimRight(baseURL, "/") + "/chat/completions"}
 }
 
 func (q *Qwen) Name() string { return "qwen" }
@@ -56,7 +68,7 @@ func (q *Qwen) Generate(ctx context.Context, prompt string, schema string) (stri
 		},
 	})
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", q.baseURL, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -93,6 +105,9 @@ func (q *Qwen) Generate(ctx context.Context, prompt string, schema string) (stri
 	}
 
 	sql := strings.TrimSpace(result.Choices[0].Message.Content)
-	sql = cleanSQL(sql)
+	sql, err = requireSQL("qwen", sql)
+	if err != nil {
+		return "", err
+	}
 	return sql, nil
 }

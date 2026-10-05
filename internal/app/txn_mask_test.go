@@ -773,8 +773,17 @@ func TestCommitPending_CommitFailurePropagatesAndClears(t *testing.T) {
 	if err == nil {
 		t.Fatal("commitPending returned no error for a failing commit")
 	}
-	if !committed {
-		t.Error("commitPending reported no pending transaction, want true (there was one)")
+	// FALSE. This assertion used to be `if !committed` with the comment "there was one",
+	// which is true and is not what the flag is FOR: the app's handler turns it into a
+	// "Transaction committed" success toast, so `true` on a failed commit made one
+	// statement announce itself as committed and then failed. The test was written to
+	// match the code, which is the one thing a test is not for.
+	//
+	// What the flag means is "a commit happened and it worked", so the information that a
+	// transaction EXISTED has to live in the error — where it does, in the message's own
+	// words: "failed to commit transaction".
+	if committed {
+		t.Error("commitPending reported a commit that failed, so the app would toast a success for it")
 	}
 	if tx.commits != 1 {
 		t.Errorf("commit called %d times, want 1", tx.commits)

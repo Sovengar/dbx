@@ -481,40 +481,74 @@ func TestCleanSQL(t *testing.T) {
 	}
 }
 
-// Scenario: Una valla con la palabra SQL en mayúsculas deja el resto de la
-// sentencia dentro del SQL.
+// Scenario: Una valla con la palabra SQL en mayúsculas YA NO se fuga al SQL.
 //
-// KNOWN DEFECT, pinned so a fix is a deliberate change.
+// This test used to pin a defect: cleanSQL compared the literal "```sql", so a model
+// answering "```SQL" got the bare-fence strip and kept the word, which parses as a column
+// alias. The app then showed a plausible error about a missing relation instead of "the
+// model sent a fence". FIXED — the tag is now matched case-insensitively — so the
+// assertions are the intended ones and the KNOWN DEFECT note is gone with it.
 //
-// cleanSQL strips the literal "```sql" prefix and the bare "```" prefix, both
-// lowercase, then the trailing "```". A model that emits "```SQL" therefore
-// gets the bare-fence strip, which removes the backticks and leaves the word
-// "SQL" glued to the front of the statement. The result parses as a column
-// alias, so the app shows a plausible-looking error about a missing relation
-// rather than "the model sent a fence".
-//
-// The fix is to compare the language tag case-insensitively, or to strip any
-// leading fence plus optional language word. That is a production change, so it
-// is not made here; the actual behaviour is asserted instead, and the case
-// below flips to the intended value when it is fixed.
-func TestCleanSQL_UppercaseLanguageTagLeaksIntoTheSQL(t *testing.T) {
+// The ambiguity that shaped the fix is kept as a case below: a glued fence with no
+// newline ("```sqlSELECT 1") reads the same as "```sql SELECT 1", and resolving it by rule
+// would break one of the two. The exact lowercase prefix still goes first, so the glued
+// reading keeps working.
+func TestCleanSQL_UppercaseLanguageTagIsStripped(t *testing.T) {
 	for _, in := range []string{
 		"```SQL\nSELECT 1\n```",
-		"```SQL SELECT 1 ```",
 		"```Sql\nSELECT 1\n```",
+		"```sQl\nSELECT 1\n```",
+		"```JSON\nSELECT 1\n```",
 	} {
-		got := cleanSQL(in)
-		if got == in {
-			t.Errorf("cleanSQL(%q) = %q, want the backticks at least removed", in, got)
-		}
-		// The defect: the language word survives and is no longer a fence.
-		if !strings.HasPrefix(got, "SQL") && !strings.HasPrefix(got, "Sql") {
-			t.Errorf("cleanSQL(%q) = %q, expected the leaked language word per the KNOWN DEFECT note", in, got)
+		if got := cleanSQL(in); got != "SELECT 1" {
+			t.Errorf("cleanSQL(%q) = %q, want %q", in, got, "SELECT 1")
 		}
 	}
 
-	// The intended behaviour, for whoever fixes it: no language word at all.
-	if got := cleanSQL("```SQL\nSELECT 1\n```"); got == "SELECT 1" {
-		t.Log("cleanSQL now handles an uppercase language tag; flip the assertions above")
+	// A tag-shaped run that runs STRAIGHT into the statement is not a tag. Cutting
+	// it would turn "SELECT 1" into "1", which is the way a naive "strip the first
+	// word after the fence" implementation quietly eats a statement.
+	for _, tc := range []struct{ in, want string }{
+		{"```sqlSELECT 1```", "SELECT 1"},
+		{"```SELECT 1```", "SELECT 1"},
+		{"```SQLSELECT 1", "SQLSELECT 1"},
+		// The one form that cannot be resolved: a glued fence with an uppercase
+		// tag and no trailing newline is indistinguishable from the glued
+		// lowercase one, which the case above resolves. Pinned as a known
+		// limitation with its reason, so nobody tries to fix it with a rule that
+		// breaks the working case.
+		{"```SQL SELECT 1 ```", "SQL SELECT 1"},
+		// A fence with nothing after it yields nothing.
+		{"```", ""},
+		{"```sql", ""},
+		// And the same limitation one step further: a bare uppercase tag with NO
+		// statement at all leaves the tag behind, because TrimSpace removes the
+		// newline first and the input then looks exactly like the glued form
+		// above. Harmless — there was no SQL to lose — and pinned so the
+		// asymmetry reads as known rather than as an oversight.
+		{"```SQL\n", "SQL"},
+		{"```SQL", "SQL"},
+		{"```json\nSELECT 1\n```", "SELECT 1"},
+		{"```postgresql\nSELECT 1\n```", "SELECT 1"},
+	} {
+		if got := cleanSQL(tc.in); got != tc.want {
+			t.Errorf("cleanSQL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+
+	// And with no fence at all there is no tag to remove, so a bare statement is
+	// never touched. The first version of the fix had no guard for this and turned
+	// "SELECT 1" into "1" by reading SELECT as a language tag.
+	for _, tc := range []struct{ in, want string }{
+		{"SELECT 1", "SELECT 1"},
+		{"  SELECT 1  ", "SELECT 1"},
+		{"SELECT", "SELECT"},
+		{"select 1", "select 1"},
+		{"", ""},
+		{"   ", ""},
+	} {
+		if got := cleanSQL(tc.in); got != tc.want {
+			t.Errorf("cleanSQL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

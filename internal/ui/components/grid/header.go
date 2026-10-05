@@ -25,12 +25,12 @@ const (
 )
 
 type Header struct {
-	styles    *theme.Styles
-	columns   []string
-	sortCol   int
-	sortDir   SortDirection
-	widths    []int
-	keyIcons  map[int]KeyIcon
+	styles   *theme.Styles
+	columns  []string
+	sortCol  int
+	sortDir  SortDirection
+	widths   []int
+	keyIcons map[int]KeyIcon
 }
 
 func NewHeader(styles *theme.Styles) *Header {

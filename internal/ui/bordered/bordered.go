@@ -226,12 +226,12 @@ func buildContentLines(style *ansi.Style, leftChar, rightChar, content string, i
 		}
 	}
 
-	// Ensure at least one line
-	if len(result) == 0 {
-		emptyLine := strings.Repeat(" ", innerWidth)
-		result = append(result, styledChar(style, leftChar)+emptyLine+styledChar(style, rightChar))
-	}
-
+	// There is no "ensure at least one line" guard here any more, and there used to be one.
+	// It could not fire: strings.Split always returns at least one element — for "", it
+	// returns [""] — and the loop body appends unconditionally on both of its branches, so
+	// result has at least one line for every possible content, empty included. An empty
+	// panel renders as one blank interior row because of that, not because of a guard, and
+	// TestAnEmptyPanelStillHasAnInnerLine is what holds the property now.
 	return result
 }
 

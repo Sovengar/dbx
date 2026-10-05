@@ -52,7 +52,11 @@ type statementRunner struct {
 	// the ASK path so the database itself rejects any mutation even if the
 	// statement passes the client-side validation.
 	beginReadOnly func(ctx context.Context) (pgx.Tx, error)
-	exec          func(ctx context.Context, q postgres.Querier, sql string) (*postgres.QueryResult, error)
+	// ping asks the connection whether it still works. It is what the app consults
+	// after a commit failure, because that failure has two possible endings and the
+	// error alone does not say which one happened.
+	ping func(ctx context.Context) error
+	exec func(ctx context.Context, q postgres.Querier, sql string) (*postgres.QueryResult, error)
 	// mu guards tx. It is written from tea.Cmd goroutines and read from
 	// Update, so access must be synchronized.
 	mu sync.Mutex
@@ -64,15 +68,56 @@ type statementRunner struct {
 	readOnlyActive atomic.Bool
 }
 
-func newStatementRunner(conn *pgx.Conn) *statementRunner {
-	return &statementRunner{
-		conn:  conn,
-		begin: conn.Begin,
-		beginReadOnly: func(ctx context.Context) (pgx.Tx, error) {
-			return conn.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
-		},
+// newStatementRunner takes the INTERFACE for the reason documented on
+// postgres.TxBeginner: the runner holds the connection only to open transactions on it,
+// and every error arm it has — a commit that fails, a rollback that fails, a begin that
+// fails — needs a connection that can be told to fail on demand.
+func newStatementRunner(conn postgres.TxBeginner) *statementRunner {
+	r := &statementRunner{
+		conn: conn,
 		exec: postgres.ExecuteQuery,
 	}
+	// A runner with NO connection is a state worth being able to represent: the read-only
+	// flag lives on the runner, and a fixture that wants to hold it without a database has
+	// nothing else to construct. Binding a method value from a nil interface panics HERE,
+	// at construction, rather than at the use that actually needed one — which is the worst
+	// place for it. So the hooks are attached only when there is something to attach them
+	// to, and a runner built this way refuses at execute with the nil-beginner error
+	// rather than crashing the app.
+	//
+	// `ping` is attached down here for the same reason and not in the literal above, which
+	// is where it went first: a method value in a composite literal is evaluated before the
+	// nil check that is six lines below it, and the test that caught it is the one that
+	// constructs a connectionless runner.
+	if conn == nil {
+		return r
+	}
+	r.ping = conn.Ping
+	r.begin = conn.Begin
+	r.beginReadOnly = func(ctx context.Context) (pgx.Tx, error) {
+		return conn.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	}
+	return r
+}
+
+// usable reports whether the connection still works.
+//
+// It exists because a failed COMMIT has two endings and the error does not distinguish
+// them. pgx marks the transaction closed before it checks the error, and on failure it
+// closes the whole connection when the server's transaction status is not IDLE — so the
+// usual outcome of a commit failure is a connection the app still holds and can no longer
+// use. But if the commit landed and only the acknowledgement was lost, the server is
+// IDLE, the connection is fine, and the DML is committed.
+//
+// Both produce "failed to commit transaction". Telling them apart needs the connection's
+// own answer, which is what this is. A runner with no connection, or one whose fake cannot
+// be pinged, answers true: nothing was proved lost, and claiming otherwise would drop a
+// connection on no evidence.
+func (r *statementRunner) usable(ctx context.Context) bool {
+	if r == nil || r.ping == nil {
+		return true
+	}
+	return r.ping(ctx) == nil
 }
 
 // pending reports whether a transaction is waiting to be committed or rolled back.
@@ -165,7 +210,16 @@ func (r *statementRunner) commitPending(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return true, fmt.Errorf("failed to commit transaction: %w", err)
+		// FALSE, not true. The transaction existed — the caller needs to know a commit was
+		// attempted and failed — but it did not commit, and this boolean is read as
+		// "committed": the app's handler turns it into a "Transaction committed" success
+		// toast. Returning true here made a failed commit announce itself as a successful
+		// one, immediately before the error toast for the same statement.
+		//
+		// The handle is dropped either way and not because of this line: pgx marks a
+		// transaction closed before it checks the error, so a second Rollback returns
+		// ErrTxClosed and nothing can undo the DML through this runner.
+		return false, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	return true, nil
 }
@@ -308,25 +362,40 @@ func selectOnlyViolation(sql string) string {
 	return ""
 }
 
+// blankRange replaces out[from:to] with spaces, keeping every newline so line numbers and
+// column positions still line up with the original statement.
+//
+// It is a PACKAGE-LEVEL function rather than a closure over `out` for one reason: its two
+// clamps were unreachable while it was a closure, because every call site inside maskNonCode
+// passes indices the scanner has already bounded. As a closure they could only be exercised
+// by hand-writing a call, which is not something a test can do to a local variable — so the
+// two arms sat uncovered and the guards read as if the bounds were in doubt.
+//
+// They ARE in doubt, which is why they are kept and now tested: a caller that computed an
+// index wrongly would otherwise index out of range and take the statement masker down with
+// it. Out-of-range bounds are clamped rather than rejected, because a partially masked
+// literal is a better answer than a panic on the user's SQL.
+func blankRange(out []byte, from, to int) {
+	if from < 0 {
+		from = 0
+	}
+	if to > len(out) {
+		to = len(out)
+	}
+	for i := from; i < to; i++ {
+		if out[i] != '\n' {
+			out[i] = ' '
+		}
+	}
+}
+
 // maskNonCode returns a copy of sql with string literals (including E-strings
 // and dollar-quoted strings), quoted identifiers and comments replaced by
 // spaces, preserving byte length. Callers can then find top-level separators or
 // keywords without being fooled by their contents.
 func maskNonCode(sql string) string {
 	out := []byte(sql)
-	blank := func(from, to int) {
-		if from < 0 {
-			from = 0
-		}
-		if to > len(out) {
-			to = len(out)
-		}
-		for i := from; i < to; i++ {
-			if out[i] != '\n' {
-				out[i] = ' '
-			}
-		}
-	}
+	blank := func(from, to int) { blankRange(out, from, to) }
 
 	for i := 0; i < len(sql); {
 		switch {

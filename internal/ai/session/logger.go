@@ -36,6 +36,19 @@ type Logger struct {
 	file      *os.File
 	encoder   *json.Encoder
 	retention int // days
+	// readDir is how the retention sweep lists what it is about to delete. A FIELD rather
+	// than a direct os.ReadDir call for one reason, and it is the same reason the tests'
+	// other guards could never be reached.
+	//
+	// The sweep skips an entry whose Info() fails — `if err != nil { continue }` — and that
+	// only happens when the file disappears BETWEEN the listing and the stat. No fixture
+	// produces it: os.ReadDir's DirEntry.Info() calls LSTAT, so a dangling symlink stats
+	// fine, and a permission problem fails for EVERY entry at once, which the sweep reads as
+	// "nothing to do". Only a race reaches the guard.
+	//
+	// So the listing is injected, and a test supplies a three-line entry whose Info() fails.
+	// The behaviour is unchanged: production passes os.ReadDir and nothing else can tell.
+	readDir func(string) ([]os.DirEntry, error)
 }
 
 func NewLogger(dir string, retentionDays int) (*Logger, error) {
@@ -54,6 +67,7 @@ func NewLogger(dir string, retentionDays int) (*Logger, error) {
 		file:      file,
 		encoder:   json.NewEncoder(file),
 		retention: retentionDays,
+		readDir:   os.ReadDir,
 	}, nil
 }
 
@@ -109,7 +123,7 @@ func (l *Logger) Cleanup() error {
 		return nil
 	}
 
-	entries, err := os.ReadDir(l.dir)
+	entries, err := l.listDir()
 	if err != nil {
 		return err
 	}
@@ -137,10 +151,31 @@ func (l *Logger) Cleanup() error {
 
 type Reader struct {
 	dir string
+	// readDir is the same seam as the Logger's, for the same reason: the listing's
+	// per-entry Info() guard is only reachable through a race, so the listing is injected and
+	// the guard is driven with an entry that cannot be stat'ed. Production passes os.ReadDir.
+	readDir func(string) ([]os.DirEntry, error)
 }
 
 func NewReader(dir string) *Reader {
-	return &Reader{dir: dir}
+	return &Reader{dir: dir, readDir: os.ReadDir}
+}
+
+// listDir is os.ReadDir unless the caller supplied its own listing, which is what the tests
+// do. Both call sites go through it rather than through os.ReadDir directly, because a seam
+// that two of the three call sites bypass is not a seam.
+func (l *Logger) listDir() ([]os.DirEntry, error) {
+	if l.readDir != nil {
+		return l.readDir(l.dir)
+	}
+	return os.ReadDir(l.dir)
+}
+
+func (r *Reader) listDir() ([]os.DirEntry, error) {
+	if r.readDir != nil {
+		return r.readDir(r.dir)
+	}
+	return os.ReadDir(r.dir)
 }
 
 type SessionInfo struct {
@@ -154,7 +189,7 @@ type SessionInfo struct {
 }
 
 func (r *Reader) ListSessions() ([]SessionInfo, error) {
-	entries, err := os.ReadDir(r.dir)
+	entries, err := r.listDir()
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +250,7 @@ func (r *Reader) ReadFile(filename string) ([]LogEntry, error) {
 }
 
 func (r *Reader) ReadAll() ([]LogEntry, error) {
-	entries, err := os.ReadDir(r.dir)
+	entries, err := r.listDir()
 	if err != nil {
 		return nil, err
 	}

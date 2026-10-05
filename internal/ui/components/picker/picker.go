@@ -26,7 +26,6 @@ type Picker struct {
 	cursor   int
 	styles   *theme.Styles
 	width    int
-	height   int
 	loading  bool
 	err      error
 }
@@ -47,9 +46,13 @@ func (p *Picker) SetWidth(w int) {
 	p.width = w
 }
 
-func (p *Picker) SetHeight(h int) {
-	p.height = h
-}
+// NO SetHeight, and there used to be one. It wrote a field the renderer never reads: the
+// picker is a centred popup sized by its own content, so only the width has an opinion, and
+// View's only measurements are `p.width` comparisons. The app called it on every window
+// resize, which kept the setter alive and the field written — a value maintained for nothing.
+//
+// So both are gone rather than covered: a test that calls SetHeight would exercise a function
+// no product code can reach a use for, and the honest form of that is to delete it.
 
 func (p *Picker) SetLoading(loading bool) {
 	p.loading = loading

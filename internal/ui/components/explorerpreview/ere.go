@@ -2,7 +2,7 @@ package explorerpreview
 
 import (
 	"fmt"
-	"os"
+	"github.com/buble/dbx/internal/debuglog"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -48,16 +48,57 @@ type ERDiagram struct {
 	IncomingOverflow int
 }
 
+// truncateToWidth shortens s to at most `width` DISPLAY COLUMNS, marking the cut with an
+// ellipsis that fits inside the budget.
+//
+// cutToWidth does the same without the ellipsis.
+//
+// There were seven byte-index slices in this file doing these two jobs — `name[:
+// MaxTableName]`, `entry[:innerWidth]`, `label[:innerWidth]`, `fkEntry[:innerWidth]` and
+// more — and a byte offset is not a display width. Every one of them cuts a multi-byte
+// character in half when the name is not ASCII, and a column named "日本" or "año" produced
+// a box whose own border line was invalid UTF-8. It does not crash and it does not look
+// like an error: it looks like a font problem.
+//
+// Seven copies of one decision, disagreeing about what a width is. Two functions now — one
+// per contract the call sites actually had — and every call site goes through one of them.
+func truncateToWidth(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if ansi.StringWidth(s) <= width {
+		return s
+	}
+	if width == 1 {
+		return "…"
+	}
+	// One column is kept for the ellipsis, which is one column wide.
+	return ansi.Truncate(s, width-1, "") + "…"
+}
+
+// cutToWidth is a hard cut with no ellipsis, for the places that had one. Which of the two
+// a caller wants is a design decision that was made per call site and is now stated rather
+// than implied by an operator.
+func cutToWidth(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if ansi.StringWidth(s) <= width {
+		return s
+	}
+	return ansi.Truncate(s, width, "")
+}
+
 func TruncateTableName(name string) string {
-	if len(name) > MaxTableName {
-		return name[:MaxTableName] + "…"
+	if ansi.StringWidth(name) > MaxTableName {
+		return cutToWidth(name, MaxTableName) + "…"
 	}
 	return name
 }
 
 func TruncateColumnName(name string) string {
-	if len(name) > MaxColumnName {
-		return name[:MaxColumnName] + "…"
+	if ansi.StringWidth(name) > MaxColumnName {
+		return cutToWidth(name, MaxColumnName) + "…"
 	}
 	return name
 }
@@ -149,12 +190,13 @@ func BuildERDiagram(
 
 	// Incoming: tables that reference center
 	incomingFixed := make([]Relationship, 0)
-	seenIncoming := make(map[string]bool)
 
+	// NO seenIncoming map, and there used to be one. It was keyed on tableName over a range
+	// over schemaFKs — a MAP, whose keys are unique by definition — so every key was visited
+	// exactly once and the guard could never fire. The two keys naming the same target are two
+	// DIFFERENT keys, and both are legitimately drawn: orders.user_id and invoices.user_id are
+	// two relationships, not one relationship counted twice.
 	for tableName, fks := range schemaFKs {
-		if seenIncoming[tableName] {
-			continue
-		}
 		for _, fk := range fks {
 			if fk.RefTable == table && fk.RefSchema == schema {
 				rel := Relationship{
@@ -165,7 +207,6 @@ func BuildERDiagram(
 					IsJunction:  isJunctionTable(fks),
 				}
 				incomingFixed = append(incomingFixed, rel)
-				seenIncoming[tableName] = true
 				break
 			}
 		}
@@ -212,13 +253,9 @@ func BuildERDiagram(
 		diagram.Outgoing = outgoingDirect
 	}
 
-	// Debug log
-	if f, err := os.OpenFile("/tmp/dbx_ere_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-		_, _ = fmt.Fprintf(f, "BuildERE: table=%s totalCols=%d centerCols=%d(out of %d) outgoing=%d incoming=%d\n",
-			table, len(columns), len(diagram.Center.Columns), len(allCols),
-			len(diagram.Outgoing), len(diagram.Incoming))
-		_ = f.Close()
-	}
+	debuglog.Write("ere", "ER", "BuildERE: table=%s totalCols=%d centerCols=%d(out of %d) outgoing=%d incoming=%d",
+		table, len(columns), len(diagram.Center.Columns), len(allCols),
+		len(diagram.Outgoing), len(diagram.Incoming))
 
 	return diagram
 }
@@ -270,10 +307,13 @@ func (n *ERDiagramNav) MoveDown() {
 	if count == 0 {
 		return
 	}
+	// No `else if n.activeRow == -1` arm, and there used to be one. It cannot fire: count == 0
+	// returns two lines above, so reaching the else means activeRow >= count-1 >= 0, which is
+	// exactly the condition the arm was testing. The no-selection state is already handled —
+	// by the `count == 0` early return, and by activeRow starting at -1 and being incremented
+	// to 0 on the first MoveDown.
 	if n.activeRow < count-1 {
 		n.activeRow++
-	} else if n.activeRow == -1 {
-		n.activeRow = 0
 	}
 }
 
@@ -368,20 +408,14 @@ func renderBox(name string, columns []ColumnBadge, width int, isJunction bool) s
 	innerWidth := width - 2
 	displayName := TruncateTableName(name)
 
-	if ansi.StringWidth(displayName) > innerWidth {
-		if innerWidth > 1 {
-			displayName = displayName[:innerWidth-1] + "…"
-		} else {
-			displayName = "…"
-		}
-	}
+	displayName = truncateToWidth(displayName, innerWidth)
 
 	lines = append(lines, "┌"+strings.Repeat("─", innerWidth)+"┐")
 
+	// No clamp on namePad: displayName was truncated to innerWidth two lines above, so the
+	// difference cannot be negative. The 1:N box below does NOT truncate, and its clamp is
+	// live — which is the difference this pair used to hide.
 	namePad := innerWidth - ansi.StringWidth(displayName)
-	if namePad < 0 {
-		namePad = 0
-	}
 	leftPad := namePad / 2
 	rightPad := namePad - leftPad
 	lines = append(lines, "│"+strings.Repeat(" ", leftPad)+displayName+strings.Repeat(" ", rightPad)+"│")
@@ -396,22 +430,15 @@ func renderBox(name string, columns []ColumnBadge, width int, isJunction bool) s
 			badge = "FK "
 		}
 		colName := TruncateColumnName(col.Name)
-		entry := badge + colName + " " + col.DataType
-		if ansi.StringWidth(entry) > innerWidth {
-			entry = entry[:innerWidth]
-		}
+		// No clamp on pad: cutToWidth caps the entry at innerWidth, so the difference cannot
+		// be negative. Without the cap, strings.Repeat would panic on a negative count.
+		entry := cutToWidth(badge+colName+" "+col.DataType, innerWidth)
 		pad := innerWidth - ansi.StringWidth(entry)
-		if pad < 0 {
-			pad = 0
-		}
 		lines = append(lines, "│"+entry+strings.Repeat(" ", pad)+"│")
 	}
 
 	if isJunction {
-		label := "  *"
-		if ansi.StringWidth(label) > innerWidth {
-			label = label[:innerWidth]
-		}
+		label := cutToWidth("  *", innerWidth)
 		pad := innerWidth - ansi.StringWidth(label)
 		lines = append(lines, "│"+label+strings.Repeat(" ", pad)+"│")
 	}
@@ -433,32 +460,20 @@ func renderCompactBox(name string, fkColumn string, width int, isJunction bool, 
 	if selected {
 		displayName = "► " + displayName + " ◄"
 	}
-	if ansi.StringWidth(displayName) > innerWidth {
-		if innerWidth > 1 {
-			displayName = displayName[:innerWidth-1] + "…"
-		} else {
-			displayName = "…"
-		}
-	}
+	displayName = truncateToWidth(displayName, innerWidth)
 
 	lines = append(lines, "┌"+strings.Repeat("─", innerWidth)+"┐")
 
-	// Name line — left-aligned (more compact)
+	// Name line — left-aligned (more compact). No clamp on namePad, for the same reason as
+	// the three above: displayName was truncated to innerWidth five lines up.
 	namePad := innerWidth - ansi.StringWidth(displayName)
-	if namePad < 0 {
-		namePad = 0
-	}
 	lines = append(lines, "│"+displayName+strings.Repeat(" ", namePad)+"│")
 
 	// FK column line
-	fkEntry := "FK " + fkColumn
-	if ansi.StringWidth(fkEntry) > innerWidth {
-		fkEntry = fkEntry[:innerWidth]
-	}
+	// No clamp on fkPad, for the same reason as the column pad above: cutToWidth caps the
+	// entry at innerWidth.
+	fkEntry := cutToWidth("FK "+fkColumn, innerWidth)
 	fkPad := innerWidth - ansi.StringWidth(fkEntry)
-	if fkPad < 0 {
-		fkPad = 0
-	}
 	lines = append(lines, "│"+fkEntry+strings.Repeat(" ", fkPad)+"│")
 
 	lines = append(lines, "└"+strings.Repeat("─", innerWidth)+"┘")

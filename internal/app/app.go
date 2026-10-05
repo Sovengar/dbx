@@ -14,11 +14,14 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
 	"charm.land/lipgloss/v2"
+	"github.com/buble/dbx/internal/debuglog"
 	"github.com/charmbracelet/x/ansi"
 
 	aiContext "github.com/buble/dbx/internal/ai/context"
 	"github.com/buble/dbx/internal/ai/nl2sql"
+	"github.com/buble/dbx/internal/ai/session"
 	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/buble/dbx/internal/store"
@@ -58,25 +61,32 @@ const (
 )
 
 type Model struct {
-	state                      AppState
-	config                     *config.Config
-	theme                      *theme.Theme
-	styles                     *theme.Styles
-	picker                     *picker.Picker
-	explorer                   *explorer.Explorer
-	grid                       *grid.Grid
-	editor                     *editor.SQLEditor
-	gridSidebarPreview         *gridsidebarpreview.Preview
-	gridPreview                *gridpreview.GridPreview
-	explorerPreview            *explorerpreview.ExplorerPreview
-	router                     *Router
-	keybinds                   config.Resolver
-	palette                    *palette.Palette
-	helpModal                  *ui.HelpModal
-	toast                      *ui.ToastManager
-	keybindsPane               *ui.KeybindsPane
-	project                    *config.FoundProject
-	conn                       *pgx.Conn
+	state              AppState
+	config             *config.Config
+	theme              *theme.Theme
+	styles             *theme.Styles
+	picker             *picker.Picker
+	explorer           *explorer.Explorer
+	grid               *grid.Grid
+	editor             *editor.SQLEditor
+	gridSidebarPreview *gridsidebarpreview.Preview
+	gridPreview        *gridpreview.GridPreview
+	explorerPreview    *explorerpreview.ExplorerPreview
+	router             *Router
+	keybinds           config.Resolver
+	palette            *palette.Palette
+	helpModal          *ui.HelpModal
+	toast              *ui.ToastManager
+	keybindsPane       *ui.KeybindsPane
+	project            *config.FoundProject
+	// The INTERFACE, not *pgx.Conn. Everything this model does over a connection goes
+	// through postgres.Conn — Query, QueryRow, Exec, Close — and depending on the
+	// interface is what lets a test make one statement fail and the next succeed, which
+	// is the only way to reach the arms that handle a rejected metadata query or a
+	// refused write. A live database cannot be told to fail on demand, so while this was
+	// *pgx.Conn the error handling in this file was only reachable by breaking a
+	// container mid-test.
+	conn                       postgres.Conn
 	width                      int
 	height                     int
 	err                        error
@@ -97,18 +107,22 @@ type Model struct {
 	spinnerFrame               int
 	schemaForeignKeys          map[string][]postgres.ForeignKeyInfo
 	queryStore                 *store.QueryStore
-	queryBrowser               *querybrowser.QueryBrowser
-	queryBrowserOpen           bool
-	ask                        *ask.Ask
-	askOpen                    bool
-	aiProvider                 nl2sql.Provider
-	aiProviderErr              error
-	askSchemaText              string
-	askContextHint             string
-	askGenSeq                  int
-	runner                     *statementRunner
-	connectCancelled           bool
-	forcePicker                bool
+	// sessionLogger records the SQL that ran, for `dbx pipe`. Nil when
+	// session.enabled is false or the log could not be opened, so every call site
+	// nil-checks rather than testing a flag.
+	sessionLogger    *session.Logger
+	queryBrowser     *querybrowser.QueryBrowser
+	queryBrowserOpen bool
+	ask              *ask.Ask
+	askOpen          bool
+	aiProvider       nl2sql.Provider
+	aiProviderErr    error
+	askSchemaText    string
+	askContextHint   string
+	askGenSeq        int
+	runner           *statementRunner
+	connectCancelled bool
+	forcePicker      bool
 }
 
 var spinnerChars = [9]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"}
@@ -125,6 +139,10 @@ func NewModel(cfg *config.Config) Model {
 	if cfg.UI.YankMaxRows > 0 {
 		yankMaxRows = cfg.UI.YankMaxRows
 	}
+	// ui.statusbar_help is the on/off switch for the keybind pane. It was
+	// declared with a default of true and read by nothing, so a user who turned
+	// the help off kept getting it.
+	helpVisible := cfg.UI.StatusBarHelp
 	g := grid.New(t.Styles(), pageSize, kbr)
 	g.SetYankMaxRows(yankMaxRows)
 	// QueryStore is initialized later in initQueryStore after project selection
@@ -141,6 +159,25 @@ func NewModel(cfg *config.Config) Model {
 		Model:     cfg.AI.Model,
 		Providers: cfg.AI.Nl2sqlProviders(),
 	})
+	kbp := ui.NewKeybindsPane(t.Styles(), kbr)
+	kbp.SetVisible(helpVisible)
+
+	// session.enabled and session.retention_days. session.NewLogger took a
+	// directory and a retention all along and was never called by anything, so
+	// both keys were declared with defaults and read by nothing — and dbx wrote no
+	// session log at all, which is why `session.dir` appeared to work (only the
+	// READER in the CLI used it) while the writer did not exist.
+	//
+	// A failure to open the log must not stop the TUI, so the error is dropped and
+	// the logger stays nil: logging is the one feature here that is allowed to be
+	// unavailable without the user finding out the hard way.
+	var sessionLogger *session.Logger
+	if cfg.Session.Enabled {
+		if l, err := session.NewLogger(cfg.Session.Dir, cfg.Session.RetentionDays); err == nil {
+			sessionLogger = l
+		}
+	}
+
 	return Model{
 		config:             cfg,
 		theme:              t,
@@ -156,20 +193,74 @@ func NewModel(cfg *config.Config) Model {
 		palette:            palette.New(t.Styles(), kbr),
 		helpModal:          ui.NewHelpModal(t.Styles(), kbr),
 		toast:              ui.NewToastManager(t.Styles()),
-		keybindsPane:       ui.NewKeybindsPane(t.Styles(), kbr),
+		keybindsPane:       kbp,
 		state:              StatePicker,
 		yankMaxRows:        yankMaxRows,
 		queryStore:         qs,
 		queryBrowser:       qb,
+		sessionLogger:      sessionLogger,
 		ask:                ask.New(t.Styles()),
 		aiProvider:         aiProvider,
 		aiProviderErr:      aiProviderErr,
 	}
 }
 
+// logSessionQuery, logSessionError and logSessionConnect are the three writes the
+// session log gets. All three are no-ops without a logger, which is the state
+// session.enabled = false produces — and also the state a failed log open produces,
+// because a TUI that refuses to start over a log file would be a worse bug than a
+// missing log.
+//
+// They swallow their own errors on purpose. The log is a record of what happened, not a
+// channel the user is waiting on, so a full disk must not turn a successful query into a
+// reported failure.
+func (m *Model) logSessionQuery(sql string, d time.Duration, rows int) {
+	if m.sessionLogger == nil {
+		return
+	}
+	_ = m.sessionLogger.LogQuery(sql, d, rows)
+}
+
+func (m *Model) logSessionError(sql string, err error) {
+	if m.sessionLogger == nil || err == nil {
+		return
+	}
+	_ = m.sessionLogger.LogError(sql, err)
+}
+
+func (m *Model) logSessionConnect(name string) {
+	if m.sessionLogger == nil {
+		return
+	}
+	_ = m.sessionLogger.LogConnect(name)
+}
+
+// cleanupSessions applies session.retention_days. It runs once at startup, in its own
+// command rather than inline, because it is a directory walk: on a laptop with a year of
+// daily logs that is thousands of stat calls, and doing it in Init would delay the first
+// frame by however long the disk takes.
+func (m Model) cleanupSessions() tea.Cmd {
+	logger := m.sessionLogger
+	if logger == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		_ = logger.Cleanup()
+		return nil
+	}
+}
+
 // initQueryStore initializes the QueryStore for the given project.
 // It uses a default stateDir if not provided (for tests).
 func (m *Model) initQueryStore(projectName string, stateDir string) {
+	if stateDir == "" && m.config != nil {
+		// ui.state_dir. The explicit argument still wins so a caller — and the
+		// tests — can point the store somewhere disposable without touching the
+		// user's real state. The nil guard is not defensive padding: a model
+		// built by the test harness has no config, and reading through it
+		// panicked the first time a test passed an empty stateDir.
+		stateDir = m.config.UI.StateDir
+	}
 	if stateDir == "" {
 		stateDir = config.StateDir()
 	}
@@ -178,7 +269,15 @@ func (m *Model) initQueryStore(projectName string, stateDir string) {
 	// Migrate global history if it exists and project file doesn't
 	_ = store.MigrateGlobalHistory(stateDir, projectDir)
 
-	m.queryStore = store.NewQueryStore(projectDir)
+	// ui.history_size, which used to default to 100 while the store kept 500 and
+	// read neither. A limit of zero means the store's own default rather than
+	// "keep nothing", so a model built without a config is not left with an empty
+	// history.
+	maxEntries := 0
+	if m.config != nil {
+		maxEntries = m.config.UI.HistorySize
+	}
+	m.queryStore = store.NewQueryStoreLimited(projectDir, maxEntries)
 	m.queryBrowser = querybrowser.New(m.styles, m.queryStore)
 	// Apply current window dimensions to the new QueryBrowser
 	if m.width > 0 && m.height > 0 {
@@ -188,7 +287,7 @@ func (m *Model) initQueryStore(projectName string, stateDir string) {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.scanProjects(), tickToast())
+	return tea.Batch(m.scanProjects(), m.cleanupSessions(), tickToast())
 }
 
 func (m Model) scanProjects() tea.Cmd {
@@ -209,6 +308,27 @@ type projectsScannedMsg struct {
 
 type toastTickMsg struct{}
 
+// actionSurvivesTextInput reports whether an app-wide action stays available while a
+// widget owns the keyboard — the explorer's table filter, the jq expression line.
+//
+// This is ONE list because it was TWO, and they drifted. The jq line got a carve-out
+// and the explorer's table filter did not, so `?` typed a literal `?` into the filter
+// instead of opening help: the one key a user reaches for when they do not know what
+// else to press, which is exactly the state they are in while filtering.
+//
+// `quit` is deliberately ABSENT, and that is a real tension rather than an oversight.
+// It is bound to `q`, and `q` is a legal character in a table filter, so carving it out
+// would make the filter untypeable. Its other binding, `ctrl+c`, is not separable from
+// `q` at this layer — the carve-out is by ACTION, not by key — so quitting from inside
+// a text input stays the business of the key that means "quit" everywhere.
+func actionSurvivesTextInput(action config.ActionID) bool {
+	switch action {
+	case "help", "palette", "rollback":
+		return true
+	}
+	return false
+}
+
 func tickToast() tea.Cmd {
 	return tea.Every(time.Second, func(t time.Time) tea.Msg {
 		return toastTickMsg{}
@@ -223,6 +343,22 @@ func tickSpinner() tea.Cmd {
 	})
 }
 
+// pgxConnect opens a database connection, and it is a VARIABLE so a test can supply one.
+//
+// This is the app's only call that opens a socket, and the ping that follows it is an error
+// arm no test could reach: pgx.Connect succeeding means the DSN parsed and something answered
+// on the far end, so the only way for the PING to fail is a server that accepts the connection
+// and then stalls — which is a socket this repository has no server for.
+//
+// So the connect is injected and the arm is driven with a connection that reports itself
+// unusable. Production passes pgx.Connect and nothing else can tell the difference.
+//
+// It is the same trade the CLI makes with its own pgxConnect, and it is the same shape as
+// copyToClipboard below: a package variable for the one call a test cannot make for itself.
+var pgxConnect = func(ctx context.Context, dsn string) (postgres.Conn, error) {
+	return pgx.Connect(ctx, dsn)
+}
+
 func (m Model) connectToDB(project config.FoundProject) tea.Cmd {
 	return func() tea.Msg {
 		dsn := project.Connection.GetDSN()
@@ -232,12 +368,18 @@ func (m Model) connectToDB(project config.FoundProject) tea.Cmd {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		conn, err := pgx.Connect(ctx, dsn)
+		conn, err := pgxConnect(ctx, dsn)
 		if err != nil {
 			return dbConnectedMsg{err: fmt.Errorf("failed to connect: %w", err)}
 		}
 
 		if err := conn.Ping(ctx); err != nil {
+			// Close it. The connection is already open — pgx.Connect returned it — and
+			// returning without closing leaked a socket and a backend process for every
+			// database that accepted the TCP connection and then failed to answer. The error
+			// is returned rather than the connection, because a connection that cannot answer
+			// a ping cannot answer a query either.
+			_ = conn.Close(ctx)
 			return dbConnectedMsg{err: fmt.Errorf("failed to ping: %w", err)}
 		}
 
@@ -246,12 +388,12 @@ func (m Model) connectToDB(project config.FoundProject) tea.Cmd {
 }
 
 type dbConnectedMsg struct {
-	conn    *pgx.Conn
+	conn    postgres.Conn
 	project *config.FoundProject
 	err     error
 }
 
-func (m Model) loadSchema(conn *pgx.Conn, project config.FoundProject) tea.Cmd {
+func (m Model) loadSchema(conn postgres.Conn, project config.FoundProject) tea.Cmd {
 	if m.refuseIfBusy() {
 		return nil
 	}
@@ -259,13 +401,7 @@ func (m Model) loadSchema(conn *pgx.Conn, project config.FoundProject) tea.Cmd {
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(conn)
 
-		dbName := project.Connection.DSN
-		if idx := strings.LastIndex(dbName, "/"); idx >= 0 {
-			dbName = dbName[idx+1:]
-		}
-		if idx := strings.Index(dbName, "?"); idx >= 0 {
-			dbName = dbName[:idx]
-		}
+		dbName := deriveDBName(project.Connection.DSN)
 
 		result, err := loader.LoadDatabase(ctx, dbName)
 		if err != nil {
@@ -276,7 +412,31 @@ func (m Model) loadSchema(conn *pgx.Conn, project config.FoundProject) tea.Cmd {
 	}
 }
 
-func (m Model) loadSchemaWithTarget(conn *pgx.Conn, project config.FoundProject, targetSchema, targetTable string) tea.Cmd {
+// deriveDBName is the database name inside a DSN: the part after the last slash and before
+// the first question mark.
+//
+// It was written inline twice — in loadSchema and in loadSchemaWithTarget — with no shared
+// helper, which is the shape that has produced the most bugs in this repository: the same
+// string operation in two places, left to drift. The name it produces is what the schema
+// pane and the window title show, so a divergence between the copies would mean the app
+// names the database one thing on the first load and another on the reload after a DDL
+// statement.
+//
+// The order of the two steps matters and is not interchangeable: the question mark is
+// stripped AFTER the slash, because a DSN's query string can itself contain a slash
+// (`?options=-c%20search_path%3Dpublic`).
+func deriveDBName(dsn string) string {
+	name := dsn
+	if idx := strings.LastIndex(name, "/"); idx >= 0 {
+		name = name[idx+1:]
+	}
+	if idx := strings.Index(name, "?"); idx >= 0 {
+		name = name[:idx]
+	}
+	return name
+}
+
+func (m Model) loadSchemaWithTarget(conn postgres.Conn, project config.FoundProject, targetSchema, targetTable string) tea.Cmd {
 	if m.refuseIfBusy() {
 		return nil
 	}
@@ -284,13 +444,7 @@ func (m Model) loadSchemaWithTarget(conn *pgx.Conn, project config.FoundProject,
 		ctx := context.Background()
 		loader := postgres.NewSchemaLoader(conn)
 
-		dbName := project.Connection.DSN
-		if idx := strings.LastIndex(dbName, "/"); idx >= 0 {
-			dbName = dbName[idx+1:]
-		}
-		if idx := strings.Index(dbName, "?"); idx >= 0 {
-			dbName = dbName[:idx]
-		}
+		dbName := deriveDBName(project.Connection.DSN)
 
 		result, err := loader.LoadDatabase(ctx, dbName)
 		if err != nil {
@@ -417,18 +571,83 @@ func (m Model) isDDL(sql string) bool {
 	return false
 }
 
+// hasWordPrefix reports whether s begins with word followed by whitespace or the end of
+// s. A bare strings.HasPrefix is not enough: it matched "CREATE TABLEX" — and
+// "CREATE TABLESPACE" — as CREATE TABLE, so `CREATE TABLESPACE foo LOCATION '/x'`
+// reported the table "SPACE".
+func hasWordPrefix(s, word string) bool {
+	if !strings.HasPrefix(s, word) {
+		return false
+	}
+	rest := s[len(word):]
+	return rest == "" || rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\n' || rest[0] == '\r'
+}
+
+// takeName reads one unquoted identifier off the front of rest, returning it and what is
+// left (already trimmed).
+//
+// The characters that END an identifier are written here, once. They used to be written
+// twice and the two copies disagreed: the reader that takes the table after an explicit
+// schema ended the name at a semicolon, and the reader that takes an unqualified name did
+// not. So `CREATE TABLE users;` — the punctuated form, which is how most people write it,
+// and what the editor is left holding after a previous statement — navigated to a table
+// named "users;", while `CREATE TABLE s.users;` navigated correctly. Same parser, same
+// statement, different answer depending on whether a schema happened to be spelled out.
+//
+// dotEnds says whether a dot terminates the name. It does for the FIRST token, which is
+// either the schema or the whole name, and not for the second, which is a table inside a
+// quoted schema and may legitimately contain one.
+func takeName(rest string, dotEnds bool) (name, remainder string) {
+	end := 0
+	for end < len(rest) {
+		switch c := rest[end]; c {
+		case ' ', '\t', '\n', '\r', '(', ';':
+			return rest[:end], strings.TrimSpace(rest[end:])
+		case '"':
+			// A double quote ENDS the name immediately, which for a name that starts with
+			// one means the name is empty. Quoted identifiers are only ever read through
+			// unquoteName, so reaching a quote here means either the statement is malformed
+			// or the quoting is unterminated — and returning the opening quote as part of
+			// the name produced a table called `"users`, which does not exist.
+			//
+			// A quote cannot appear inside an unquoted identifier (Postgres escapes it by
+			// doubling it, which only exists in the quoted form), so this cannot truncate
+			// a legitimate name.
+			return rest[:end], strings.TrimSpace(rest[end:])
+		case '.':
+			if dotEnds {
+				return rest[:end], strings.TrimSpace(rest[end:])
+			}
+		}
+		end++
+	}
+	return rest, ""
+}
+
 func extractDDLTableName(sql string) (schema, table string) {
-	upper := strings.ToUpper(strings.TrimSpace(sql))
+	// TRIM ONCE. `upper` was TrimSpace'd while `sql` was not, so the slice below
+	// counted the keyword's bytes from the start of the UNTRIMMED text and cut
+	// into the middle of it: "  DROP TABLE IF EXISTS public.users" sliced at 10
+	// gave "LE IF EXISTS public.users", and the answer was schema "public", table
+	// "LE". The result drives loadSchemaWithTarget, so that navigated the
+	// explorer to a table that does not exist — and the leading whitespace is not
+	// exotic, because the statement arrives from the editor and the history, and
+	// the TrimSpace at the top of this function PROMISED to handle it.
+	//
+	// The table name still comes from the UN-uppercased text below, which is why
+	// this cannot simply slice `upper`.
+	trimmed := strings.TrimSpace(sql)
+	upper := strings.ToUpper(trimmed)
 
 	keyword := ""
 	switch {
-	case strings.HasPrefix(upper, "CREATE TABLE"):
+	case hasWordPrefix(upper, "CREATE TABLE"):
 		keyword = "CREATE TABLE"
-	case strings.HasPrefix(upper, "DROP TABLE"):
+	case hasWordPrefix(upper, "DROP TABLE"):
 		keyword = "DROP TABLE"
-	case strings.HasPrefix(upper, "ALTER TABLE"):
+	case hasWordPrefix(upper, "ALTER TABLE"):
 		keyword = "ALTER TABLE"
-	case strings.HasPrefix(upper, "TRUNCATE TABLE"):
+	case hasWordPrefix(upper, "TRUNCATE TABLE"):
 		keyword = "TRUNCATE TABLE"
 	}
 
@@ -436,61 +655,58 @@ func extractDDLTableName(sql string) (schema, table string) {
 		return "", ""
 	}
 
-	rest := strings.TrimSpace(sql[len(keyword):])
+	rest := strings.TrimSpace(trimmed[len(keyword):])
 
 	upperRest := strings.ToUpper(rest)
 	switch {
-	case strings.HasPrefix(upperRest, "IF NOT EXISTS "):
-		rest = rest[len("IF NOT EXISTS "):]
-	case strings.HasPrefix(upperRest, "IF EXISTS "):
-		rest = rest[len("IF EXISTS "):]
+	case hasWordPrefix(upperRest, "IF NOT EXISTS"):
+		rest = rest[len("IF NOT EXISTS"):]
+	case hasWordPrefix(upperRest, "IF EXISTS"):
+		rest = rest[len("IF EXISTS"):]
 	}
 
 	rest = strings.TrimSpace(rest)
 
 	if len(rest) > 0 && rest[0] == '"' {
-		end := strings.Index(rest[1:], "\"")
-		if end >= 0 {
-			table = rest[1 : end+1]
-			rest = strings.TrimSpace(rest[end+2:])
+		if quoted, ok := unquoteName(rest); ok {
+			// Read by unquoteName so the quote handling lives in ONE place. It used to be
+			// hand-sliced here, and the two copies disagreed in two ways:
+			//
+			//   after a quoted SCHEMA an unquoted table was never read at all, so
+			//   `CREATE TABLE "MySchema".users` came back with an empty table and
+			//   navigated nowhere
+			//
+			//   after an unquoted schema a quoted table kept its QUOTES, so
+			//   `sales."MyTable"` came back as the name `"MyTable"` — with the quote
+			//   characters in it, which is not a table that exists, while the identical
+			//   statement without a schema came back as `MyTable`.
+			//
+			// Two copies of one decision, disagreeing. Eleventh instance of this family in
+			// this repo.
+			table = quoted
+			rest = strings.TrimSpace(rest[len(quoted)+2:])
 			if len(rest) > 0 && rest[0] == '.' {
 				schema = table
-				table = ""
-				rest = strings.TrimSpace(rest[1:])
-				if len(rest) > 0 && rest[0] == '"' {
-					end2 := strings.Index(rest[1:], "\"")
-					if end2 >= 0 {
-						table = rest[1 : end2+1]
-					}
-				}
+				table = nameAfterSchema(strings.TrimSpace(rest[1:]))
+			}
+
+			// The `public` default, applied HERE as well as at the end of the function
+			// because this arm returns early. Quoting a table name is mandatory in
+			// Postgres for any name with a capital in it, so without the default here
+			// `CREATE TABLE "MyTable"` navigated nowhere while the identical statement
+			// unquoted navigated to public.MyTable.
+			if schema == "" {
+				schema = "public"
 			}
 			return schema, table
 		}
 	}
 
-	endIdx := 0
-	for endIdx < len(rest) {
-		c := rest[endIdx]
-		if c == ' ' || c == '.' || c == '(' || c == '\t' || c == '\n' {
-			break
-		}
-		endIdx++
-	}
-	first := rest[:endIdx]
-	rest = strings.TrimSpace(rest[endIdx:])
+	first, rest := takeName(rest, true)
 
 	if len(rest) > 0 && rest[0] == '.' {
 		schema = first
-		rest = strings.TrimSpace(rest[1:])
-		endIdx = 0
-		for endIdx < len(rest) {
-			c := rest[endIdx]
-			if c == ' ' || c == '(' || c == '\t' || c == '\n' || c == ';' {
-				break
-			}
-			endIdx++
-		}
-		table = rest[:endIdx]
+		table = nameAfterSchema(strings.TrimSpace(rest[1:]))
 	} else {
 		table = first
 	}
@@ -500,6 +716,38 @@ func extractDDLTableName(sql string) (schema, table string) {
 	}
 
 	return schema, table
+}
+
+// nameAfterSchema reads the table name that follows a dot, quoted or not.
+//
+// Both arms of extractDDLTableName go through it, which is what makes `sales."MyTable"`
+// and `sales.MyTable` answer identically — they used not to, and the quoted one carried
+// its quote characters into a lookup for a table that does not exist.
+func nameAfterSchema(rest string) string {
+	if quoted, ok := unquoteName(rest); ok {
+		return quoted
+	}
+	name, _ := takeName(rest, false)
+	return name
+}
+
+// unquoteName reads a double-quoted identifier off the front of s and returns it with the
+// quotes removed, plus whether there was one.
+//
+// It is the single answer to "is this name quoted", and it refuses an UNTERMINATED quote
+// rather than returning the fragment: slicing s[1 : strings.Index(s[1], quote)+1] over a
+// string with no closing quote asks for s[1:0], which is a slice bounds panic. The panic
+// was avoided by a branch that instead returned the name WITH its opening quote still
+// attached, so `DROP TABLE "users` navigated to a table called `"users`.
+func unquoteName(s string) (string, bool) {
+	if len(s) == 0 || s[0] != '"' {
+		return "", false
+	}
+	end := strings.Index(s[1:], `"`)
+	if end < 0 {
+		return "", false
+	}
+	return s[1 : end+1], true
 }
 
 type schemaLoadedMsg struct {
@@ -636,6 +884,16 @@ type queryExecutedMsg struct {
 	result *postgres.QueryResult
 	sql    string
 	err    error
+	// duration is how long the statement took, measured where it ran. It is
+	// carried rather than recomputed because the handler that writes the session
+	// log runs later, on a different turn of the event loop.
+	duration time.Duration
+	// commitFailed reports that the COMMIT of a pending DML transaction failed,
+	// which is not the same as the statement failing: the statement ran, and the
+	// question is whether its effects are stored. It is carried separately because
+	// the answer needs the connection's, not the statement's — see
+	// handleCommitFailure.
+	commitFailed bool
 	// committedTx reports that a pending DML transaction was committed
 	// before running this execution.
 	committedTx bool
@@ -844,6 +1102,14 @@ func (m *Model) syncGridSidebarPreviewForCursor() tea.Cmd {
 
 func preprocessSQL(sql string) string {
 	trimmed := strings.TrimSpace(sql)
+	if trimmed == "" {
+		// Nothing to run. This used to fall through to `return sql` at the bottom,
+		// handing back the untrimmed whitespace — which is not empty, so execute_query's
+		// `sql != ""` check passed and pressing run on an empty editor sent whitespace
+		// to PostgreSQL. The answer came back as "empty query string", which is a
+		// confusing way to learn you pressed the wrong key.
+		return ""
+	}
 	upper := strings.ToUpper(trimmed)
 
 	if strings.HasPrefix(upper, "SELECT ") || strings.HasPrefix(upper, "WITH ") ||
@@ -930,15 +1196,28 @@ func (m Model) executeQuery(sql string) tea.Cmd {
 		}
 
 		ctx := context.Background()
+		started := time.Now()
 		result, committed, err := m.runner.execute(ctx, sql)
+		commitFailed := false
 		if err == nil && commitOnRun {
 			committedNow, commitErr := m.runner.commitPending(ctx)
 			if commitErr != nil {
 				err = commitErr
+				commitFailed = true
 			}
 			committed = committed || committedNow
 		}
-		return queryExecutedMsg{result: result, sql: sql, err: err, committedTx: committed}
+		// The duration and row count are measured HERE, inside the command, because
+		// the handler that receives the message cannot: by then the runner is free
+		// again and any clock it started would be measuring the wrong thing.
+		return queryExecutedMsg{
+			result:       result,
+			sql:          sql,
+			err:          err,
+			commitFailed: commitFailed,
+			committedTx:  committed,
+			duration:     time.Since(started),
+		}
 	}
 }
 
@@ -958,7 +1237,6 @@ func (m Model) handleAskOpen() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	schema, table, where := m.gridContextHint()
-	m.ask.SetContextHint(schema, table, where)
 	m.askContextHint = buildAskContextHint(schema, table, where)
 	m.askOpen = true
 	m.ask.Show()
@@ -1071,7 +1349,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.picker.SetWidth(msg.Width)
-		m.picker.SetHeight(msg.Height)
 		m.toast.SetWidth(msg.Width)
 		m.palette.SetWidth(msg.Width)
 		m.palette.SetHeight(msg.Height)
@@ -1079,6 +1356,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.helpModal.SetHeight(msg.Height)
 		m.keybindsPane.SetWidth(msg.Width)
 		m.keybindsPane.SetHeight(msg.Height)
+		// The grid was sized ONLY from renderGrid and from schemaLoadedMsg, so its width
+		// was a side effect of painting: a model that had been resized but not yet
+		// drawn had an unsized grid, and an unsized grid has no column widths, and the
+		// cell editor indexes those widths. Every other component is sized here, and
+		// the grid not being sized here is the odd one out.
+		m.grid.SetWidth(msg.Width)
+		m.grid.SetHeight(msg.Height - 4)
 		if m.explorer != nil {
 			m.explorer.SetWidth(msg.Width)
 			m.explorer.SetHeight(msg.Height - 2)
@@ -1141,14 +1425,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.connectCancelled = false
 			return m, nil
 		}
+		// Logged BEFORE the returns, and by PROJECT NAME rather than by DSN.
+		//
+		// A DSN carries the password — that is what password_env puts in it — so
+		// writing one into a log file would undo the whole point of that knob. The
+		// name is what a reader of the log actually wants anyway.
 		if msg.err != nil {
+			m.logSessionError("", msg.err)
 			m.state = StateError
 			m.err = msg.err
+			// The spinner is stopped here for the same reason the schema-load error
+			// stops it: this arm used not to, so a failed connection left the app
+			// sitting on the error screen with a spinner still ticking and still
+			// reissuing its command forever. Same decision, written once here and once
+			// twenty lines down, and the copy that was missing is the one that fires
+			// first.
+			m.spinnerActive = false
 			m.toast.ShowError(fmt.Sprintf("Connection failed: %v", msg.err))
 			return m, nil
 		}
+		// The project the MESSAGE names becomes the model's project, not just the
+		// argument to the schema load.
+		//
+		// The handler has always read msg.project here rather than m.project — which is
+		// right, because connectToDB stamps the project it actually connected to onto the
+		// reply — but it never wrote it back. So a model whose own project was changed
+		// while the connection was in flight loaded the schema of the database it reached
+		// while still calling itself STALE: the schema pane, the window title and every
+		// later per-project lookup used a project that was never connected to.
+		//
+		// The nil case is not reachable from connectToDB, which always sets it, so this
+		// keeps m.project rather than inventing an error path nothing takes.
+		if msg.project != nil {
+			m.project = msg.project
+		}
+		if m.project != nil {
+			m.logSessionConnect(m.project.Name)
+		}
 		m.conn = msg.conn
-		m.runner = newStatementRunner(msg.conn)
+		// The runner needs to open transactions and the message carries the wider
+		// postgres.Conn, so the two methods are recovered here. connectToDB hands over a
+		// *pgx.Conn, which satisfies both, so this cannot fail in the app — and if it ever
+		// did, the honest answer is a visible error rather than a nil runner, because a
+		// nil runner means every statement refuses with "not connected" while the app
+		// displays "Connected to database".
+		beginner, ok := msg.conn.(postgres.TxBeginner)
+		if !ok {
+			m.state = StateError
+			m.err = fmt.Errorf("connection cannot open transactions")
+			m.spinnerActive = false
+			m.toast.ShowError("Connected, but this connection cannot open transactions")
+			return m, nil
+		}
+		m.runner = newStatementRunner(beginner)
 		m.syncTxStatus()
 		m.state = StateLoading
 		m.toast.ShowInfo("Connected to database")
@@ -1488,14 +1817,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.editor != nil {
 			m.editor.SetCommitOnRun(false)
 		}
-		if msg.committedTx {
-			m.toast.ShowSuccess("Transaction committed")
-		}
 		m.syncTxStatus()
+		// The error is answered FIRST. It used to be answered second, with the success
+		// toast in front of it, so any message carrying both a committedTx and an error
+		// announced "Transaction committed" and then "Query failed" for the same statement.
+		// The boolean no longer says that any more — commitPending returns false when the
+		// commit fails — but the ORDER is the defect, and an ordering that can contradict
+		// itself is worth not having regardless of what feeds it.
 		if msg.err != nil {
+			m.logSessionError(msg.sql, msg.err)
+			if msg.commitFailed {
+				return m.handleCommitFailure(msg.err)
+			}
 			m.toast.ShowError(fmt.Sprintf("Query failed: %v", msg.err))
 			return m, nil
 		}
+		if msg.committedTx {
+			m.toast.ShowSuccess("Transaction committed")
+		}
+		m.logSessionQuery(msg.sql, msg.duration, len(msg.result.Rows))
 		m.editorOpen = false
 		m.editor.Blur()
 		m.keybindsPane.SetEditorOpen(false)
@@ -1653,11 +1993,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// The help modal scrolls itself; do not scroll panes behind it.
+		// The help modal, offered the wheel FIRST: a visible modal scrolls itself, so the pane
+		// behind it must not.
+		//
+		// There is no "and if the modal declines, do nothing" second return, and there used to
+		// be one. HelpModal.Update handles every tea.MouseWheelMsg — up, down, and anything
+		// else as a down — so `handled` is true on every path and the branch was a dead
+		// statement that read as if the modal might not want the wheel.
 		if m.helpModal.IsVisible() {
 			if cmd, handled := m.helpModal.Update(msg); handled {
 				return m, cmd
 			}
-			return m, nil
 		}
 		if m.editorOpen || m.palette.IsVisible() ||
 			(m.queryBrowserOpen && m.queryBrowser != nil) || m.grid.IsExporting() ||
@@ -1785,12 +2131,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.state == StatePicker {
+			// NO `if key == "q" || key == "ctrl+c"` fallback, and there used to be one. It
+			// could not run: the picker is offered the key FIRST and it binds q and ctrl+c
+			// itself — to tea.Quit, which is the same thing this branch was doing. So the
+			// picker never declines them and the branch below was a second copy of a decision
+			// that had already been made, written as if it might not have been.
+			//
+			// Which is worth stating, because the two copies LOOKED like different decisions:
+			// "close the picker" and "quit the app" are different answers to the same key. The
+			// picker's is the live one, and it quits — so a user pressing q in the project
+			// picker quits dbx, and that is what has always happened.
 			if cmd, handled := m.picker.Update(msg); handled {
 				return m, cmd
-			}
-			key := msg.String()
-			if key == "q" || key == "ctrl+c" {
-				return m, tea.Quit
 			}
 			return m, nil
 		}
@@ -1830,6 +2182,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.state == StateMain {
 			key := msg.String()
+			// Declared here, not three blocks down. The carve-out below is what a text input
+			// consults to decide whether a key is still the app's, and it needs the router
+			// context to answer. It used to be declared at the explorer filter, which meant
+			// every block ABOVE it had no way to ask — and the column filter, the one input
+			// where the question matters most, therefore asked nothing.
+			context := m.router.Context()
 			appDebugLog("KeyPress: key=%q editorOpen=%v focus=%q", key, m.editorOpen, m.router.Focus())
 
 			if m.editorOpen {
@@ -1843,11 +2201,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			// The column filter gets the carve-out, which it did not have, and the reason
+			// it matters is spelled out in the comment four blocks below: `?` is the key a
+			// user reaches for when confused, and a filter is what you open when you cannot
+			// find the column you want. Two of the three filters that look like this one —
+			// the explorer's table filter and jq input — already carve `?` out. This one did
+			// not, so `?` while hunting for a column typed a literal `?` into the filter:
+			// the one moment help is needed was the one moment help could not be opened.
+			//
+			// The list also takes `U` (rollback) out of the filter, and that costs nothing:
+			// jumpToBestMatch lowercases both the column name and the query, so the filter is
+			// case-insensitive and `u` does the same job. Verified, not assumed.
+			// NO `return m, nil` after the column filter declines, and there used to be one. It
+			// could not run: Grid.handleFilterKey ends in a `default` that appends any single
+			// character to the filter and returns handled=true, so it declines NOTHING — not a
+			// function key, not ctrl+c, not a modifier combo. A text filter swallows every key
+			// on purpose, which is why ctrl+c does nothing inside one, so the grid handles the
+			// key on every path and there is no fall-through to write.
+			//
+			// The WHERE filter below is the contrast: its handler ends in a
+			// `if len(key) == 1` insert, so a two-character key name like "f1" IS declined,
+			// and its `return m, nil` is the live one.
 			if m.router.Focus() == FocusGrid && m.grid != nil && m.grid.IsFiltering() {
+				if action, ok := m.keybinds.Resolve(key, context); ok && actionSurvivesTextInput(action) {
+					return m.dispatchAction(action)
+				}
 				if cmd, handled := m.grid.Update(msg); handled {
 					return m, cmd
 				}
-				return m, nil
 			}
 
 			if m.router.Focus() == FocusGrid && m.grid != nil && m.grid.IsWhereFiltering() {
@@ -1857,11 +2238,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			// A widget that owns the keyboard gets the app-wide keys carved out
+			// first, from ONE list. This block used to hand every key straight
+			// to the filter, so `?` typed a literal `?` instead of opening help
+			// — the one key a user reaches for when confused, which is exactly
+			// when they are filtering. The jq line below had the carve-out and
+			// this did not; actionSurvivesTextInput is now what both read.
+			//
+			// THREE inputs look like this one and only two of them may have the list, which
+			// is worth writing down because the shape invites the wrong fix:
+			//
+			//	the column filter above: yes. It matches COLUMN NAMES, which contain no
+			//	  `?` and no `:`, and it is case-insensitive so losing `U` is free.
+			//
+			//	the where filter just below: NO, and `?` is the reason. It builds a
+			//	  WHERE clause, and `?` is PostgreSQL's bind parameter — carving help
+			//	  out of it would make a parameterised filter untypable. The
+			//	  "consistency" fix breaks the feature.
+			//
+			//	the cell editor: not settled. `?` is a legal character of a cell VALUE and
+			//	  case is significant there, so unlike the filters, `U` is not free. Whether
+			//	  help should win over a `?` in a data value is a UX judgement, not a
+			//	  defect, and this does not make it. Pinned with the two callers above named.
+
+			// No `return m, nil` here either, for the same reason as the column filter above:
+			// Explorer's filter handler also ends in a default that swallows the key and
+			// reports handled. Both text filters claim every key, and both mean it.
 			if m.router.Focus() == FocusExplorer && m.explorer != nil && m.explorer.IsFiltering() {
+				if action, ok := m.keybinds.Resolve(key, context); ok && actionSurvivesTextInput(action) {
+					return m.dispatchAction(action)
+				}
 				if cmd, handled := m.explorer.Update(msg); handled {
 					return m, cmd
 				}
-				return m, nil
 			}
 
 			if m.router.Focus() == FocusGrid && m.grid != nil && m.grid.IsEditing() {
@@ -1871,21 +2280,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			context := m.router.Context()
-
 			// JQ input mode swallows every key except the few app-wide ones
-			// that stay available while typing a filter.
+			// that stay available while typing a filter — the same carve-out,
+			// from the same list, as the explorer's table filter above.
+			// No `return m, nil` here either, and the reason is different from the two filters
+			// above: this whole block sits inside `case tea.KeyPressMsg:`, so msg IS a key
+			// press — and the jq handler's ONLY way to decline is
+			// `if _, ok := msg.(tea.KeyPressMsg); !ok`, which cannot be true for a message
+			// that was type-switched as one. A jq input swallows every key it is given, which
+			// is exactly what makes it a text field.
 			if m.router.Focus() == FocusGridPreview && m.gridPreview != nil && m.gridPreview.IsJQMode() {
-				if action, ok := m.keybinds.Resolve(key, context); ok {
-					switch action {
-					case "help", "palette", "rollback":
-						return m.dispatchAction(action)
-					}
+				if action, ok := m.keybinds.Resolve(key, context); ok && actionSurvivesTextInput(action) {
+					return m.dispatchAction(action)
 				}
 				if cmd, handled := m.gridPreview.Update(msg); handled {
 					return m, cmd
 				}
-				return m, nil
 			}
 
 			if action, ok := m.keybinds.Resolve(key, context); ok && m.hasAppAction(action) {
@@ -2198,6 +2608,47 @@ func (m Model) rollbackOnExit() {
 	}
 }
 
+// handleCommitFailure answers a COMMIT that failed, and it is the only place in the app
+// that asks the connection whether it survived.
+//
+// A failed commit has two endings and the error does not say which:
+//
+//	the usual one — pgx closes the whole connection when the server's transaction status
+//	  is not IDLE, which it hands back to a model that still holds it. Every later
+//	  statement then fails with "conn closed" and the user is told a query failed, over
+//	  and over, with nothing anywhere saying the connection is gone. That was the bug.
+//
+//	the unlucky one — the commit landed and only the acknowledgement was lost, so the
+//	  connection is fine and the DML IS stored. Reporting "reconnect" here would be
+//	  false, and so would reporting "rolled back".
+//
+// So the connection is asked rather than assumed, and each answer gets the message it
+// deserves. Dropping the connection is not done on the strength of the error: the project
+// is kept, so `switch_connection` is one keypress away and the user does not lose their
+// place.
+func (m Model) handleCommitFailure(commitErr error) (tea.Model, tea.Cmd) {
+	if m.runner == nil || m.runner.usable(context.Background()) {
+		m.toast.ShowError(fmt.Sprintf(
+			"Commit failed: %v — the transaction may or may not have been committed", commitErr))
+		return m, nil
+	}
+
+	appDebugLog("Commit failed and the connection is gone: %v", commitErr)
+	m.conn = nil
+	// The runner held the connection and its hooks; keeping it would mean a runner whose
+	// commands fail with a nil querier, which reads as "not connected" for a connection
+	// the status bar still names.
+	m.runner = nil
+	// syncTxStatus with a nil runner clears the pending-transaction indicator, which is the
+	// right answer: the transaction lived inside the connection pgx closed, so there is
+	// nothing left to commit or roll back and claiming otherwise would offer the user a
+	// rollback that cannot work.
+	m.syncTxStatus()
+	m.toast.ShowError(
+		"Commit failed and the connection was lost. Press the switch-connection key to reconnect.")
+	return m, nil
+}
+
 // syncTxStatus mirrors the pending transaction state into the statusbar.
 func (m *Model) syncTxStatus() {
 	if m.keybindsPane == nil || m.runner == nil {
@@ -2277,14 +2728,50 @@ func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
 	}
 }
 
+// usableWidth is how many columns a result can honestly be exported as.
+//
+// The number of columns EVERY row has, capped at the number of columns that were
+// selected. For anything PostgreSQL returns this is the column count and nothing changes;
+// it exists for the ragged case, and all four exporters had a different answer to it:
+//
+//	CSV    wrote a short record, which encoding/csv and every other CSV reader REJECTS
+//	JSON   indexed the row by column index and PANICKED
+//	SQL    wrote fewer values than the header named, so the statement does not parse
+//
+// One assumption — a row has one value per column — written four times, and every copy
+// broken in a different direction. Every exporter now asks this function first, so a
+// ragged result exports something all four formats accept.
+//
+// Truncating is the honest answer rather than padding with NULLs: a column a row does not
+// have was never read from the database, and inventing a NULL for it would put a value in
+// the exported data that the query never produced.
+func usableWidth(columns int, rows [][]interface{}) int {
+	width := columns
+	for _, row := range rows {
+		if len(row) < width {
+			width = len(row)
+		}
+	}
+	if width < 0 {
+		width = 0
+	}
+	return width
+}
+
+// rowWidth is usableWidth for the single-row exporters.
+func rowWidth(columns []string, row []interface{}) int {
+	return usableWidth(len(columns), [][]interface{}{row})
+}
+
 func exportAsSQL(schema, table string, result *postgres.QueryResult) string {
 	var sb strings.Builder
+	width := usableWidth(len(result.Columns), result.Rows)
 	_, _ = fmt.Fprintf(&sb, "INSERT INTO %q.%q (%s) VALUES\n", schema, table,
-		strings.Join(quoteColumns(result.Columns), ", "))
+		strings.Join(quoteColumns(result.Columns[:width]), ", "))
 
 	for i, row := range result.Rows {
-		values := make([]string, len(row))
-		for j, val := range row {
+		values := make([]string, width)
+		for j, val := range row[:width] {
 			values[j] = formatSQLValue(val)
 		}
 		_, _ = fmt.Fprintf(&sb, "  (%s)", strings.Join(values, ", "))
@@ -2327,11 +2814,17 @@ func formatSQLValue(val interface{}) string {
 }
 
 func exportAsJSON(result *postgres.QueryResult) string {
+	width := usableWidth(len(result.Columns), result.Rows)
+	columns := result.Columns[:width]
+
 	rows := make([]map[string]interface{}, len(result.Rows))
 	for i, row := range result.Rows {
 		rows[i] = make(map[string]interface{})
-		for j, col := range result.Columns {
-			rows[i][col.Name] = row[j]
+		// Over `row`, not over `columns`: the width is the minimum row length, so
+		// indexing by column position is safe only if the row is at least that long,
+		// which by construction it is. Iterating the row makes that structural.
+		for j, val := range row[:width] {
+			rows[i][columns[j].Name] = val
 		}
 	}
 
@@ -2343,9 +2836,11 @@ func exportAsCSV(result *postgres.QueryResult) string {
 	var sb strings.Builder
 	writer := csv.NewWriter(&sb)
 
+	width := usableWidth(len(result.Columns), result.Rows)
+
 	// Header
-	headers := make([]string, len(result.Columns))
-	for i, col := range result.Columns {
+	headers := make([]string, width)
+	for i, col := range result.Columns[:width] {
 		headers[i] = col.Name
 	}
 	// Writes to a strings.Builder never fail, so the errors are ignored.
@@ -2353,8 +2848,8 @@ func exportAsCSV(result *postgres.QueryResult) string {
 
 	// Rows
 	for _, row := range result.Rows {
-		record := make([]string, len(row))
-		for i, val := range row {
+		record := make([]string, width)
+		for i, val := range row[:width] {
 			record[i] = fmt.Sprintf("%v", val)
 		}
 		_ = writer.Write(record)
@@ -2366,11 +2861,12 @@ func exportAsCSV(result *postgres.QueryResult) string {
 
 func exportRowAsSQL(schema, table string, columns []string, row []interface{}) string {
 	var sb strings.Builder
+	width := rowWidth(columns, row)
 	_, _ = fmt.Fprintf(&sb, "INSERT INTO %q.%q (%s) VALUES\n", schema, table,
-		strings.Join(quoteColumnNames(columns), ", "))
+		strings.Join(quoteColumnNames(columns[:width]), ", "))
 
-	values := make([]string, len(row))
-	for i, val := range row {
+	values := make([]string, width)
+	for i, val := range row[:width] {
 		values[i] = formatSQLValue(val)
 	}
 	_, _ = fmt.Fprintf(&sb, "  (%s)\n", strings.Join(values, ", "))
@@ -2386,8 +2882,9 @@ func quoteColumnNames(columns []string) []string {
 }
 
 func exportRowAsJSON(columns []string, row []interface{}) string {
+	width := rowWidth(columns, row)
 	obj := make(map[string]interface{})
-	for i, col := range columns {
+	for i, col := range columns[:width] {
 		obj[col] = row[i]
 	}
 	data, _ := json.MarshalIndent(obj, "", "  ")
@@ -2399,10 +2896,10 @@ func exportRowAsCSV(columns []string, row []interface{}) string {
 	writer := csv.NewWriter(&sb)
 
 	// Writes to a strings.Builder never fail, so the errors are ignored.
-	_ = writer.Write(columns)
+	_ = writer.Write(columns[:rowWidth(columns, row)])
 
-	record := make([]string, len(row))
-	for i, val := range row {
+	record := make([]string, rowWidth(columns, row))
+	for i, val := range row[:len(record)] {
 		record[i] = fmt.Sprintf("%v", val)
 	}
 	_ = writer.Write(record)
@@ -2411,34 +2908,98 @@ func exportRowAsCSV(columns []string, row []interface{}) string {
 	return sb.String()
 }
 
-func copyToClipboard(content string) error {
-	// Try platform-specific commands
-	var cmd *exec.Cmd
+// clipVia runs one clipboard helper with the content ALREADY attached to its stdin, and
+// reports whether it worked.
+//
+// Assigning stdin before the run is the whole point of this function existing. It used to
+// be assigned once, AFTER a loop that had already run two commands: xclip was invoked with
+// a nil Stdin, which exec gives the child as the null device, so xclip read EOF, copied
+// nothing and exited 0 — and the caller reported success over an EMPTY clipboard. The
+// user saw a success toast and pasted an empty string.
+//
+// Every attempt now goes through here, so "give the child the content" is written once.
+func clipVia(name string, args []string, content string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdin = strings.NewReader(content)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("clipboard: %s: %w", name, err)
+	}
+	return nil
+}
 
-	switch runtime.GOOS {
+// clipAttempt is one clipboard helper to try: the program and the arguments it needs.
+type clipAttempt struct {
+	name string
+	args []string
+}
+
+// clipboardAttempts is the ordered list of helpers to try on a given platform.
+//
+// It was a switch on runtime.GOOS inside copyToClipboard, which meant the darwin and
+// windows branches could only run on those platforms — and the ORDER, which is the entire
+// content of the function, could not be checked at all from a Linux test run. Taking the
+// platform and the wayland flag as arguments makes the decision data, so all three
+// platforms are testable from anywhere.
+//
+// The order is deliberate and is what the app has always used: on Wayland, wl-copy is the
+// native tool and the X11 helpers are emulated by XWayland, which sometimes work and
+// sometimes lose the selection. On X11, xclip first because xsel's clipboard support is
+// flakier under some window managers.
+func clipboardAttempts(goos string, wayland bool) []clipAttempt {
+	switch goos {
 	case "darwin":
-		cmd = exec.Command("pbcopy")
+		return []clipAttempt{{name: "pbcopy"}}
 	case "windows":
-		cmd = exec.Command("clip.exe")
-	default: // Linux
-		// Wayland: try wl-copy first
-		if os.Getenv("WAYLAND_DISPLAY") != "" {
-			cmd = exec.Command("wl-copy")
-			cmd.Stdin = strings.NewReader(content)
-			if err := cmd.Run(); err == nil {
-				return nil
-			}
-		}
-		// X11: try xclip, then xsel
-		cmd = exec.Command("xclip", "-selection", "clipboard")
-		if err := cmd.Run(); err == nil {
-			return nil
-		}
-		cmd = exec.Command("xsel", "--clipboard", "--input")
+		return []clipAttempt{{name: "clip.exe"}}
 	}
 
-	cmd.Stdin = strings.NewReader(content)
-	return cmd.Run()
+	attempts := make([]clipAttempt, 0, 3)
+	if wayland {
+		attempts = append(attempts, clipAttempt{name: "wl-copy"})
+	}
+	return append(attempts,
+		clipAttempt{name: "xclip", args: []string{"-selection", "clipboard"}},
+		clipAttempt{name: "xsel", args: []string{"--clipboard", "--input"}},
+	)
+}
+
+// copyToClipboard puts content on the system clipboard, trying the helpers the running
+// platform is likely to have and reporting the last failure if none of them worked.
+//
+// It is a VARIABLE so a test can replace it, for the same reason the CLI's loadConfig is one:
+// the three callers are the export path and the copy-SQL action, and both report a clipboard
+// failure with a toast — behaviour that is invisible on a machine with a working clipboard and
+// unreachable on one without, because the only way to make the call fail is to have no helper
+// installed. Which means the failure branch was never executed anywhere: on a developer machine
+// it is never taken, and in CI it is taken for the wrong reason (no clipboard at all, so every
+// assertion about it would be about the environment).
+//
+// So the name is a seam and the function behind it is the production value.
+var copyToClipboard = func(content string) error {
+	return clipViaAny(clipboardAttempts(runtime.GOOS, os.Getenv("WAYLAND_DISPLAY") != ""), content)
+}
+
+// clipViaAny tries each helper in order and returns nil at the first success.
+func clipViaAny(attempts []clipAttempt, content string) error {
+	var lastErr error
+	for _, a := range attempts {
+		if err := clipVia(a.name, a.args, content); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+
+	// Every helper is missing or failed. Say so with the LAST error, which names the
+	// program the user would have to install, rather than a bare failure with no clue.
+	//
+	// The nil case is an empty list, which no current platform produces — Linux always
+	// appends xclip and xsel. It is here so a future platform with no helpers gets a
+	// message rather than a nil error that a caller would read as success.
+	if lastErr == nil {
+		lastErr = fmt.Errorf("clipboard: no helper available")
+	}
+	return lastErr
 }
 
 type exportDoneMsg struct {
@@ -2544,13 +3105,21 @@ func (m Model) renderMainView() string {
 		if s == "" {
 			return 0
 		}
+		// Every non-empty shape renderTopLine can return ends in "\n" — the two bordered
+		// branches append it explicitly, and the spinner branch writes it in the literal — so
+		// the last element after a split is always the empty string the newline created. There
+		// is no `return len(lines)` here, and there used to be one: it could not fire, because
+		// the empty string is already handled by the `s == ""` return above it, which is the
+		// only way a top line arrives without a trailing newline.
 		lines := strings.Split(s, "\n")
-		if lines[len(lines)-1] == "" {
-			return len(lines) - 1
-		}
-		return len(lines)
+		return len(lines) - 1
 	}
-	statusBarLines := 7 + countLines(topLine)
+	// The pane's OWN height, not a constant. It used to reserve 7 rows while the
+	// pane drew a variable number of wrapped lines, so the content was short by
+	// the difference on every window whose focused view needed more or fewer
+	// than 5 segments. Fourth time in this repository that the same quantity was
+	// written in two places and left to drift.
+	statusBarLines := m.keybindsPane.Height() + countLines(topLine)
 	contentHeight := m.height - statusBarLines
 	if contentHeight < 1 {
 		contentHeight = 1
@@ -2576,8 +3145,14 @@ func (m Model) renderMainView() string {
 	}
 
 	// Register pane bounds from the freshly rendered output and strip the zone
-	// markers before layering overlays on top. Previews/sidebar are intentionally
-	// left unmarked so clicks on them are ignored.
+	// markers before layering overlays on top.
+	//
+	// "Previews are left unmarked" is still true — the grid preview and the explorer
+	// preview have no zone and no click handling. The GRID SIDEBAR is not in that
+	// category and this comment used to say it was, one line above the Mark call that
+	// registers it: the sidebar exists to be hovered, and the wheel routes to the pane
+	// under the cursor, which cannot happen without a zone. The comment and the code
+	// disagreed, and the code is the one the wheel depends on.
 	content := ui.Zones.Scan(topLine + lipgloss.JoinHorizontal(lipgloss.Top, panes...))
 
 	if m.editorOpen {
@@ -2768,10 +3343,11 @@ func overlay(base, box string, width, height int) string {
 	if x < 0 {
 		x = 0
 	}
+	// No clamp on y, and there used to be one. bh was clamped to height three lines above, so
+	// height-bh is never negative and the division is never negative. The x clamp above is NOT
+	// redundant — bw is measured from the box's first line and nothing clamps it to the width —
+	// and the pair read as if they were the same situation.
 	y := (height - bh) / 2
-	if y < 0 {
-		y = 0
-	}
 	for len(lines) < y+bh {
 		lines = append(lines, strings.Repeat(" ", width))
 	}
@@ -2815,10 +3391,5 @@ func abs(x int) int {
 }
 
 func appDebugLog(format string, args ...interface{}) {
-	f, err := os.OpenFile("/tmp/dbx_app_debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "App: "+format+"\n", args...)
+	debuglog.Write("app", "App", format, args...)
 }

@@ -191,11 +191,38 @@ func TestPreprocessSQL_UnknownStatementIsUntouched(t *testing.T) {
 		"SET search_path TO public",
 		"VACUUM ANALYZE",
 		"COPY t FROM stdin",
-		"",
-		"   ",
 	} {
 		if got := preprocessSQL(in); got != in {
 			t.Errorf("preprocessSQL(%q) = %q, want it unchanged", in, got)
 		}
 	}
+}
+
+// Scenario: Un editor VACIO no produce una sentencia.
+//
+// "" and "   " used to be in the list above, asserting they came back unchanged. They came
+// back UNCHANGED, which is not the same as coming back as something to run: preprocessSQL
+// returned the raw whitespace, execute_query's `sql != ""` check passed, and pressing run
+// on an empty editor sent whitespace to PostgreSQL. The answer came back as "empty query
+// string", which is a confusing way to learn you pressed the wrong key.
+//
+// Empty is a different answer from "unknown": a SET statement is a statement this function
+// does not recognise, and passing it through untouched is the correct answer. Whitespace is
+// not a statement at all.
+func TestPreprocessSQL_AnEmptyEditorHasNoStatement(t *testing.T) {
+	for _, in := range []string{"", "   ", "\n", "\t \n  ", " \r\n "} {
+		if got := preprocessSQL(in); got != "" {
+			t.Errorf("preprocessSQL(%q) = %q, want no statement at all", in, got)
+		}
+	}
+
+	t.Run("a statement that is only a semicolon is not empty", func(t *testing.T) {
+		// It is not a runnable statement either, but it is SOMETHING the user typed and
+		// the database is the right place to complain about it. Distinguishing this from
+		// whitespace would need a parser; the whitespace case is the one that matters
+		// because it is what an untouched empty editor holds.
+		if got := preprocessSQL(";"); got == "" {
+			t.Error("preprocessSQL(\";\") is empty; a semicolon is something the user typed")
+		}
+	})
 }

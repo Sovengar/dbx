@@ -11,15 +11,28 @@ import (
 )
 
 type OpenAI struct {
-	apiKey string
-	model  string
+	apiKey  string
+	model   string
+	baseURL string
 }
 
 func NewOpenAI(apiKey, model string) *OpenAI {
 	if model == "" {
 		model = "gpt-4o"
 	}
-	return &OpenAI{apiKey: apiKey, model: model}
+	return NewOpenAIAt(apiKey, model, openAIDefaultBaseURL)
+}
+
+// openAIDefaultBaseURL is the BASE, with the version path appended by the constructor. See
+// anthropicDefaultBaseURL for why it is not the full endpoint.
+const openAIDefaultBaseURL = "https://api.openai.com/v1"
+
+// NewOpenAIAt is NewOpenAI with an explicit endpoint. See NewAnthropicAt.
+func NewOpenAIAt(apiKey, model, baseURL string) *OpenAI {
+	if model == "" {
+		model = "gpt-4o"
+	}
+	return &OpenAI{apiKey: apiKey, model: model, baseURL: strings.TrimRight(baseURL, "/") + "/chat/completions"}
 }
 
 func (o *OpenAI) Name() string { return "openai" }
@@ -58,7 +71,7 @@ func (o *OpenAI) Generate(ctx context.Context, prompt string, schema string) (st
 		MaxTokens: 1024,
 	})
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", o.baseURL, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -95,6 +108,9 @@ func (o *OpenAI) Generate(ctx context.Context, prompt string, schema string) (st
 	}
 
 	sql := strings.TrimSpace(result.Choices[0].Message.Content)
-	sql = cleanSQL(sql)
+	sql, err = requireSQL("openai", sql)
+	if err != nil {
+		return "", err
+	}
 	return sql, nil
 }

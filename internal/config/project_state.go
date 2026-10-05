@@ -49,10 +49,12 @@ func (ps *ProjectState) Save() error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(ps, "", "  ")
-	if err != nil {
-		return err
-	}
+	// No error to handle: ProjectState is a map of bool, and encoding/json cannot fail on
+	// one. The check that used to be here was unreachable, and an unreachable check is not
+	// defensiveness — it is dead code that reads as if the type could grow a field it
+	// cannot. If ProjectState ever gains a channel, a func or a cyclic value, this becomes
+	// the line that has to come back, and the type is the thing that will say so.
+	data, _ := json.MarshalIndent(ps, "", "  ")
 
 	return os.WriteFile(ProjectStateFile(), data, 0o644)
 }

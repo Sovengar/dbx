@@ -308,11 +308,19 @@ func (wf *WhereFilter) detectContext() []Suggestion {
 		return isSuggestions
 	}
 
-	// Check if last token is a column name
+	// Check if last token is a column name.
+	//
+	// No `len(tokens) == 0` arm, and there used to be one. It could not fire: the empty-input
+	// case returned four lines above, so input is non-empty; extractLastClause returns a
+	// substring of that input which starts on a non-space boundary, so it is non-empty too;
+	// and tokenize appends its final non-empty run unconditionally, so a non-empty string always
+	// yields at least one token.
+	//
+	// The whitespace-only input that WOULD reach it is unreachable for the same reason — input
+	// is TrimSpace'd at the top, so the trailing " AND " that would make extractLastClause
+	// return "" no longer has its trailing space. Two guards for one emptiness, written as if
+	// the first were not there.
 	tokens := wf.tokenize(lastClause)
-	if len(tokens) == 0 {
-		return wf.allColumnsWithKeywords()
-	}
 
 	lastToken := tokens[len(tokens)-1]
 

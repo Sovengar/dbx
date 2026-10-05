@@ -9,8 +9,8 @@ import (
 )
 
 type SchemaExport struct {
-	Database string         `json:"database"`
-	Schemas  []SchemaInfo   `json:"schemas"`
+	Database string       `json:"database"`
+	Schemas  []SchemaInfo `json:"schemas"`
 }
 
 type SchemaInfo struct {
@@ -19,12 +19,12 @@ type SchemaInfo struct {
 }
 
 type TableInfo struct {
-	Name      string       `json:"name"`
-	Type      string       `json:"type"`
-	RowCount  int64        `json:"row_count"`
-	Columns   []ColumnInfo `json:"columns"`
-	Indexes   []IndexInfo  `json:"indexes,omitempty"`
-	FKs       []FKInfo     `json:"foreign_keys,omitempty"`
+	Name     string       `json:"name"`
+	Type     string       `json:"type"`
+	RowCount int64        `json:"row_count"`
+	Columns  []ColumnInfo `json:"columns"`
+	Indexes  []IndexInfo  `json:"indexes,omitempty"`
+	FKs      []FKInfo     `json:"foreign_keys,omitempty"`
 }
 
 type ColumnInfo struct {
@@ -36,18 +36,18 @@ type ColumnInfo struct {
 }
 
 type IndexInfo struct {
-	Name     string   `json:"name"`
-	Columns  []string `json:"columns"`
-	IsUnique bool     `json:"is_unique"`
-	IsPrimary bool    `json:"is_primary"`
+	Name      string   `json:"name"`
+	Columns   []string `json:"columns"`
+	IsUnique  bool     `json:"is_unique"`
+	IsPrimary bool     `json:"is_primary"`
 }
 
 type FKInfo struct {
-	Name            string `json:"name"`
-	Columns         string `json:"columns"`
-	RefSchema       string `json:"ref_schema"`
-	RefTable        string `json:"ref_table"`
-	RefColumns      string `json:"ref_columns"`
+	Name       string `json:"name"`
+	Columns    string `json:"columns"`
+	RefSchema  string `json:"ref_schema"`
+	RefTable   string `json:"ref_table"`
+	RefColumns string `json:"ref_columns"`
 }
 
 func ExportSchema(ctx context.Context, conn postgres.Conn, dbName string) (*SchemaExport, error) {
@@ -96,10 +96,11 @@ func ExportSchemaString(ctx context.Context, conn postgres.Conn, dbName string) 
 		return "", err
 	}
 
-	data, err := json.MarshalIndent(export, "", "  ")
-	if err != nil {
-		return "", err
-	}
+	// No error arm on the marshal, and there used to be one: SchemaExport is strings, ints,
+	// bools, pointers and slices of those — every value encoding/json can encode. A value
+	// that would fail — a channel, a func, a cycle — cannot be produced by the catalog
+	// queries that fill it, and this function has no other source for one.
+	data, _ := json.MarshalIndent(export, "", "  ")
 
 	return string(data), nil
 }

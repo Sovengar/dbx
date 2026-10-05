@@ -47,7 +47,7 @@ MUTATE_BASE ?= main
 #        internal/drivers/postgres/{query,schema}.go,
 #        internal/ui/components/grid/{header,mouse,pager}.go,
 #        internal/ui/components/palette/{commands,fuzzy}.go
-#   OUT: internal/app/app.go (350 uncovered), internal/ai/nl2sql/compatible.go,
+#   OUT: internal/app/app.go (506 uncovered),
 #        and the rest of internal/ui/components.
 # Optional. A shared PostgreSQL for the mutation run, so internal/app does not
 # start a fresh testcontainers instance on every one of the hundreds of test
@@ -55,7 +55,7 @@ MUTATE_BASE ?= main
 # testcontainers, which is correct but slow. See the note above `mutate`.
 MUTATE_DSN ?=
 
-MUTATE_EXCLUDE ?= internal/testsupport/|internal/ui/keydisplay/|internal/ui/components/explorerpreview/(preview|tabbar|handled)\.go|internal/ui/components/(gridpreview|gridsidebarpreview|querybrowser)/|internal/ui/components/grid/(consts|handled)\.go|internal/ui/components/editor/(autocomplete|handled|sql)\.go|internal/ui/components/(explorer/(explorer|handled|tree)|palette/palette)\.go|internal/app/(app|messages)\.go|internal/ai/nl2sql/(compatible|provider|prompt)\.go|cmd/|main\.go|internal/theme/
+MUTATE_EXCLUDE ?= internal/testsupport/|internal/ui/keydisplay/|internal/ui/components/explorerpreview/handled\.go|internal/ui/components/gridpreview/handled\.go|internal/ui/components/grid/(consts|handled)\.go|internal/ui/components/editor/handled\.go|internal/ui/components/explorer/handled\.go|internal/app/(app|messages)\.go|internal/ai/nl2sql/prompt\.go|cmd/|main\.go
 
 build:
 	go build $(LDFLAGS) -o .local/bin/dbx .

@@ -32,13 +32,46 @@ type KeybindsPane struct {
 	queryBrowserOpen  bool
 	txPending         bool
 	canGoBack         bool
+	visible           bool
 }
 
+// NewKeybindsPane builds the pane with the help VISIBLE, which is the default and was
+// the only behaviour until ui.statusbar_help was wired. A caller that does not set
+// visibility gets the pane it always had.
 func NewKeybindsPane(styles *theme.Styles, keybinds config.Resolver) *KeybindsPane {
 	return &KeybindsPane{
 		styles:   styles,
 		keybinds: keybinds,
+		visible:  true,
 	}
+}
+
+// SetVisible shows or hides the pane. Driven by ui.statusbar_help, which was declared
+// with a default and read by nothing: a user who turned the help off kept getting it.
+//
+// Hidden is not the same as zero-height. Height reports 0 so the caller can give the
+// space to the content, and View returns "" so nothing is drawn — both halves, because
+// one without the other leaves either a blank strip at the bottom or a layout that still
+// reserves the rows.
+func (s *KeybindsPane) SetVisible(v bool) { s.visible = v }
+
+// Visible reports whether the pane will draw.
+func (s *KeybindsPane) Visible() bool { return s.visible }
+
+// Height is how many terminal rows the pane occupies, borders included, or 0 when it
+// will not draw.
+//
+// It exists because the layout reserved a HARD-CODED 7 rows for the status bar while the
+// pane renders a variable number of wrapped lines — one per maxKeybindsPerLine segments,
+// so it grows and shrinks with the width, the focused view and how many actions that view
+// hides. Same arithmetic written in two places and left to drift, for the fourth time in
+// this repository.
+func (s *KeybindsPane) Height() int {
+	if !s.visible || s.width <= 0 {
+		return 0
+	}
+	// The rounded border contributes a top and a bottom row.
+	return len(s.renderLines()) + 2
 }
 
 func (s *KeybindsPane) SetWidth(w int)                { s.width = w }
@@ -73,7 +106,7 @@ func (s *KeybindsPane) Context() string {
 }
 
 func (s *KeybindsPane) View() string {
-	if s.width <= 0 {
+	if !s.visible || s.width <= 0 {
 		return ""
 	}
 

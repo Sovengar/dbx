@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -86,9 +87,14 @@ func (o *OpenAICompatible) Generate(ctx context.Context, prompt string, schema s
 		return "", fmt.Errorf("empty response from %s", o.name)
 	}
 
-	sql := strings.TrimSpace(result.Choices[0].Message.Content)
-	sql = cleanSQL(sql)
-	return sql, nil
+	// The one failure mode that must not be a success. Everything else
+	// below returns an error, and an error the TUI shows. Empty SQL with
+	// a nil error reaches execute_query as an empty statement: the AI
+	// answers nothing, dbx runs nothing, and the user sees the keypress do
+	// nothing at all. A refusal, a safety filter and a truncated response
+	// all arrive like this — and so does a refusal in PROSE, which is why the
+	// check is looksLikeSQL and not `== ""`.
+	return requireSQL(o.name, result.Choices[0].Message.Content)
 }
 
 const defaultOpenCodeBaseURL = "https://opencode.ai/zen/go/v1"
@@ -312,14 +318,31 @@ type PiProvider struct {
 	baseURL string
 }
 
+// piDefaultBaseURL is Pi's inference endpoint.
+const piDefaultBaseURL = "https://layercake.pubwestus3.inf7ks8.com/external/api"
+
 func NewPi(apiKey, model string) *PiProvider {
+	return NewPiAt(apiKey, model, piDefaultBaseURL)
+}
+
+// NewPiAt is NewPi with an explicit endpoint.
+//
+// It exists because the endpoint was baked into the constructor, which made the provider's
+// whole response ladder — six error exits, the same six OpenAICompatible has — unreachable
+// from a test. Not a private-network problem and not a "the other provider covers it"
+// problem: a ladder with one copy tested and one copy untested is exactly the shape that
+// rots, and this file is where the two ladders were written.
+//
+// The same reasoning as clipboardAttempts, which takes the platform as an argument instead
+// of reading runtime.GOOS: the decision is data, so it can be checked from anywhere.
+func NewPiAt(apiKey, model, baseURL string) *PiProvider {
 	if model == "" {
 		model = "inflection_3_pi"
 	}
 	return &PiProvider{
 		apiKey:  apiKey,
 		model:   model,
-		baseURL: "https://layercake.pubwestus3.inf7ks8.com/external/api",
+		baseURL: baseURL,
 	}
 }
 
@@ -392,9 +415,7 @@ func (p *PiProvider) Generate(ctx context.Context, prompt string, schema string)
 		return "", fmt.Errorf("empty response from Pi")
 	}
 
-	sql := strings.TrimSpace(result.Entries[0].Text)
-	sql = cleanSQL(sql)
-	return sql, nil
+	return requireSQL("Pi", result.Entries[0].Text)
 }
 
 func DetectJCodeConfig() (provider, apiKey, model, baseURL string, found bool) {
@@ -421,7 +442,25 @@ func DetectJCodeConfig() (provider, apiKey, model, baseURL string, found bool) {
 		return
 	}
 
-	for name, p := range cfg.Providers {
+	// Which provider to use when several hold a key. The config is decoded into a
+	// MAP, and Go randomises map iteration, so `range` picked a different one on
+	// nearly every call: forty consecutive reads of the same file gave zzz 28
+	// times, aaa 6 and mmm 6. That is not a harmless shuffle — the chosen
+	// provider's base_url is where dbx posts the prompt, and `model` below is a
+	// single global value, so a random provider means the same model sent to a
+	// different endpoint depending on the run. Restarting dbx could move the AI
+	// from one host to another with nothing changed on disk.
+	//
+	// Alphabetical it is. There is no right answer for "which of the two did the
+	// user mean" — but a documented, reproducible one beats an unreproducible one,
+	// and it makes the choice assertable instead of invisible.
+	names := make([]string, 0, len(cfg.Providers))
+	for name := range cfg.Providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		p := cfg.Providers[name]
 		if p.APIKey != "" {
 			provider = name
 			apiKey = p.APIKey
@@ -431,9 +470,10 @@ func DetectJCodeConfig() (provider, apiKey, model, baseURL string, found bool) {
 		}
 	}
 
-	if model == "" {
-		model = cfg.Model
-	}
+	// Not `if model == ""`: model is a named return that nothing assigns before
+	// this point, so the condition is always true and the branch exists only to
+	// suggest an override that is not there.
+	model = cfg.Model
 
 	return
 }

@@ -479,6 +479,33 @@ CONDITIONALS_BOUNDARY internal/ui/components/picker/picker.go:233
 # ere.go:459   `if fkPad < 0` -> `<=`: fires only at 0.
 # ere.go:474   `if titlePad < 0` -> `<=`: fires only at 0.
 #
+# Four more of the same family that had no proof written down at all, checked one at a
+# time in this round because a group is only as good as its weakest member:
+#
+# ere.go:201   `len(incomingFixed) > MaxNeighbors` -> `>=`: the body assigns
+# ere.go:208   `len(outgoingDirect) > MaxNeighbors` -> `>=`: len - MaxNeighbors, which is 0
+#              at the boundary, and the field is assigned in NO other place in the package
+#              (grep for IncomingOverflow/OutgoingOverflow returns this assignment, the
+#              render call sites and tests). So it already holds 0 and the mutant rewrites
+#              0 as 0.
+# ere.go:400   `ansi.StringWidth(entry) > innerWidth` -> `>=`: the body is
+# ere.go:412   `entry = entry[:innerWidth]`, and at innerWidth the slice is the WHOLE
+# ere.go:455   string. Same value out. 455 is fkEntry, 412 is a column label.
+# ere.go:562   `len(col2) > maxColLines` -> `>=`: the body assigns maxColLines the value
+#              it already holds.
+#
+# And two that are NOT clamps, which is why they were never going to be caught by reading
+# the shape — the two branches print the SAME STRING at the boundary:
+#
+# ere.go:372   `if innerWidth > 1` -> `>= 1`, inside renderBox.
+# ere.go:437   the same guard inside renderCompactBox.
+#              The body is `displayName = displayName[:innerWidth-1] + "…"` and the else
+#              is `displayName = "…"`. At innerWidth == 1 the slice is displayName[:0],
+#              which is "", so the if-branch also prints exactly "…". Provably equivalent,
+#              and confirmed by hand: 0/3 red for both.
+#              TestRenderBox_ANarrowerThanANameCellShowsASingleEllipsis pins that OUTPUT at
+#              widths 3, 4 and 5 — it does not kill the mutant, and it is not supposed to.
+#
 # This is the FOURTH file where this family shows up (after modal.go, toast.go, query
 # _history.go and ask.go), which is why it is one entry with twelve lines and not
 # twelve entries. The general shape: `if x < LOOP { x = FLOOR }` cannot distinguish LOOP
@@ -497,7 +524,6 @@ CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:77
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:201
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:208
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:329
-CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:371
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:372
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:382
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:400
@@ -508,11 +534,27 @@ CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:448
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:455
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:459
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:474
-CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:489
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:514
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:517
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:528
 CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:562
+
+# ---------------------------------------------------------------------------
+# Shape 0 (2 instances, RETIRED in round 4): an exact-width boundary that was a real gap.
+# ---------------------------------------------------------------------------
+# ere.go:371 `ansi.StringWidth(displayName) > innerWidth` -> `>=`, in renderBox, and
+# ere.go:437's neighbour :436 in renderCompactBox. A name exactly as wide as the box was
+# being cut, losing a character to an ellipsis that had nothing to elide. The boundary is
+# a name whose display width EQUALS innerWidth, and no fixture built one: every name in
+# the suite was either comfortably short or comfortably long.
+#   Dead by TestRenderBox_ANameExactlyAsWideAsTheBoxIsNotTruncated (3/3 red at :371).
+#   Note the two functions need DIFFERENT names for the boundary, because renderCompactBox
+#   decorates with "*" and the selection markers before it measures. A fixture that reused
+#   one name for both would have passed :371 and left :436 alive.
+# ere.go:489 `if len(lines) > 1` -> `>= 1`, the blank line before the "+N more" summary in
+#   renderColumn. The boundary is a column holding exactly one line — a title and nothing
+#   else, with every neighbour cut. Dead by
+#   TestRenderColumn_TheOverflowSummaryIsSeparatedOnlyWhenThereIsSomethingToSeparate.
 
 # ---------------------------------------------------------------------------
 # Shape 2 (1 instance): the debug-log guard, negated.
@@ -635,15 +677,44 @@ CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2157
 #    through to the same style RenderRow picks. And a row that HAS a draft
 #    column already had hasDrafts true. Provably equivalent.
 #
-# 3. THE SECOND OPERAND OF A `&&` (NONE REMAIN). Loops of the form
-#    `for i := a; i < b && other(i); i++`. Go short-circuits, so `other` is only
-#    consulted while `i < b` still holds — and its own boundary can therefore
-#    never decide whether the body runs. That reasoning is CORRECT, and it was
-#    applied to the wrong operand: 400, 2092 and 2152 were entered here as
-#    second-operand mutants, and hand-application showed all three are killed by
-#    the FIRST operand instead (`i < endRow` -> `i <= endRow` renders one row more).
-#    The allowlist key is `file:line`, so an entry written for one mutant on a line
-#    keeps living after that mutant dies while its twin on the same line does not.
+# 3. THE SECOND OPERAND OF A `&&` (343, 400, 2092, 2152 — AND NONE OF THEM MAY BE
+#    RETIRED). This item was wrong, and wrong in the direction that deletes correct
+#    entries, so the correction matters more than the four lines.
+#
+#    It said: "400, 2092 and 2152 were entered here as second-operand mutants, and
+#    hand-application showed all three are killed by the FIRST operand instead, so the
+#    entries go." True, and irrelevant. THE ALLOWLIST KEY IS (mutator, file, line) WITH
+#    NO COLUMN: one entry covers BOTH operands' mutants, killing one leaves the entry
+#    looking justified, and retiring it on the strength of the other's death strips a
+#    live mutant of its cover.
+#
+#    Measured, three runs per variant, every variant reported:
+#
+#      line    first operand's mutant      second operand's mutant
+#      343     3/3 red  (dead)             0/3    ALIVE
+#      400     3/3 red  (dead)             0/3    ALIVE
+#      2092    3/3 red  (dead)             0/3    ALIVE
+#      2152    3/3 red  (dead)             0/3    ALIVE
+#
+#    Four for four, and always the second. Each second operand is provably equivalent,
+#    each for its own reason:
+#
+#      343   `len(g.widths) > 0`. calculateWidths RETURNS EARLY at :309 when
+#            `len(g.columns) == 0`, and :314 then builds `g.widths` with exactly
+#            `len(g.columns)` entries. The guard is therefore always true and `>= 0`
+#            changes nothing. DEAD GUARD.
+#      400   `i < len(g.widths)`. :380 already clamped cursorCol to len-1, and :392
+#            guarantees scrollCol <= cursorCol, so the first operand `i <= cursorCol`
+#            already implies `i < len`. Implied by its left neighbour.
+#      2092  `visibleCount < contentHeight`. One extra rendered row, and the gap at
+#      2152  :2250 is computed from the line count of the very body it pads, so the
+#            block ends up a line taller and a newline shorter. Byte-identical — the
+#            same argument as item 4 below, which is why 2186 belongs to that group and
+#            these two belong with it.
+#
+#    The rule this replaces: a line carrying two comparisons needs BOTH variants probed,
+#    and only an all-variants-dead verdict may retire the entry. A probe that stops at
+#    the first death is what deleted thirteen correct entries once.
 #
 # 4. A PADDING LOOP COMPLEMENTED BY THE GAP (2177, 2183, 2186). The body and the
 #    gap are computed from the same line count — `gap := target - bodyLines - 1`
@@ -662,15 +733,18 @@ CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2157
 #        second operand is always true.
 #
 # TWO MORE OF THIS SHAPE USED TO BE HERE AND WERE WRONG. Both were justified by a
-# proof about what the SURROUNDING code does, which is exactly the reasoning that
-# most often survives a mutation:
+# proof about what the SURROUNDING code does, which is exactly the reasoning that most
+# often survives a mutation:
 #
-#   343  claimed: "`len(g.widths) > 0` -> `>= 0` is always true, which lets
-#        minCols be zero and turns `available / minCols` into a DIVISION BY ZERO."
-#        The division by zero is real, and it is a panic — so
-#        TestCalculateWidths_AViewportWithNoRoomDoesNotDivideByZero recovers it and
-#        fails. A guard that is only "load-bearing" against a crash is a guard
-#        whose absence no ordinary assertion would notice.
+#   343  claimed: "`len(g.widths) > 0` -> `>= 0` is always true, which lets minCols be
+#        zero and turns `available / minCols` into a DIVISION BY ZERO." The conclusion
+#        (always true) is right and the route to it is wrong: there is no division by
+#        zero to recover, because :309 returns before the guard is ever reached when
+#        there are no columns, and `TestCalculateWidths_AViewportWithNoRoomDoesNotDivideByZero`
+#        never gets there either — its "no columns at all" case goes through the early
+#        return, so the fixture named after this guard does not exercise it. A test whose
+#        name promises a guard and whose fixture returns before reaching it is worse than
+#        no test, because it reads as coverage. The correct proof is item 3 above.
 #   406  claimed: "the column the mutation drops is the column the expand-left loop
 #        puts back." The two loops do cancel at the boundary, and the mutation is
 #        still observable: one extra shrink iteration moves `used` a column further
@@ -965,22 +1039,7 @@ CONDITIONALS_BOUNDARY internal/ui/toast.go:219
 CONDITIONALS_BOUNDARY internal/ui/toast.go:222
 CONDITIONALS_BOUNDARY internal/ui/toast.go:234
 
-# === Group B19: grid/where_filter.go, twenty-five lines, twenty survivors ==========
-#
-# New to the gate in this round: 136 killed, 35 lived, and NOT COVERED went from 53 to
-# zero. Thirty-five survivors is a lot for one file, so they are grouped by the reason
-# rather than listed as thirty-five findings.
-#
-# GROUP 1 — A REDUNDANT CONJUNCT (145, 156, 163, 170). `if wf.showPopup &&
-# len(wf.suggestions) > 0`. showPopup is assigned in exactly one place, filterSuggestions,
-# as `len(wf.suggestions) > 0`, and Hide() clears it without touching the suggestions. So
-# showPopup already implies a non-empty list and the second conjunct decides nothing;
-# `>= 0` makes it always true and changes no outcome. This is DEAD CODE, and the honest
-# fix is to delete the conjunct rather than to justify it here for a fourth time.
-CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:145
-CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:156
-CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:163
-CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:170
+
 
 # GROUP 2 — THE CLAMP FAMILY, the shape this project has now seen in seven files
 # (268, 355, 361, 535, 549, 556, 564, 582, 587).
@@ -999,6 +1058,75 @@ CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:170
 CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:268
 CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:355
 CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:361
+# === Group B19: grid/where_filter.go, twenty-five lines, twenty survivors ==========
+#
+# New to the gate in this round: 136 killed, 35 lived, and NOT COVERED went from 53 to
+# zero. Thirty-five survivors is a lot for one file, so they are grouped by the reason
+# rather than listed as thirty-five findings.
+#
+# GROUP 1 — A CONJUNCT THAT LOOKS REDUNDANT (145, 156, 163, 170). RETIRED, and the way
+# out was the opposite of the way in. `if wf.showPopup && len(wf.suggestions) > 0`.
+#
+# The first proof said the conjunct decides nothing because showPopup is set from the
+# list length, called it DEAD CODE, and urged deleting it. The second proof, written
+# here a day later, said the opposite — that Hide() and the escape arm leave showPopup
+# false with the list still populated, so the conjunct is load-bearing. THE SECOND PROOF
+# WAS ALSO WRONG, and the gate said so: with the fixture it called for, all four mutants
+# came back LIVED.
+#
+# Neither was reading the code badly. Both reasoned about the wrong STATE. There are
+# three, and only one of them separates the two forms:
+#
+#   showPopup=true,  list>0     both forms true       indistinguishable
+#   showPopup=false, list>0     both forms false      indistinguishable  <-- reachable
+#   showPopup=true,  list empty  original false, mutant true  <-- THE ONLY ONE
+#
+# The second proof picked the middle row because it is the one a USER can reach (escape
+# closes the popup and leaves the list), and a guard that does nothing in the state you
+# can reach feels like the guard that matters. It is the opposite: the conjunct only
+# decides where nothing can get there. updateSuggestions sets showPopup from
+# len(suggestions) > 0 AFTER filterSuggestions assigns the list, and the only two other
+# assignments (:97 Hide, :130 escape) set it to false — so `showPopup == true` implies a
+# non-empty list, always, and the mutation really is equivalent on reachable states.
+#
+# So the conjunct is redundant in production and undefended in the suite, and that is
+# fixable: this package's tests already reach into the struct and assign showPopup
+# directly, so the third row is constructible from a test. The fixture builds it and
+# pins what the guard decides — tab and the arrows fall through to the grid, enter
+# applies the clause. All four die, 3/3 red each.
+#
+# And the conjunct stays. Deleting it, as the first proof urged, would have made "up"
+# over an empty popup report itself handled and move nothing.
+#
+# GROUP 1b — WHERE THE PROOF WAS AN EQUIVALENCE LOOKING LIKE A GAP (386, 619, 624, 646).
+# These four stay, and the reason is the opposite of what group 4 below used to claim
+# for them. Each mutant is `> 0` -> `>= 0` or `<` -> `<=`, and in every case the widened
+# comparison is a tautology over the value it is comparing, so no fixture can exist:
+#
+#   386  `current.Len() > 0` -> `>= 0`. strings.Builder.Len returns len(b.buf), which is
+#        non-negative by the language, so `>= 0` is `true` unconditionally — the same
+#        value `> 0` already returns whenever the line is reached. Group 4's claim that
+#        the boundary is "an all-space input, where the mutant appends one empty token"
+#        was wrong twice: `>= 0` does not append anything, and an all-space input
+#        returns at where_filter.go:369 before the loop that line closes is ever entered.
+#   624  `pad > 0` -> `>= 0`. pad is `maxWidth - width`, and it is only computed in the
+#        else-arm of `width > maxWidth`, so pad >= 0 already. The widened form is `true`
+#        unconditionally, and the body it guards, strings.Repeat(" ", 0), is the empty
+#        string anyway.
+#   646  `w < width` -> `w <= width`. Equal widths take the mutant's branch and run
+#        strings.Repeat(" ", width-w) with width-w == 0, which is "". Identical output.
+#   619  `width > maxWidth` -> `width >= maxWidth`. This one needs the callee:
+#        ansi.Truncate returns its argument UNCHANGED when StringWidth(s) <= length
+#        (charm.land/x/ansi truncate.go, first two lines of `truncate`). So at
+#        width == maxWidth the mutant returns the same string the else-arm would, because
+#        the pad it skips is Repeat(" ", 0). Note this also means the exact-width
+#        fixture that group 4 cited at TestWhereFilter_LabelsTruncateAndKindsPadding
+#        DOES exist and does run — it simply cannot tell the two forms apart, which is
+#        what an equivalent mutant looks like from the outside.
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:386
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:619
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:624
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:646
 CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:535
 CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:549
 CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:556
@@ -1029,40 +1157,74 @@ INVERT_NEGATIVES internal/ui/components/grid/where_filter.go:586
 ARITHMETIC_BASE internal/ui/components/grid/where_filter.go:586
 INVERT_NEGATIVES internal/ui/components/grid/where_filter.go:535
 
-# GROUP 4 — WHERE A BOUNDARY IS REAL AND NO FIXTURE SITS ON IT (164, 242, 353, 386,
-# 455, 498, 556 is group 2, 619, 624, 646). THESE ARE REAL GAPS, not equivalences, and
-# the gate's own attribution says the suite does not reach them. Each one has a fixture
-# that appears to distinguish it and does not register:
+# GROUP 4 — WHERE A BOUNDARY IS REAL AND NO FIXTURE SITS ON IT. RETIRED, all of it.
+# 164, 242, 353, 455 and 498 were real gaps and now have fixtures; 386, 619, 624 and 646
+# were never gaps at all and moved to group 1b above as equivalences. What the old proof
+# got wrong, kept because each mistake is a way to fool yourself again:
 #
-#   164  moveSelection(-1) from row 0 must land on the LAST row; the wrap is asserted by
-#        TestWhereFilter_TheSelectionWrapsAtBothEnds. Both INVERT_NEGATIVES and
-#        ARITHMETIC_BASE turn the -1 into a +1, which the assertion rejects.
-#   242  the guard is `wf.selected >= len(wf.suggestions)`; the boundary is
-#        selected == len, and the out-of-range fixtures use -1 and 99 — neither is len.
-#   353  `pos >= 0` with pos == 0, i.e. a clause whose keyword is the FIRST thing typed.
-#        Every fixture puts a column name first.
-#   386  `current.Len() > 0` with an all-space input, where the mutant appends one empty
-#        token; the tokenising fixture asserts both the join and the length for "   ".
-#   455  the loop `for i := wf.cursor - 1; i >= 0; i--` skipping i == 0, which is the
-#        cursor sitting just after a leading space.
-#   498  `colIndex >= len(row)` with colIndex == len(row), i.e. a row exactly as long as
-#        the index; the fixture uses an index PAST the row, which both forms decline.
-#   619/624/646  the label and detail padding arithmetic in renderLabel and renderKind,
-#        whose boundary is a string whose display width is exactly the column's. Only
-#        the CONDITIONALS_BOUNDARY mutant on each is in the gate's survivor set; their
-#        ARITHMETIC_BASE siblings are killed, which is the same per-mutator granularity
-#        that made toast.go's five look stale.
+#   164  It cited TestWhereFilter_TheSelectionWrapsAtBothEnds as the fixture that rejects
+#        a +1 delta. That test calls `wf.moveSelection(±1)` DIRECTLY and never goes
+#        through HandleKey, so it pins the WRAPPER and says nothing about the handler's
+#        sign. The one test that does press the arrow key through HandleKey
+#        (TestWhereFilter_ThePopupDecidesWhatEnterTabAndArrowsDo) asserted only
+#        `wf.selected != before` — from the first row, up lands on the LAST and down
+#        lands on 1, and BOTH differ from 0. A guard that compared for change instead of
+#        for value cannot see a sign. Fixture:
+#        TestWhereFilter_TheArrowKeysMoveInTheirOwnDirection, which walks from the first
+#        row (where a wrap is visible) AND from the middle (where the two directions
+#        part), because neither position alone pins the direction.
+#   242  Right, and the fixture is mustNotPanic around acceptSuggestion with the
+#        selection set to exactly len(suggestions). Reaching it through the keys is
+#        impossible, which is the point: it is a guard against an out-of-range index, so
+#        it has to be exercised by setting the index.
+#   353  Right. `pos == 0` needs a clause whose keyword is the FIRST thing typed, and
+#        every old fixture put a column name first. The fixture also pins the near-miss,
+#        "x AND b = 2", so the test would fail if someone widened it to "contains AND".
+#   455  Right. The boundary is i == 0, i.e. the cursor at offset 1 on a line whose
+#        first character is a space — reachable, because a fresh clause can begin with a
+#        space (" AND x") and the cursor walks back onto it.
+#   498  Right. `colIndex == len(row)`, not past it. A ragged projection is normal for a
+#        projection, and the old fixture used an index PAST every row, which both forms
+#        of the guard decline identically. mustNotPanic is load-bearing here: the mutant
+#        reaches row[colIndex] rather than returning a wrong answer.
 #
-# A panicking mutant is scored a SURVIVOR by the gate, and 242, 498 and 619 all index
-# after their guard, so for those the recover-and-report pattern already used in
-# grid/table.go applies. Written down rather than justified: none of these is equivalent.
-CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:242
-CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:353
-CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:386
-CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:455
-CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:498
-CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:619
-CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:624
-CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:646
-ARITHMETIC_BASE internal/ui/components/grid/where_filter.go:164
-INVERT_NEGATIVES internal/ui/components/grid/where_filter.go:164
+# And the sentence that closed the group — "A panicking mutant is scored a SURVIVOR by
+# the gate, and 242, 498 and 619 all index after their guard" — listed 619, which does no
+# indexing at all; it calls ansi.Truncate. A proof that inventories three members of a
+# set and gets one of them wrong is a summary of an argument nobody ran.
+
+# ---------------------------------------------------------------------------
+# GROUP 5 — WHERE THE MUTATION CHANGES WHICH BRANCH RUNS AND BOTH BRANCHES ARE
+#           THE SAME CONSTANT. (explorer/tree.go:315.)
+#
+# getExpandIcon returns "  " for a leaf and " " for everything else, and the
+# expanded arm and the fall-through arm are the SAME literal:
+#
+#     if node.IsLeaf() { return "  " }
+#     if node.Expanded { return " " }
+#     return " "
+#
+# So CONDITIONALS_NEGATION on `node.Expanded` (tree.go:315) compiles to a
+# program that returns " " for an expanded node and " " for a collapsed one,
+# which is what the original returns for both. There is no input — no value of
+# Expanded, no value of IsLeaf — on which the two differ, so no test can kill
+# this mutant and none should try.
+#
+# This is an equivalence, NOT a test gap, and the difference is worth keeping
+# sharp: the icons in this package are blank. NodeType.Icon() returns "" for a
+# database, a schema and a table, and "  " for a column, an index and a
+# constraint — and it has returned exactly that since the first commit
+# (5d3983c), so no glyph was ever lost and nothing regressed. The whole icon
+# column therefore carries no information, and `if node.Expanded` is dead code
+# whose two arms happen to agree.
+#
+# What is NOT done here: inventing glyphs. Whether the tree should use ASCII
+# (+/-), box-drawing (▸/▾) or nerd-font icons is a product decision, and picking
+# one would change what every user sees in this pane. So the marker stays blank,
+# and the two facts are pinned by
+# TestTheIconsAreBlankAndTheExpandMarkerDoesNotChange, which asserts the blanks
+# rather than ignoring them — a test that says nothing about the icons leaves a
+# reader unable to tell a deliberate blank from a lost glyph, and this test
+# SKIPS itself the moment the markers start differing so the allowlist entry
+# cannot outlive the behaviour it justifies.
+CONDITIONALS_NEGATION internal/ui/components/explorer/tree.go:315

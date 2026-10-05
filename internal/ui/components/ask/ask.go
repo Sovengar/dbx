@@ -1,12 +1,12 @@
 package ask
 
 import (
-	"fmt"
-	"os"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+
 	"charm.land/lipgloss/v2"
+	"github.com/buble/dbx/internal/debuglog"
 
 	"github.com/buble/dbx/internal/theme"
 	"github.com/buble/dbx/internal/ui/bordered"
@@ -72,10 +72,6 @@ type Ask struct {
 	input string
 
 	turns []Turn
-
-	contextSchema string
-	contextTable  string
-	contextWhere  string
 }
 
 // New creates an empty ASK overlay.
@@ -115,14 +111,6 @@ func (a *Ask) Turns() []Turn {
 
 // Input returns the current input line.
 func (a *Ask) Input() string { return a.input }
-
-// SetContextHint records the grid context used as a prompt hint (display only;
-// the app builds the actual prompt text).
-func (a *Ask) SetContextHint(schema, table, where string) {
-	a.contextSchema = schema
-	a.contextTable = table
-	a.contextWhere = where
-}
 
 // AddQuestion appends a turn for the submitted question and enters generating.
 func (a *Ask) AddQuestion(q string) {
@@ -261,10 +249,10 @@ func (a *Ask) View() string {
 		modalH = 10
 	}
 
+	// No floor on innerH, and there used to be one. modalH has a floor of 10 immediately
+	// above, so innerH is at least 8 — the same two-floors-for-one-quantity mistake the query
+	// browser had.
 	innerH := modalH - 2
-	if innerH < 3 {
-		innerH = 3
-	}
 
 	askDebugLog("View: width=%d height=%d modalW=%d modalH=%d turns=%d state=%v", a.width, a.height, modalW, modalH, len(a.turns), a.state)
 
@@ -315,10 +303,5 @@ func (a *Ask) View() string {
 }
 
 func askDebugLog(format string, args ...interface{}) {
-	f, err := os.OpenFile("/tmp/dbx_ask_debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "Ask: "+format+"\n", args...)
+	debuglog.Write("ask", "Ask", format, args...)
 }

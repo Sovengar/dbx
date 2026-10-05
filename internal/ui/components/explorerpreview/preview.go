@@ -2,12 +2,13 @@ package explorerpreview
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
 	"github.com/buble/dbx/internal/config"
+	"github.com/buble/dbx/internal/debuglog"
 	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/buble/dbx/internal/theme"
 )
@@ -278,27 +279,43 @@ func (e *ExplorerPreview) View() string {
 }
 
 func (e *ExplorerPreview) renderERE() string {
-	if e.ereDiagram == nil {
+	// The diagram AND its viewport, in one condition. They were two, and the second left a
+	// `return fullOutput` at the end that could not run: buildEREDiagram sets them together
+	// with no early return between, so a diagram without a viewport does not exist. Merging
+	// the checks means one exit, and the viewport is non-nil from here on — which the slicing
+	// below relies on without having to ask.
+	if e.ereDiagram == nil || e.ereViewport == nil {
 		return e.styles.TextMuted.Render("  No data available for ERE diagram")
 	}
 
 	fullOutput := RenderERDiagram(*e.ereDiagram, e.width, e.height, e.ereNav)
 
 	// Apply scroll
-	if e.ereViewport != nil {
+	{
 		lines := strings.Split(fullOutput, "\n")
+
+		// The scroll window is the last SCREENFUL, not the last line.
+		//
+		// It used to be clamped to len(lines) and to compute `end` before clamping `start` at
+		// all, so an offset past the end produced lines[len(lines):len(lines)] — an EMPTY
+		// panel. That is what a scroll offset left over from a taller diagram did: blanking
+		// the panel at the moment the user is scrolling and the content changes underneath.
+		//
+		// So the offset is bounded by the content minus the pane, which is what "scrolled to
+		// the bottom" means, and `end` follows from it.
 		start := e.ereViewport.ScrollOffset
+		if maxStart := len(lines) - e.ereViewport.PaneHeight; start > maxStart {
+			start = maxStart
+		}
+		if start < 0 {
+			start = 0
+		}
 		end := start + e.ereViewport.PaneHeight
 		if end > len(lines) {
 			end = len(lines)
 		}
-		if start > len(lines) {
-			start = len(lines)
-		}
 		return strings.Join(lines[start:end], "\n")
 	}
-
-	return fullOutput
 }
 
 func (e *ExplorerPreview) ensureERESelectionVisible() {
@@ -306,12 +323,12 @@ func (e *ExplorerPreview) ensureERESelectionVisible() {
 		return
 	}
 
-	// Estimate line of selected item: center (7) + spacing (1) + row * 6
+	// No `row < 0` guard, and there used to be one: the check two lines above is
+	// HasSelection(), which is `activeRow >= 0`, so reaching here means the row is not
+	// negative. Two different spellings of the same question, and the second was written as if
+	// the first might answer differently.
 	row := e.ereNav.ActiveRow()
-	if row < 0 {
-		return
-	}
-	selLine := 8 + row*6 // rough: center box ~7 lines + 1 spacing + row*6 per box
+	selLine := e.ereSelectionLine(row)
 
 	// Adjust scroll to keep selection visible
 	if selLine < e.ereViewport.ScrollOffset {
@@ -319,6 +336,38 @@ func (e *ExplorerPreview) ensureERESelectionVisible() {
 	} else if selLine >= e.ereViewport.ScrollOffset+e.ereViewport.PaneHeight {
 		e.ereViewport.ScrollOffset = selLine - e.ereViewport.PaneHeight + 1
 	}
+}
+
+// ereSelectionLine returns the line, within the rendered diagram, that the selected
+// relationship's NAME is drawn on.
+//
+// It used to be a rough constant, `8 + row*6`, and it was wrong twice over. The base
+// ignored how tall the centre box is — which grows with the column count, so a table with
+// ten FK columns already pushed it four lines short — and the stride said six lines per
+// relationship when a rendered relationship is a FOUR-line box plus one blank line. Both
+// errors put the estimate BELOW the real position and both grow with the row, so on a
+// diagram taller than the pane the selection walks off the bottom while the scroll
+// insists it is already visible.
+//
+// The numbers now come from the same calls RenderERDiagram makes, in the same order, so
+// the two cannot drift apart again. The layout being summed is:
+//
+//	centre box lines            renderBox: four frame lines plus one per column
+//	one blank                   the spacing between the centre and the columns
+//	one line                    each column's own title ("1:N" / "N:1")
+//	then per relationship        a blank line for all but the first, then the box — and
+//	                            the name is the SECOND line of the box, which is why
+//	                            the constant below is three and not one
+func (e *ExplorerPreview) ereSelectionLine(row int) int {
+	d := e.ereDiagram
+	if d == nil {
+		return 0
+	}
+	centerBox := renderBox(d.Center.Name, d.Center.Columns,
+		ComputeBoxWidth(d.Center.Columns), d.Center.IsJunction)
+	centreLines := strings.Count(centerBox, "\n") + 1
+	const linesPerRelationship = 5 // four box lines plus one blank
+	return centreLines + 3 + row*linesPerRelationship
 }
 
 func (e *ExplorerPreview) renderOverview() string {
@@ -454,12 +503,6 @@ func formatTime(t *time.Time) string {
 
 //nolint:unused // debug helper kept per AGENTS.md
 func debugLogERE(diagram *ERDiagram, selectedIdx int) {
-	f, err := os.OpenFile("/tmp/dbx_ere_debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-
 	centerColsPKFK := 0
 	for _, col := range diagram.Center.Columns {
 		if col.IsPK || col.IsFK {
@@ -467,7 +510,7 @@ func debugLogERE(diagram *ERDiagram, selectedIdx int) {
 		}
 	}
 
-	_, _ = fmt.Fprintf(f, "ERE: center=%s centerCols=%d(out of all) pkfkCols=%d outgoing=%d incoming=%d selectedIdx=%d\n",
+	debuglog.Write("ere", "ER", "ERE: center=%s centerCols=%d(out of all) pkfkCols=%d outgoing=%d incoming=%d selectedIdx=%d",
 		diagram.Center.Name,
 		len(diagram.Center.Columns),
 		centerColsPKFK,

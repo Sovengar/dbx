@@ -90,6 +90,16 @@ type Conn struct {
 	unmatched int
 	// CloseErr is what Close returns, for a caller that must not ignore it.
 	CloseErr error
+	// ExecErr is what every Exec returns, for the arms that handle a rejected write.
+	// There is no per-statement seam for Exec and there does not need to be one: a
+	// write either is refused or it is not, and a fixture that needs "this one refused"
+	// installs a whole Conn per case the way it installs a per-case Steps list.
+	ExecErr error
+
+	// Execs records the statements Exec was given, in order, because the app's write
+	// path is a loop over arguments and a test needs to see that it issued one
+	// statement per argument rather than one statement with all of them.
+	Execs []string
 }
 
 // New returns a connection that answers nothing, for tests that install their own
@@ -169,6 +179,16 @@ func (c *Conn) Ping(ctx context.Context) error {
 	return c.PingErr
 }
 
+func (c *Conn) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	c.Queries = append(c.Queries, sql)
+	c.Args = append(c.Args, args)
+	c.Execs = append(c.Execs, sql)
+	if c.ExecErr != nil {
+		return pgconn.CommandTag{}, c.ExecErr
+	}
+	return pgconn.NewCommandTag("EXEC 1"), nil
+}
+
 // Closed reports how many times Close was called.
 func (c *Conn) Closed() int { return c.closed }
 
@@ -186,6 +206,35 @@ func (c *Conn) LastQuery() string {
 // Unmatched is how many queries fell through every Step, i.e. how many
 // Sequential answers were consumed.
 func (c *Conn) Unmatched() int { return c.unmatched }
+
+// Asked reports whether any query so far contained substr. It exists for the
+// assertions that a caller's error handling actually CHANGED what it asked for —
+// a loader that stops at the first failure makes four fewer queries than one that
+// carries on, and the difference is only visible from the query log.
+//
+// Without it the only way to say "it stopped early" is to count Queries, which
+// counts the fixture's own setup queries too, so a fixture that grows a step
+// silently changes the number and the assertion stops meaning anything.
+func (c *Conn) Asked(substr string) bool {
+	for _, q := range c.Queries {
+		if strings.Contains(q, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// AskedCount is how many queries contained substr, for the case where one is not
+// enough — a retry loop that must run once and not twice.
+func (c *Conn) AskedCount(substr string) int {
+	n := 0
+	for _, q := range c.Queries {
+		if strings.Contains(q, substr) {
+			n++
+		}
+	}
+	return n
+}
 
 // row is a single scripted result row, scanned into whatever destinations the
 // caller passes.
@@ -347,10 +396,12 @@ func assign(dest, v any) error {
 		s := fmt.Sprint(v)
 		*p = &s
 	case *[]string:
-		if v == nil {
-			*p = nil
-			return nil
-		}
+		// NO `if v == nil` here, and there used to be one. assign returns at the top for a
+		// nil value, so by the time any case runs v is not nil — the check was the second
+		// copy of the guard four lines above it, written as if the first might not fire.
+		//
+		// A nil scanned into a *[]string still ends up nil: it is the top-level return that
+		// does it, which TestAssignAnswersEveryDestinationTheDriversScanInto pins.
 		switch list := v.(type) {
 		case []string:
 			*p = list
@@ -361,10 +412,9 @@ func assign(dest, v any) error {
 		}
 	case *time.Time:
 		// TableOverview scans a nullable timestamp, so pgx is handed a *time.Time
-		// destination and the value arrives either as a time or as nil.
-		if v == nil {
-			return nil
-		}
+		// destination and the value arrives either as a time or as nil — and the nil case is
+		// answered by assign's own first line, which is why there is no nil check here. There
+		// used to be one, and it could not fire.
 		t, err := asTime(v)
 		if err != nil {
 			return err
@@ -372,11 +422,8 @@ func assign(dest, v any) error {
 		*p = t
 	case **time.Time:
 		// This is the shape GetTableOverview actually uses: the field is a
-		// *time.Time and the scan gets a **time.Time.
-		if v == nil {
-			*p = nil
-			return nil
-		}
+		// *time.Time and the scan gets a **time.Time. No nil check, for the same reason as
+		// the case above: a nil value never reaches a case.
 		t, err := asTime(v)
 		if err != nil {
 			return err
@@ -395,7 +442,23 @@ func assign(dest, v any) error {
 		}
 		*p = n
 	case *bool:
-		*p = fmt.Sprint(v) == "true"
+		// "t" counts as true, and it used not to: the comparison was
+		// `fmt.Sprint(v) == "true"`, which answers FALSE for "t" — and "t" is what Postgres
+		// PRINTS for a true boolean, and what a fixture copied out of a psql session or a
+		// `\d` listing contains. So a fixture written the way the database spells it was
+		// silently false, and the test went on to assert that a row which was not there was
+		// not there.
+		//
+		// Only Postgres's own OUTPUT spellings are accepted — "true" and "t", in either case.
+		// Its input syntax is wider ("yes", "on", "1"), and those are still false, which the
+		// existing contract test pins deliberately: a fixture that says "yes" and means true
+		// gets a visible surprise, and one that says "yes" by accident gets a silent false.
+		switch s := strings.ToLower(fmt.Sprint(v)); s {
+		case "true", "t":
+			*p = true
+		default:
+			*p = false
+		}
 	default:
 		return fmt.Errorf("pgxfake: cannot scan %T into %T", v, dest)
 	}

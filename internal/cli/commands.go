@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -73,8 +75,14 @@ func init() {
 func getConnection(cmd *cobra.Command) (postgres.Conn, error) {
 	connName, _ := cmd.Flags().GetString("connection")
 
-	// First, try to find .dbx.toml in current directory
-	if dsn := findLocalDSN(); dsn != "" {
+	// First, try to find .dbx.toml in current directory.
+	//
+	// The flag is passed through, and it used not to be: `--connection analytics` from
+	// inside a project with a .dbx.toml connected to whatever entry the map happened to
+	// yield, which is a different database from the one the user named. The flag was
+	// honoured only in the global-config branch below, so the same command behaved
+	// differently depending on whether a project file happened to exist.
+	if dsn := findLocalDSN(connName); dsn != "" {
 		ctx := context.Background()
 		conn, err := pgxConnect(ctx, dsn)
 		if err != nil {
@@ -118,6 +126,61 @@ func getConnection(cmd *cobra.Command) (postgres.Conn, error) {
 // It is separated from getConnection because it is the part with a real decision
 // in it — which config entry, and how a URL-less entry is turned into a URL — and
 // that decision is worth testing without a database or a config file on disk.
+//
+// passwordEnv returns the password named by a connection's `password_env`, or "" when
+// there is none. It exists because that knob was declared, given no default and read by
+// nothing at all: the documented way to keep a password out of config.toml did nothing,
+// and a user who set it and dropped the password from the URL simply failed to connect
+// with nothing saying the knob was unsupported. The sibling mechanism already worked —
+// project .dbx.toml files expand `${env:NAME}` in their DSN — so this is the global
+// config learning the convention the project files already had.
+func passwordEnv(conn *config.ConnectionConfig) string {
+	if conn.PasswordEnv == "" {
+		return ""
+	}
+	return os.Getenv(conn.PasswordEnv)
+}
+
+// dsnWithPassword puts a password into a DSN that has no password in it.
+//
+// A DSN that ALREADY carries a password is left alone: the file is the more explicit
+// statement, and overwriting it would make `password_env` silently discard what the user
+// wrote. Every form is handled — url form and keyword form, with or without a port —
+// because the DSN in the file is whichever of them the user happened to write, and
+// "does this DSN have a password" has more than one answer if you only check for '@'.
+func dsnWithPassword(dsn, password string) string {
+	if password == "" || dsn == "" {
+		return dsn
+	}
+	at := strings.LastIndex(dsn, "@")
+	if at < 0 {
+		// No credentials section at all: postgres://host/db. Splice one in
+		// before the host, which is where a userinfo goes.
+		if i := strings.Index(dsn, "://"); i >= 0 {
+			return dsn[:i+3] + ":" + password + "@" + dsn[i+3:]
+		}
+		return dsn
+	}
+
+	creds := dsn[:at]
+	scheme := ""
+	if i := strings.Index(creds, "://"); i >= 0 {
+		scheme = creds[:i+3]
+		creds = creds[i+3:]
+	}
+	if strings.Contains(creds, ":") {
+		// Already has user:password.
+		return dsn
+	}
+	return scheme + creds + ":" + password + dsn[at:]
+}
+
+// dsnFor picks the DSN for a named connection, or for the first one when no name
+// was given.
+//
+// It is separated from getConnection because it is the part with a real decision
+// in it — which config entry, and how a URL-less entry is turned into a URL — and
+// that decision is worth testing without a database or a config file on disk.
 func dsnFor(connName string, cfg *config.Config) (string, error) {
 	var connCfg *config.ConnectionConfig
 	for _, c := range cfg.Connections {
@@ -131,18 +194,33 @@ func dsnFor(connName string, cfg *config.Config) (string, error) {
 		return "", fmt.Errorf("connection not found: %s (no .dbx.toml in current directory)", connName)
 	}
 
+	password := passwordEnv(connCfg)
+
 	if connCfg.URL != "" {
-		return connCfg.URL, nil
+		return dsnWithPassword(connCfg.URL, password), nil
 	}
-	return fmt.Sprintf("postgres://%s@%s:%d/%s",
+	dsn := fmt.Sprintf("postgres://%s@%s:%d/%s",
 		connCfg.User,
 		connCfg.Host,
 		connCfg.Port,
 		connCfg.Database,
-	), nil
+	)
+	return dsnWithPassword(dsn, password), nil
 }
 
-func findLocalDSN() string {
+// findLocalDSN returns the DSN of the named connection in the .dbx.toml of the working
+// directory, or of a default one when name is empty.
+//
+// The default is the alphabetically FIRST connection name, not "whichever one the map
+// yields". ProjectConfig.Connections is a map[string]ProjectConnection, and `for _, c :=
+// range m { return c }` returns an arbitrary element: Go randomises map iteration, so a
+// project with two connections connected to a DIFFERENT DATABASE ON EVERY INVOCATION.
+// The first version of the test below asserted "the first of several" by writing them in
+// an order, and the assertion passed or failed depending on the run.
+//
+// Sorting also makes `--connection` unnecessary for the common case: the alphabetically
+// first name is at least stable enough to document.
+func findLocalDSN(name string) string {
 	wd, err := os.Getwd()
 	if err != nil {
 		return ""
@@ -152,12 +230,26 @@ func findLocalDSN() string {
 	if err != nil {
 		return ""
 	}
+	if len(cfg.Connections) == 0 {
+		return ""
+	}
 
-	for _, conn := range cfg.Connections {
+	if name != "" {
+		conn, ok := cfg.Connections[name]
+		if !ok {
+			return ""
+		}
 		return conn.GetDSN()
 	}
 
-	return ""
+	names := make([]string, 0, len(cfg.Connections))
+	for n := range cfg.Connections {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	conn := cfg.Connections[names[0]]
+	return conn.GetDSN()
 }
 
 func runQuery(cmd *cobra.Command, args []string) error {

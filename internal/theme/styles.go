@@ -6,11 +6,11 @@ type Styles struct {
 	Border       lipgloss.Style
 	BorderActive lipgloss.Style
 
-	Panel    lipgloss.Style
-	Element  lipgloss.Style
-	Selected lipgloss.Style
-	Cursor   lipgloss.Style
-	Pending  lipgloss.Style
+	Panel               lipgloss.Style
+	Element             lipgloss.Style
+	Selected            lipgloss.Style
+	Cursor              lipgloss.Style
+	Pending             lipgloss.Style
 	DraftInsert         lipgloss.Style
 	DraftInsertSelected lipgloss.Style
 	DraftUpdate         lipgloss.Style
@@ -37,7 +37,7 @@ type Styles struct {
 	TabActive   lipgloss.Style
 	TabInactive lipgloss.Style
 
-	ModeEdit lipgloss.Style
+	ModeEdit   lipgloss.Style
 	ModeNormal lipgloss.Style
 
 	FilterIndicator lipgloss.Style
