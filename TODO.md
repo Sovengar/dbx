@@ -2317,3 +2317,82 @@ conviene no perder de vista:
 Ninguna de las dos cosas se ha tocado aqui a proposito: son la siguiente unidad de trabajo, no
 esta. Registrar la cifra es lo que importa; arreglarla de a mezclas mientras secia lo que el
 allowlist prohibe.
+
+## Ronda 31 — el bucle de mutacion, y por que NO se borra el allowlist
+
+Cobertura sigue en **100%**. Esta ronda no es de cobertura: es de la puerta de mutacion, que
+llevaba **356 supervivientes no listados** y por tanto haria fallar cualquier PR.
+
+### 1. Borrar el allowlist apaga la puerta. No la reinicia.
+
+Medido, no supuesto. `mutation.yml:154-157` sin el fichero:
+
+```
+- gate NOT calibrated: .mutation-allowlist is missing, so this run reports only and cannot block
+exit 0
+```
+
+Ademas `mutation.yml` corre solo en `pull_request` y `workflow_dispatch`, y **no** en push a
+`main`. Borrarlo = 356 mutantes vivos sin mirar y sin avisar, y nadie se entera porque el
+workflow tampoco corre al pushear. Lo que si funciona es **podarlo**: 174 entradas -> las 41
+que realmente sobreviven. La puerta da el mismo resultado (356 nuevos bloquean igual) sin 133
+mentiras, y una entrada que lista un mutante que las pruebas ya matan dice "esto se examino" de
+algo que nadie examino dos veces.
+
+### 2. El bucle es `commit -> mutate-diff -> arreglar -> commit`, NO `cambio -> mutate-diff`
+
+Medido tambien. La regla es:
+
+```make
+git diff --name-only $(MUTATE_BASE)...HEAD | grep -q '\.go$'
+```
+
+Tres puntos, contra `HEAD`. Consecuencias:
+
+| momento | ficheros que ve |
+|---|---|
+| cambio sin commitear | **0** |
+| commiteado, sin pushear | 1 |
+| pusheado (`HEAD == origin/main`) | **0** |
+
+Asi que un cambio sin commitear no se muta, y tras pushear tampoco. El paso va **despues** del
+commit y **antes** del push.
+
+### 3. Y mutate-diff muta LINEAS cambiadas, no ficheros enteros
+
+Esto es lo que hace el bucle barato. `gridpreview` tenia 84 mutantes vivos en el modulo
+entero; el diff de esa rondarodujo **13 mutantes en total**, porque solo se mutan las lineas
+tocadas. 12 muertos, 1 equivalente allowlisted. **6 segundos** de run.
+
+Consecuencia practica: el bucle por commit es barato, y la deuda de 356 vive en lineas que
+nadie ha tocado. Cada PR mueve su propio diff contra la puerta; reducing la deuda requiere
+tocar deliberadamente cada fichero — que es justo lo que hace este bucle.
+
+### 4. La ronda: gridpreview
+
+84 supervivientes, **0 allowlisted** — el fichero era invisible para la puerta. Cuatro eran
+condiciones muertas (`jqSugVisible && len(jqSugs) > 0`, un hecho escrito dos veces en cinco
+sitios). Al quitarlas, el test del invariante encontro un agujero **de mi propio cambio**: `up`
+pasaba por delante de una lista vacia a `len-1`, que es `-1`, y `acceptJQSuggestion` ya sabia
+eso con una tercera redaccion de la misma regla. Los tres pasan ahora por
+`moveJQSuggestionSelection`.
+
+Tres hallazgos **fijados, no corregidos**, cada uno con su punto de cableado:
+
+- El conjunto de caracteres del scanner de numeros tiene `t` y `Z` pero ni `T` ni `:`, asi que
+  un timestamp ISO se pinta como cuatro numeros separados con una `T` suelta en medio.
+  Completarlo significa anadir `:` al conjunto, que tambien se tragaria el colon de `{"a":1}`.
+- **Un panel, dos alturas de contenido**: `Render` dibuja `height-4` y `ensureCursorVisible`
+  desplaza como si fueran `height-6`. El error va en la direccion segura, que es probablemente
+  por lo que sobrevive.
+- Un tipo mas ancho que su columna **envuelve** la caja una fila mas alta, porque la columna de
+  ruta recorta y la de tipo no. Inalcanzable: el vocabulario es cerrado y su miembro mas largo
+  mide diez columnas.
+
+### trampa nueva pagada
+
+`addToHistory` **escribe** `~/.config/dbx/jq_history.json` y un panel lo **lee** al
+construirse, asi que un test que.historia sin redirigir `HOME` lee el historial del
+desarrollador y deja cien entradas `.k0042` detras. `previewOf` no aísla; `isolate(t)` si. Mis
+tests de historiales no lo hacian y tocaron el fichero real (que contenia solo basura de
+tests, nada del usuario).
