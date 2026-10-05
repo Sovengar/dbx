@@ -478,7 +478,7 @@ func (p *GridPreview) handleJQInput(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case "enter":
-		if p.jqSugVisible && len(p.jqSugs) > 0 {
+		if p.jqSugVisible {
 			p.acceptJQSuggestion()
 			return nil, true
 		}
@@ -491,7 +491,7 @@ func (p *GridPreview) handleJQInput(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case "tab":
-		if p.jqSugVisible && len(p.jqSugs) > 0 {
+		if p.jqSugVisible {
 			p.acceptJQSuggestion()
 			return nil, true
 		}
@@ -517,22 +517,16 @@ func (p *GridPreview) handleJQInput(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 
 	case "up":
-		if p.jqSugVisible && len(p.jqSugs) > 0 {
-			p.jqSugSelected--
-			if p.jqSugSelected < 0 {
-				p.jqSugSelected = len(p.jqSugs) - 1
-			}
+		if p.jqSugVisible {
+			p.moveJQSuggestionSelection(-1)
 			return nil, true
 		}
 		p.jqHistoryNavigate(-1)
 		return nil, true
 
 	case "down":
-		if p.jqSugVisible && len(p.jqSugs) > 0 {
-			p.jqSugSelected++
-			if p.jqSugSelected >= len(p.jqSugs) {
-				p.jqSugSelected = 0
-			}
+		if p.jqSugVisible {
+			p.moveJQSuggestionSelection(1)
 			return nil, true
 		}
 		p.jqHistoryNavigate(1)
@@ -642,6 +636,20 @@ func (p *GridPreview) updateJQSuggestions() {
 		p.jqSugs = p.jqSugs[:maxJQSuggestions]
 	}
 
+	// THE INVARIANT: jqSugVisible == true IMPLIES len(jqSugs) > 0.
+	//
+	// This is the only place that turns the popup on, and the ctrl+space arm computes the
+	// same implication. The four readers used to write it out again as
+	// `p.jqSugVisible && len(p.jqSugs) > 0` -- one fact, twice -- and the second half was
+	// dead, because nothing can make the flag true with an empty list.
+	//
+	// Every other writer turns it OFF: ExitJQMode, the escape key, acceptJQSuggestion, and
+	// the two history arms all set false, and the last two of those deliberately LEAVE the
+	// list alone so the history keys can recompute it. So the implication holds at both
+	// ends: the flag is true only when the list is not empty.
+	//
+	// TestTheSuggestionFlagAndTheListCannotDisagree holds it, so if a future writer breaks
+	// it, the reader that assumed it is what fails rather than the writer.
 	if len(p.jqSugs) > 0 {
 		p.jqSugVisible = true
 		p.jqSugSelected = 0
@@ -829,8 +837,45 @@ func (p *GridPreview) navigateJSON(input interface{}, path string) interface{} {
 	return current
 }
 
+// moveJQSuggestionSelection moves the highlighted suggestion by delta, wrapping at both ends.
+//
+// It is what the up and down keys used to write out separately, and they wrote it out
+// DIFFERENTLY: up wrapped to len-1 on the way past the front, down wrapped to 0 on the way
+// past the back. Each was right about its own direction and wrong about the other's, and with
+// a one-entry list the two answers are the same only by coincidence.
+//
+// Both are wrong about the EMPTY list, which is the case that mattered here: up past the front
+// of nothing computed len-1 == -1, and down past the back of nothing computed 0, and a
+// selection of 0 with no suggestions is an index that addresses nothing. acceptJQSuggestion
+// already knew -- it refuses outright when the selection is out of range, which is the third
+// spelling of the same rule in this file.
+//
+// So all three now go through one function, and it answers for every list length including
+// none: moving within a list lands on an entry, and moving within no list leaves the selection
+// where it was, because there is nothing to select.
+func (p *GridPreview) moveJQSuggestionSelection(delta int) {
+	if len(p.jqSugs) == 0 {
+		return
+	}
+	p.jqSugSelected += delta
+	if p.jqSugSelected < 0 {
+		p.jqSugSelected = len(p.jqSugs) - 1
+	}
+	if p.jqSugSelected >= len(p.jqSugs) {
+		p.jqSugSelected = 0
+	}
+}
+
+// hasJQSuggestionSelected reports whether the selection addresses a suggestion.
+//
+// acceptJQSuggestion asked this as a range check written out longhand; this is the same
+// question with the answer named.
+func (p *GridPreview) hasJQSuggestionSelected() bool {
+	return p.jqSugSelected >= 0 && p.jqSugSelected < len(p.jqSugs)
+}
+
 func (p *GridPreview) acceptJQSuggestion() {
-	if p.jqSugSelected < 0 || p.jqSugSelected >= len(p.jqSugs) {
+	if !p.hasJQSuggestionSelected() {
 		return
 	}
 
@@ -1138,7 +1183,11 @@ func (p *GridPreview) renderJQPrompt() string {
 		bar += strings.Repeat(" ", p.width-4-barWidth)
 	}
 
-	if p.jqSugVisible && len(p.jqSugs) > 0 {
+	// The emptiness check is renderJQSuggestions' own, and it is stated there with the reason
+	// ("a border with no content in it"). Restating it here was the same fact twice -- the
+	// second copy could not be false when the first was true, because the flag is only turned
+	// on with a non-empty list. See the invariant at updateJQSuggestions.
+	if p.jqSugVisible {
 		bar += "\n" + p.renderJQSuggestions()
 	}
 
