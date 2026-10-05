@@ -71,3 +71,17 @@ CONDITIONALS_BOUNDARY internal/ui/modal.go:88
 CONDITIONALS_BOUNDARY internal/ui/toast.go:130
 CONDITIONALS_BOUNDARY internal/ui/toast.go:133
 CONDITIONALS_BOUNDARY internal/ui/toast.go:78
+
+# ── gridpreview, round 31 ──────────────────────────────────────────────────
+#
+# preview.go:861   `len(p.jqSugs) == 0` -> `<= 0`: provably equivalent. len() on a slice
+#                  returns a non-negative int by definition, so `<= 0` and `== 0` hold on
+#                  exactly the same values -- the empty slice and nothing else. There is no
+#                  state in which the two disagree, so no test can tell them apart, and a
+#                  test written to try would pass for the wrong reason.
+#
+#                  It is the first entry here that is not a clamp assigning the value a
+#                  variable already holds; those are the other shape of equivalent mutant in
+#                  this repository, and they are all `<` becoming `<=` where the body is
+#                  `x = <something x already is>`.
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:861
