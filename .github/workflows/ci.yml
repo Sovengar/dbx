@@ -285,8 +285,30 @@ jobs:
         # branch sit in the gate forever with nothing but a number in the summary.
         # A TIMED OUT mutant is worse, because it is absent from the counted
         # totals and so makes the efficacy figure go UP.
+        #
+        # Three things were missing, and none of them could show up until dbx started
+        # opening PRs -- because an open PR does not have to touch a single .go file:
+        #
+        #   * the `if` that Gate has. Without it this step ran on a run where Mutate
+        #     had said "nothing to mutate", found no report.json, and failed the job
+        #     for a non-event.
+        #   * `S`. It was referenced only on this step's OWN failure path -- the one
+        #     that writes the guidance -- and it lived in Gate's shell, so the step
+        #     died with "S: unbound variable" instead of reporting what it had just
+        #     found. It had passed until now only because check_mutate_nc.py had never
+        #     once failed: the bug sat exactly on the path where it matters.
+        #   * a voice. Gate treats a missing report.json as "no result, gate passes";
+        #     this step treated it as a failure. One state gets one verdict.
+        if: always() && steps.scope.outputs.run == 'true'
         run: |
           set -uo pipefail
+          S="$GITHUB_STEP_SUMMARY"
+
+          if [ ! -f report.json ]; then
+            echo "- no report.json (Mutate was skipped or crashed) -> nothing unevaluated to check" >> "$S"
+            exit 0
+          fi
+
           if ! python3 scripts/check_mutate_nc.py; then
             {
               echo ""
