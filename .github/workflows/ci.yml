@@ -1,9 +1,9 @@
 name: CI
 
-# Sin filtros `paths`: corre en todo PR y en todo push a `main`.
+# No `paths` filters: this runs on every PR and on every push to `main`.
 on:
   pull_request:
-    # ready_for_review: un draft puesto en listo también reporta Mutation.
+    # ready_for_review: a draft flipped to ready reports Mutation too.
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
@@ -13,7 +13,7 @@ on:
 permissions:
   contents: read
 
-# Un push nuevo cancela el run anterior de la misma ref; main queda exento.
+# A new push cancels the previous run of the same ref; main is exempt.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -31,11 +31,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-          # El Makefile entra en la clave de caché: ahí vive GOLANGCI_LINT_VERSION.
+          # The Makefile is part of the cache key: GOLANGCI_LINT_VERSION lives there.
           cache-dependency-path: |
             go.sum
             Makefile
-      # Mismo camino que `make lint` en local: golangci-lint v2.13.2 vía Makefile.
+      # Same path as `make lint` locally: golangci-lint v2.13.2 via the Makefile.
       - name: Lint
         run: make lint
 
@@ -47,7 +47,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Historia completa: el gate de cobertura usa `git merge-base <base> HEAD`.
+          # Full history: the coverage gate uses `git merge-base <base> HEAD`.
           fetch-depth: 0
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -55,7 +55,7 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
-      # fd como dependencia cacheada: binario de las releases, versión dentro de la clave.
+      # fd as a cached dependency: the release binary, version inside the key.
       - name: Cache fd
         id: fd-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -70,8 +70,8 @@ jobs:
             | tar -xz -C "$HOME/fd-bin" --strip-components=1
       - name: Put fd on PATH
         run: echo "$HOME/fd-bin" >> "$GITHUB_PATH"
-      # Misma suite que `make test` (sin `-short`), perfil de cobertura atómico y `-count=1`.
-      # internal/app levanta PostgreSQL con testcontainers desde el Docker del runner.
+      # Same suite as `make test` (no `-short`), atomic profile, `-count=1`.
+      # internal/app starts PostgreSQL through testcontainers on the runner's Docker.
       - name: Test
         run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
       - name: Coverage summary
@@ -101,7 +101,7 @@ jobs:
             }' coverage.out | sort
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # 100% de las líneas tocadas contra el merge-base, total contra scripts/coverage-floor.
+      # 100% of the touched lines against the merge-base, total against scripts/coverage-floor.
       - name: Coverage gate
         run: |
           set -euo pipefail
@@ -123,20 +123,20 @@ jobs:
             | tee -a "$GITHUB_STEP_SUMMARY"
 
 # -- Mutation ---------------------------------------------------------
-# Mide y decide `scripts/mutate.sh`; este archivo aporta paths, refs y presupuesto.
-# Sin `needs:` ni `continue-on-error`; el único `if:` es de evento (no draft).
+# Measured and decided by scripts/mutate.sh; this file carries paths, refs and budget.
+# No `needs:` and no `continue-on-error`; the only `if:` is the event gate below.
 
   Mutation:
-    # Solo en PR no draft; el fail-vs-skip vive en scripts/mutate.sh.
+    # Only on a non-draft PR; the fail-vs-skip decision lives in scripts/mutate.sh.
     if: github.event_name == 'pull_request' && !github.event.pull_request.draft
     name: Mutation
     runs-on: ubuntu-24.04
-    # 13m de techo + 360s de reserva < 20m de job; la cadena la valida mutate.sh.
+    # 13m ceiling + 360s reserve < 20m job; scripts/mutate.sh asserts the chain.
     timeout-minutes: 20
     env:
-      # Base = merge-base de la rama contra la que se abre el PR.
+      # Base = merge-base of the branch the PR targets.
       MUTATE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
-      # Presupuesto obligatorio con --ci: mutate.sh se niega a arrancar sin él.
+      # Budget, mandatory under --ci: mutate.sh refuses to start without it.
       MUTATE_CAP: 180s
       MUTATE_WORKERS: 4
       MUTATE_STALL: 8m
@@ -144,14 +144,14 @@ jobs:
       MUTATE_JOB_CEILING: 20m
       MUTATE_SETUP_RESERVE: 360s
     steps:
-      # El reloj arranca antes del checkout: la reserva se mide desde aquí.
+      # The clock starts before the checkout: the reserve is measured from here.
       - name: Mark the job clock
         run: echo "MUTATE_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Historia completa: el alcance se calcula con `git diff <base>...HEAD`.
+          # Full history: the scope is `git diff <base>...HEAD`.
           fetch-depth: 0
 
       - name: Set up Go
@@ -159,19 +159,19 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-          # scripts/mutate.sh entra en la clave de caché.
+          # scripts/mutate.sh is part of the cache key.
           cache-dependency-path: |
             go.sum
             scripts/mutate.sh
 
-      # Los dos suites del gate: mutate_test.sh y watchdog_test.sh (~1s).
+      # The two suites of the gate: mutate_test.sh and watchdog_test.sh (~1s).
       - name: Shell suites
         run: |
           set -euo pipefail
           bash scripts/watchdog_test.sh
           bash scripts/mutate_test.sh
 
-      # Exige `.mutation-allowlist`: sin él no hay con qué comparar supervivientes.
+      # Requires .mutation-allowlist: without it there is nothing to compare survivors with.
       - name: Calibration
         run: |
           set -euo pipefail
@@ -181,7 +181,7 @@ jobs:
           fi
           echo "calibrated: $(grep -cvE '^[[:space:]]*(#|$)' .mutation-allowlist) allowlisted mutants"
 
-      # Trae la ref base aunque el clone sea somero.
+      # Fetches the base ref even on a shallow clone.
       - name: Resolve mutation scope
         run: |
           set -euo pipefail
@@ -189,7 +189,7 @@ jobs:
           git fetch --no-tags --depth=1 origin "+refs/heads/${{ github.base_ref || github.event.repository.default_branch }}:refs/remotes/origin/${{ github.base_ref || github.event.repository.default_branch }}" || \
             echo "could not fetch base ref; continuing with what is present"
 
-      # Un paso que mide y decide: el código de salida es el veredicto.
+      # One step that measures and decides: the exit code is the verdict.
       - name: Mutate and gate
         id: mutate
         run: scripts/mutate.sh --diff --ci --summary "$GITHUB_STEP_SUMMARY"
@@ -199,7 +199,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-report-${{ github.event.pull_request.number || github.run_id }}
-          # El reporte y el run log del paso anterior.
+          # The report and the run log of the step above.
           path: |
             ${{ steps.mutate.outputs.report }}
             ${{ steps.mutate.outputs.run_log }}
