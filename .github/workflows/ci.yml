@@ -53,6 +53,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: the coverage gate needs `git merge-base <base> HEAD`, and a depth-1
+          # clone has no common ancestor to report — the gate would fail for a reason that has
+          # nothing to do with the diff.
+          fetch-depth: 0
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -99,6 +104,35 @@ jobs:
               for (k in tot) printf "| %s | %.1f%% |\n", k, (tot[k] > 0 ? 100 * cov[k] / tot[k] : 0);
             }' coverage.out | sort
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # The gate goes last and without `continue-on-error`: if the profile was not written (the
+      # suite broke earlier), the step fails, which is what has to happen. A gate that is skipped
+      # when something fails protects nothing.
+      #
+      # The diff base is NOT the branch name: on the runner that does not exist as a comparable
+      # ref (Actions leaves the checkout on a synthetic merge), and `git diff main...HEAD` comes
+      # out empty — the gate would report "no lines touched", i.e. 100% of a diff that does not
+      # exist. What works in both cases (PR and push to main) is the explicit MERGE-BASE, which
+      # Actions does materialise at refs/pull/N/merge.
+      - name: Coverage gate
+        run: |
+          set -euo pipefail
+          if [ ! -f coverage.out ]; then
+            echo "::error::no coverage.out (the tests did not produce it)"
+            exit 1
+          fi
+          base="origin/${{ github.event.pull_request.base.ref || 'main' }}"
+          if ! git rev-parse --verify --quiet "$base" >/dev/null; then
+            base="${{ github.event.pull_request.base.ref || 'main' }}"
+          fi
+          merge_base="$(git merge-base "$base" HEAD)"
+          if [ -z "$merge_base" ]; then
+            echo "::error::no merge-base between HEAD and $base"
+            exit 1
+          fi
+          echo "diff against the merge-base $merge_base ($base)"
+          scripts/diff-coverage.sh coverage.out "$merge_base" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
 # -- de mutation.yml, trasladados aqui ------------------------------------
 # Este bloque era la cabecera del workflow `Mutation` (dos jobs: Calibration + Mutation),
