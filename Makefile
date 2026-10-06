@@ -91,34 +91,33 @@ lint: fmt-check
 # deliberately excluded.
 check: build lint test
 
-# A timed-out mutant is ABSENT from report.json, so it is indistinguishable from
-# a killed one. That makes timeouts dangerous rather than merely slow: a
-# surviving mutant that times out is not caught, and an allowlisted survivor that
-# times out is not re-verified either. Two independent causes, both fixed here.
+# Mutation testing. scripts/mutate.sh owns everything the engine needs -- the exclusion (read from
+# THIS file, which is exactly what scripts/check_mutate_scope.py validates against it), the budget,
+# the supervisor and the verdict -- so the local loop and CI run the same code path. These two
+# targets exist only so the local loop does not have to remember the flags.
 #
-# 1. --timeout-coefficient 20, not the default 3. At 3 this scope produced 136
-#    timeouts on txn.go, which meant all 8 of its allowlisted survivors were
-#    never evaluated at all.
-# 2. DBX_TEST_DSN, so internal/app does not start a fresh testcontainers
-#    PostgreSQL on every one of the hundreds of runs. Without it each run pays
-#    ~4s of container startup and times out; with a shared container the same
-#    package finishes in 0.5s. Set MUTATE_DSN, or leave it unset to let the
-#    suite use testcontainers (correct but slow, and prone to timeouts).
+# A timed-out mutant is ABSENT from the totals, so it is dangerous rather than merely slow: a
+# surviving mutant that times out is not caught, and an allowlisted survivor that times out is not
+# re-verified either. Two independent causes, and both are handled now:
 #
-# Check `jq '[.files[].mutations[]|select(.status=="TIMED OUT")]|length' report.json`
-# after any change here. A jump in that number means results are no longer
-# trustworthy, even when the gate still passes.
-mutate:
-	DBX_TEST_DSN="$(MUTATE_DSN)" go tool gremlins unleash --workers 4 --timeout-coefficient 20 --exclude-files '$(MUTATE_EXCLUDE)' --output report.json
+# 1. The per-mutant deadline is DERIVED, not a fixed coefficient: ceil(cap / coverage-pass), so the
+#    deadline is the cap whoever measures. The old --timeout-coefficient 3 produced 136 timeouts on
+#    txn.go (all 8 of its allowlisted survivors never evaluated), and coefficient 20 only papered
+#    over it by making every mutant wait 20 coverage passes -- a number nobody had agreed to.
+# 2. DBX_TEST_DSN, so internal/app does not start a fresh testcontainers PostgreSQL on every one of
+#    the hundreds of runs: ~4s of container startup each, against 0.5s with a shared container. Set
+#    MUTATE_DSN, or leave it unset to let the suite use testcontainers (correct but slow, and the
+#    reason the cap is 180s rather than the roomier figure a suite without a database needs).
+#
+# Check `jq '[.files[].mutations[]|select(.status=="TIMED OUT")]|length' report.json` after any
+# change here: a jump in that number means results are no longer trustworthy, even when the gate
+# still passes. Whether the jump is ALLOWED is .mutation-notcovered's TIMEOUT_MAX, enforced by
+# scripts/check_mutate_nc.py -- this target does not get to decide it quietly.
+mutate: ## Whole-module mutation run, with the verdict (same wiring as CI)
+	@MUTATE_DSN="$(MUTATE_DSN)" scripts/mutate.sh --run
 
-# gremlins silently falls back to the whole module when the diff is empty (base == HEAD),
-# so fail fast instead of running a full-module run that looks diff-scoped.
-mutate-diff:
-	@if git diff --name-only $(MUTATE_BASE)...HEAD | grep -q '\.go$$'; then \
-		DBX_TEST_DSN="$(MUTATE_DSN)" go tool gremlins unleash --diff $(MUTATE_BASE) --workers 4 --timeout-coefficient 20 --exclude-files '$(MUTATE_EXCLUDE)' --output report.json; \
-	else \
-		echo "no .go changes vs $(MUTATE_BASE) - nothing to mutate"; \
-	fi
+mutate-diff: ## Mutation run over the diff vs MUTATE_BASE, with the verdict
+	@MUTATE_DSN="$(MUTATE_DSN)" scripts/mutate.sh --diff
 
 clean:
 	rm -rf .local/bin/

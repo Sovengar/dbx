@@ -23,3 +23,10 @@ go.work.sum
 # Mutation testing (gremlins)
 report.json
 .gremlins*
+# El run log, el scope anunciado y el presupuesto con el que corrio: los tres los escribe
+# scripts/mutate.sh y el veredicto los lee. El log NUNCA se borra, porque justo eso es lo
+# que se quiere cuando hace falta. Tampoco se commitea: un log heredado es exactamente lo
+# que podria juzgarse si el motor ni siquiera arranca.
+.mutation-run.log
+.mutation-scope.txt
+.mutation-budget.txt
