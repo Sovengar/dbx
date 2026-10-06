@@ -6,6 +6,9 @@ name: CI
 # PR that does not touch the filtered paths. The gates run on every change.
 on:
   pull_request:
+    # ready_for_review is NOT in the default set (opened, synchronize, reopened), so a
+    # draft flipped to ready would report no mutation check at all -- and it is required.
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
   workflow_dispatch:
@@ -56,17 +59,10 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
-      # The compile gate lives HERE rather than in a job of its own. It used to be the
-      # third job, i.e. a third independent runner acquisition, and that is what turned an
-      # 112 s run into 11 min 42 s one day: Lint finished at t=1m47 and nothing ran at all
-      # until t=9m58. Build+Test together measure 82 s against Lint's 112 s, so the wall
-      # clock is unchanged while the run asks for two runners instead of three.
-      #
-      # `go build ./...` writes no binary and never invokes the linker (`go build -x ./...`
-      # shows no link step), so the claim is exactly "the packages compile". vet is not
-      # here either: it runs once, as golangci-lint's govet, in the Lint job.
-      - name: Build
-        run: go build ./...
+      # `go build ./...` used to be a step here and is GONE: redundant three ways --
+      # `go test ./...` compiles every package (that is what "[no test files]" means),
+      # golangci-lint type-checks, and `go build -x ./...` never invokes the linker. It
+      # was also on the critical path, costing 14 s in the job whose point is the suite.
       # Same test set as `make test` (`go test -race`, no `-short`, so the
       # integration tests run) plus an atomic coverage profile, with `-count=1`
       # so a cached PASS can never stand in for a real run. The integration tests
@@ -103,3 +99,231 @@ jobs:
               for (k in tot) printf "| %s | %.1f%% |\n", k, (tot[k] > 0 ? 100 * cov[k] / tot[k] : 0);
             }' coverage.out | sort
           } >> "$GITHUB_STEP_SUMMARY"
+
+# -- de mutation.yml, trasladados aqui ------------------------------------
+# Este bloque era la cabecera del workflow `Mutation`, ahora job de ci.yml.
+# Las referencias a "workflow" y a los tres jobs de antes siguen siendo
+# Mutation testing via gremlins, with a blocking gate on new surviving mutants.
+# Deliberately has NO `paths` filters: a path-filtered workflow that ever becomes a
+# required check leaves that check stuck in "pending" on every PR that skips it,
+# which deadlocks those PRs. The .go scope is enforced INSIDE the job instead,
+# mirroring the guard in `make mutate-diff`.
+# Because there are no path filters, this workflow is SAFE to mark as a required
+# status check; do that in branch protection if you want the gate to block merges.
+# The Mutation job is gated on a Calibration job: in a repo without
+# .mutation-allowlist the Mutation job is SKIPPED (visibly not-a-pass) instead of
+# reporting green while measuring nothing. Consequence: a skipped job is a skipped
+# check, so `Mutation` must NOT be marked as a required status check in branch
+# protection - same deadlock class as path filters.
+
+# -- Mutation ---------------------------------------------------------
+# Moved here from mutation.yml: mutation is a CI verdict, not a separate product.
+# The gate is unchanged (Calibration still decides fail-vs-skip).
+  Calibration:
+    # Mutation only once the PR is up for review: a draft pays for nothing.
+    # It cannot be ONLY the ready_for_review transition -- any later push
+    # would leave the required check unreported on the new head, i.e. a
+    # permanent block. So: whenever the PR is not a draft.
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
+    name: Mutation calibration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      calibrated: ${{ steps.check.outputs.calibrated }}
+      scope: ${{ steps.scope.outputs.scope }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      # The scope regexp is an EXCLUSION list, so a file is gated only when
+      # nothing in it matches. That is easy to get wrong in either direction:
+      # a file that should be gated but is not is a silent hole, and one that
+      # should be out but is in turns the gate into a check that rarely fails.
+      # This also fails on any new Go file nobody classified, which is how the
+      # scope rots.
+      - name: Check mutation scope
+        id: scope
+        run: |
+          if python3 scripts/check_mutate_scope.py; then
+            echo "scope=ok" >> "$GITHUB_OUTPUT"
+          else
+            echo "scope=bad" >> "$GITHUB_OUTPUT"
+            echo "::error title=Mutation scope mismatch::MUTATE_EXCLUDE and scripts/check_mutate_scope.py disagree. Add any new Go file to EXPECTED and flip it deliberately."
+            # Exit, or this step keeps going green and the only visible effect is the
+            # Mutation job vanishing as "skipped" -- which reads like an infra hiccup
+            # rather than a classification nobody did. That is exactly how dbx's gate
+            # went unnoticed for the whole coverage campaign: scope=bad, Calibration
+            # green, Mutation skipped, every PR apparently fine.
+            exit 1
+          fi
+
+      - name: Check calibration
+        id: check
+        run: |
+          if [ -f .mutation-allowlist ]; then
+            echo "calibrated=true" >> "$GITHUB_OUTPUT"
+            echo "calibrated: .mutation-allowlist present"
+          else
+            echo "calibrated=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Mutation testing not calibrated::.mutation-allowlist is missing, so the gate cannot run and no surviving mutant is being detected. Seed it with: make mutate, then commit .mutation-allowlist"
+          fi
+
+  Mutation:
+    name: Mutation
+    needs: Calibration
+    # A scope mismatch is a real failure, not a warning: either direction of the
+    # error defeats the purpose of the gate, so nothing downstream can be trusted.
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft &&
+        needs.Calibration.outputs.calibrated == 'true' && needs.Calibration.outputs.scope == 'ok'
+    runs-on: ubuntu-24.04
+    # Hard cap. gremlins is never signalled: on SIGTERM it panics
+    # ("send on closed channel") and writes no report.json, so a timeout can only
+    # mean "no result", never a wrong one.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so the PR base ref exists for `git diff <base>...HEAD`
+          # and for `gremlins --diff <base>`.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          # Makefile is part of the cache key: MUTATE_BASE and the tool wiring live
+          # there, so changing them busts stale module caches.
+          cache-dependency-path: |
+            go.sum
+            Makefile
+
+      - name: Resolve mutation scope
+        id: scope
+        env:
+          BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
+          BASE_BRANCH: ${{ github.base_ref || github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          echo "base=$BASE"
+          # Belt and braces: guarantee the base ref is fetched even on shallow setups.
+          git fetch --no-tags --depth=1 origin "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" || \
+            echo "could not fetch base ref $BASE_BRANCH; continuing with what is present"
+          if git diff --name-only "$BASE...HEAD" | grep -q '\.go$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            git diff --name-only "$BASE...HEAD" | grep '\.go$' | sed 's/^/  changed: /'
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "no .go changes vs $BASE - nothing to mutate"
+          fi
+
+      - name: Mutate
+        if: steps.scope.outputs.run == 'true'
+        # A gremlins crash must not be read as a mutation failure: the Gate step
+        # below decides, and it treats a missing report.json as "no result".
+        continue-on-error: true
+        run: make mutate-diff MUTATE_BASE=origin/${{ github.base_ref || github.event.repository.default_branch }}
+
+      # Blocking gate: fail on any surviving mutant in the diff that is not already
+      # listed in .mutation-allowlist.
+      - name: Gate
+        if: always() && steps.scope.outputs.run == 'true'
+        env:
+          ALLOWLIST: .mutation-allowlist
+        run: |
+          set -uo pipefail
+          S="$GITHUB_STEP_SUMMARY"
+          : > "$S"
+          echo "### Mutation testing" >> "$S"
+
+          if [ ! -f report.json ]; then
+            echo "- no report.json (timed out, or gremlins crashed) -> no result, gate passes" >> "$S"
+            exit 0
+          fi
+
+          echo "- total: $(jq -r '.mutants_total' report.json)" >> "$S"
+          echo "- killed: $(jq -r '.mutants_killed' report.json)" >> "$S"
+          echo "- survived: $(jq -r '.mutants_lived' report.json)" >> "$S"
+          echo "- not covered: $(jq -r '.mutants_not_covered' report.json)" >> "$S"
+          echo "- test efficacy: $(jq -r '.test_efficacy' report.json)%" >> "$S"
+          echo "- mutator coverage: $(jq -r '.mutations_coverage' report.json)%" >> "$S"
+          echo "- note: gremlins does not report TIMED OUT mutants in report.json, and efficacy excludes them" >> "$S"
+
+          jq -r '.files[] | .file_name as $f | .mutations[] | select(.status=="LIVED") | "\(.type) \($f):\(.line)"' report.json | sort -u > /tmp/lived.txt
+          total=$(wc -l < /tmp/lived.txt)
+
+          if [ ! -f "$ALLOWLIST" ]; then
+            echo "- surviving in diff: $total" >> "$S"
+            echo "- gate NOT calibrated: $ALLOWLIST is missing, so this run reports only and cannot block" >> "$S"
+            exit 0
+          fi
+
+          grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" | sed 's/[[:space:]]*$//' | sort -u > /tmp/allow.txt
+          comm -23 /tmp/lived.txt /tmp/allow.txt > /tmp/new_lived.txt
+          new=$(wc -l < /tmp/new_lived.txt)
+
+          echo "- surviving in diff: $total (allowlisted: $((total - new)), new: $new)" >> "$S"
+
+          if [ "$new" -gt 0 ]; then
+            {
+              echo ""
+              echo "New surviving mutants - no test catches these changes:"
+              sed 's/^/- /' /tmp/new_lived.txt
+              echo ""
+              echo "Add a test that kills them, or - only if provably equivalent - add the line to $ALLOWLIST with a comment saying why."
+            } >> "$S"
+            exit 1
+          fi
+
+      - name: Check unevaluated mutants against .mutation-notcovered
+        # A NOT COVERED or TIMED OUT mutant is one the tool chose not to run, so
+        # it is invisible to the check above: it is not a survivor, and it is not
+        # a kill either. Failing only on survivors therefore lets an untested
+        # branch sit in the gate forever with nothing but a number in the summary.
+        # A TIMED OUT mutant is worse, because it is absent from the counted
+        # totals and so makes the efficacy figure go UP.
+        #
+        # Three things were missing, and none of them could show up until dbx started
+        # opening PRs -- because an open PR does not have to touch a single .go file:
+        #
+        #   * the `if` that Gate has. Without it this step ran on a run where Mutate
+        #     had said "nothing to mutate", found no report.json, and failed the job
+        #     for a non-event.
+        #   * `S`. It was referenced only on this step's OWN failure path -- the one
+        #     that writes the guidance -- and it lived in Gate's shell, so the step
+        #     died with "S: unbound variable" instead of reporting what it had just
+        #     found. It had passed until now only because check_mutate_nc.py had never
+        #     once failed: the bug sat exactly on the path where it matters.
+        #   * a voice. Gate treats a missing report.json as "no result, gate passes";
+        #     this step treated it as a failure. One state gets one verdict.
+        if: always() && steps.scope.outputs.run == 'true'
+        run: |
+          set -uo pipefail
+          S="$GITHUB_STEP_SUMMARY"
+
+          if [ ! -f report.json ]; then
+            echo "- no report.json (Mutate was skipped or crashed) -> nothing unevaluated to check" >> "$S"
+            exit 0
+          fi
+
+          if ! python3 scripts/check_mutate_nc.py; then
+            {
+              echo ""
+              echo "Uncovered mutants - these were never run, so nothing is known about them."
+              echo "Add a test that covers the branch, or - only if it is unreachable or dead -"
+              echo "add the entry to .mutation-notcovered with the reason."
+            } >> "$S"
+            exit 1
+          fi
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-report-${{ github.event.pull_request.number || github.run_id }}
+          path: report.json
+          if-no-files-found: ignore
+          retention-days: 14
