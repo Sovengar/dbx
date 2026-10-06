@@ -1,4 +1,4 @@
-name: Unit
+name: CI fast
 
 # Per-commit signal for branches, WIP included.
 #
@@ -10,7 +10,7 @@ name: Unit
 # WHAT IT IS NOT, and the distinction matters more than the speed:
 #
 #   - It is NOT a required check. `protect-main` requires `Lint` and `Test`; this one is
-#     advisory. A red `Unit` never blocks a merge, and a green one never authorises one.
+#     advisory. A red `CI fast` never blocks a merge, and a green one never authorises one.
 #   - It is NOT a smaller replacement for `ci.yml`'s Test job. The only functional
 #     difference is `DBX_SKIP_DOCKER=1`, which skips the real-PostgreSQL tests instead of
 #     starting testcontainers (measured: internal/app 22.1s -> 4.0s, 43 skips). The full
@@ -35,12 +35,12 @@ permissions:
 # Its own group, deliberately not `ci`'s: an advisory run must never cancel a required
 # one, and a required run must never leave this pending.
 concurrency:
-  group: unit-${{ github.workflow }}-${{ github.ref }}
+  group: cifast-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  Unit:
-    name: Unit
+  Fast:
+    name: CI fast
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

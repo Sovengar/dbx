@@ -30,9 +30,12 @@ abra dbx usará la nueva versión.
 
 ## CI y protección de `main`
 
-CI vive en `.github/workflows/ci.yml` y corre en **todo PR** y en **todo push
-a `main`** (sin filtros `paths`: un workflow skipeado deja los required checks
-en pending para siempre y bloquea todos los PRs). **Dos jobs**:
+CI vive en `.github/workflows/ci.yml`, que absorbió `mutation.yml` — la mutación es
+un veredicto de CI, no un producto aparte. `ci-fast.yml` sigue **fuera a propósito**: es
+el subconjunto que corre por commit (ver abajo), y `ci.yml` es la gate. Este corre en
+**todo PR** y en **todo push a `main`** (sin filtros `paths`: un workflow skipeado
+deja los required checks en pending para siempre y bloquea todos los PRs). **Cuatro
+jobs**, de los que los dos de mutación solo corren en PRs listos:
 
 - **`Lint`**: `make lint` → `fmt-check` (**gofmt**) + golangci-lint **v2.13.2**
   (versión pineada en el `Makefile`; no hay `.golangci.yml`, corre el set por
@@ -40,23 +43,28 @@ en pending para siempre y bloquea todos los PRs). **Dos jobs**:
   `fmt-check` no había **ningún** chequeo de formato en el repo: `gofmt -l .` está
   limpio, pero `make lint` sobre `func F(  a int ) int {` devolvía `0 issues`.
   Es el job **más largo** (112 s) y por eso el que fija el reloj.
-- **`Test`**: `go build ./...` + `go test -race -covermode=atomic
-  -coverprofile=… ./...` (suite completo, sin `-short`). Los tests de
-  integración de `internal/app` levantan PostgreSQL vía **testcontainers** usando
-  el Docker que ya trae el runner `ubuntu-24.04`; no hace falta bloque
-  `services:`. Los tests del scanner (`internal/config`) usan un seam de
-  discovery, así que **no** requieren `fd`.
-  - `go build` vive **AQUÍ** y no en un job propio: era el tercer job, es decir una
-    tercera adquisición independiente de runner, y eso convirtió una corrida de 112 s en
-    11 min 42 s (Lint acabó a t=1m47 y no corrió nada hasta t=9m58). `Build`+`Test` miden
-    82 s contra los 112 de `Lint`: el reloj no cambia y se piden **dos** runners en vez
-    de tres.
-  - `go build ./...` no escribe binario ni enlaza (`go build -x ./...` no invoca `link`),
-    así que su afirmación es exactamente "los paquetes compilan".
-  - **Sin `go vet`**, a propósito: `govet` corre dentro de golangci-lint, y con el paso
-    aparte el mismo chequeo se ejecutaba dos veces en cada push.
+- **`Test`**: `go test -race -covermode=atomic -coverprofile=… ./...` (suite
+  completo, sin `-short`). Los tests de integración de `internal/app` levantan
+  PostgreSQL vía **testcontainers** usando el Docker que ya trae el runner
+  `ubuntu-24.04`; no hace falta bloque `services:`. Los tests del scanner
+  (`internal/config`) usan un seam de discovery, así que **no** requieren `fd`.
+  - **Sin `go build`**, que estaba aquí y se quitó: redundante por tres (`go test
+    ./...` compila todos los paquetes — eso es lo que significa `[no test files]` —,
+    golangci-lint typechequea, y `go build -x ./...` ni siquiera invoca `link`). Y
+    estaba en el camino crítico: costaba 14 s.
+  - **Sin `go vet`**, a propósito: `govet` corre **una única vez**, dentro de
+    golangci-lint. El paso aparte lo ejecutaba dos veces en cada push.
+  - Este es el job que fija el reloj (~74 s); `Lint` ~32 s con caché caliente.
+- **`Calibration`** y **`Mutation`**: solo en PR **no draft** (`if: github.event_name ==
+  'pull_request' && !…draft`). `ready_for_review` está en los `types` del trigger porque
+  **no** viene en el conjunto por defecto (`opened, synchronize, reopened`) — sin él, un
+  draft puesto en listo no reportaría el check de mutación y, al ser required, bloquearía
+  el merge. Tampoco puede ser *solo* ese evento: cualquier push posterior dejaría el check
+  sin reportar en el nuevo SHA. El gate no cambia (`Calibration` decide fail-vs-skip). En
+  este repo **no es required check**, porque un job con `if:` se salta y un check saltado
+  no se puede exigir.
 
-Aparte, `.github/workflows/unit.yml` corre en **cada push a cualquier rama que no sea
+Aparte, `.github/workflows/ci-fast.yml` (`name: CI fast`) corre en **cada push a cualquier rama que no sea
 `main`** (WIP incluido): es la única señal que recibe un commit de rama sin PR, porque
 `ci.yml` solo cubre PRs y `main`. **No es required** y no sustituye a `ci.yml` — la única
 diferencia funcional es `DBX_SKIP_DOCKER=1`, que salta los 43 tests de PostgreSQL real
@@ -64,11 +72,12 @@ diferencia funcional es `DBX_SKIP_DOCKER=1`, que salta los 43 tests de PostgreSQ
 cobertura completo, y sobre esta suite reducida marcaría como `NOT_COVERED` a los mutantes
 que sí cubre la integración.
 
-**`Mutation (diff)`** vive en `.github/workflows/mutation.yml`, en su propio workflow y
-solo en `pull_request`/`workflow_dispatch`: corre la suite entera otra vez para sacar la
-cobertura, así que meterlo en un job de `ci.yml` lo convertiría en el camino crítico. En
-este repo **no es required check**, y como además este repo pushea directo a `main`, en la
-práctica el gate solo corre cuando se lanza a mano (`make mutate-diff`).
+**La mutación es un job de `ci.yml`** (antes era `mutation.yml`). Corre la suite
+entera otra vez para sacar la cobertura, y por eso **no** vive en `ci-fast.yml`: sobre
+esa suite reducida marcaría `NOT_COVERED` a los mutantes que sí cubre la integración,
+que es un perfil equivocado y no uno incompleto. En este repo **no es required check**
+— un job con `if:` se salta y un check saltado no se puede exigir — y `make mutate-diff`
+sigue siendo la vía local.
 
 Reglas de la rama por defecto (ruleset **`protect-main`**, reproducible con
 `scripts/setup-repo-protection.sh`; la rama se deriva del default branch real,
