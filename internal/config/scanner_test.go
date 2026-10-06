@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -970,32 +969,6 @@ func TestScan_DuplicatePathsCollapseSoTheNameTiebreakIsUnreachable(t *testing.T)
 				t.Errorf("path %q has names %v: the sort's Name tiebreak is reachable after all, so it needs a test of its own", path, names)
 			}
 		}
-	}
-}
-
-// Scenario: Sin seam, fd es el que descubre, y su resultado es el que se usa.
-//
-// The two other discovery tests install the seam, which returns before either real
-// path runs. This one builds the scanner the way app.go does, so `fd` really is
-// executed and scanWithFD's error branch is genuinely taken or not taken.
-//
-// Skipped when fd is absent, because then the branch under test is the
-// "command failed" one and the fixture would prove nothing about the success
-// path. The skip says so rather than passing quietly.
-func TestScanWithFD_WhenInstalledItFindsTheProjects(t *testing.T) {
-	if _, err := exec.LookPath("fd"); err != nil {
-		t.Skip("fd is not installed: scanWithFD would only exercise its failure branch")
-	}
-
-	root := t.TempDir()
-	writeConnections(t, filepath.Join(root, "one"), map[string]string{"p": "postgres://x/y"})
-
-	got := NewScanner(root).scanWithFD(root)
-	if len(got) != 1 {
-		t.Fatalf("fd found %d configs, want 1: %v", len(got), got)
-	}
-	if filepath.Base(got[0]) != ".dbx.toml" {
-		t.Errorf("fd returned %q, want a .dbx.toml", got[0])
 	}
 }
 

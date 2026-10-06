@@ -64,6 +64,25 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      # The real-binary half of the fd story (internal/config/scanner_fd_integration_test.go)
+      # needs fd on the runner, which the image does not ship. Cached as a release binary
+      # rather than installed per run: the download happens once per key, and the version
+      # lives in the key so bumping it re-fetches. The unit suite uses a fake fd and is
+      # unaffected either way, so this widens what is checked without touching the floor.
+      - name: Cache fd
+        id: fd-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/fd-bin
+          key: fd-v10.5.0-x86_64-unknown-linux-gnu
+      - name: Install fd
+        if: steps.fd-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/fd-bin"
+          curl -fsSL "https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C "$HOME/fd-bin" --strip-components=1
+      - name: Put fd on PATH
+        run: echo "$HOME/fd-bin" >> "$GITHUB_PATH"
       # `go build ./...` used to be a step here and is GONE: redundant three ways --
       # `go test ./...` compiles every package (that is what "[no test files]" means),
       # golangci-lint type-checks, and `go build -x ./...` never invokes the linker. It
