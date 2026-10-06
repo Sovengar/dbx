@@ -44,12 +44,14 @@ set -euo pipefail
 
 # GitHub Actions is the integration that reports our CI check runs.
 GH_ACTIONS_APP_ID="${GH_ACTIONS_APP_ID:-15368}"
-# Lint and Test ONLY. `Build` is gone: it was merged into Test's steps (compile gate +
+# Lint, Test and Mutation. `Build` is gone: it was merged into Test's steps (compile gate +
 # suite on one runner = two acquisitions instead of three), so a required `Build` context
-# would now error here with "expected check 'Build' not found". If you resurrect a separate
-# Build job, put the context back here too -- this array and ci.yml are the two halves of
-# the same fact.
-REQUIRED_DEFAULT=(Lint Test)
+# would now error here with "expected check 'Build' not found". Mutation joined when its job
+# became one that ALWAYS reports (no `needs:`, no measurement `if:`): before that it could be
+# skipped, and a skipped job in a required check stays pending forever and deadlocks every PR.
+# If you ever give that job a skip again, take the context out here too -- this array and ci.yml
+# are the two halves of the same fact.
+REQUIRED_DEFAULT=(Lint Test Mutation)
 
 # Labels referenced by .github/dependabot.yml, as "name|color|description".
 LABELS=(

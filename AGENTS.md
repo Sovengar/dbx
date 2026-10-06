@@ -34,8 +34,8 @@ CI vive en `.github/workflows/ci.yml`, que absorbió `mutation.yml` — la mutac
 un veredicto de CI, no un producto aparte. `ci-fast.yml` sigue **fuera a propósito**: es
 el subconjunto que corre por commit (ver abajo), y `ci.yml` es la gate. Este corre en
 **todo PR** y en **todo push a `main`** (sin filtros `paths`: un workflow skipeado
-deja los required checks en pending para siempre y bloquea todos los PRs). **Cuatro
-jobs**, de los que los dos de mutación solo corren en PRs listos:
+deja los required checks en pending para siempre y bloquea todos los PRs). **Tres
+jobs**, de los que `Mutation` solo corre en PRs listos:
 
 - **`Lint`**: `make lint` → `fmt-check` (**gofmt**) + golangci-lint **v2.13.2**
   (versión pineada en el `Makefile`; no hay `.golangci.yml`, corre el set por
@@ -55,14 +55,27 @@ jobs**, de los que los dos de mutación solo corren en PRs listos:
   - **Sin `go vet`**, a propósito: `govet` corre **una única vez**, dentro de
     golangci-lint. El paso aparte lo ejecutaba dos veces en cada push.
   - Este es el job que fija el reloj (~74 s); `Lint` ~32 s con caché caliente.
-- **`Calibration`** y **`Mutation`**: solo en PR **no draft** (`if: github.event_name ==
+- **`Mutation`**: solo en PR **no draft** (`if: github.event_name ==
   'pull_request' && !…draft`). `ready_for_review` está en los `types` del trigger porque
   **no** viene en el conjunto por defecto (`opened, synchronize, reopened`) — sin él, un
   draft puesto en listo no reportaría el check de mutación y, al ser required, bloquearía
   el merge. Tampoco puede ser *solo* ese evento: cualquier push posterior dejaría el check
-  sin reportar en el nuevo SHA. El gate no cambia (`Calibration` decide fail-vs-skip). En
-  este repo **no es required check**, porque un job con `if:` se salta y un check saltado
-  no se puede exigir.
+  sin reportar en el nuevo SHA. **Es required check desde que es UN job que siempre
+  reporta**: antes eran `Calibration` + `Mutation` con `needs:`/`if:`, y un job con `if:`
+  se salta — un check saltado no se puede exigir, así que el gate no bloqueaba nada.
+  - **El veredicto vive en `scripts/mutate.sh`**, que mide Y decide en el mismo proceso
+    (mismo diseño que gitdash): `ci.yml` solo aporta paths y refs. Sus caminos rojos son
+    funciones puras de ficheros y los prueba `scripts/mutate_test.sh` en ~1 s, con
+    `scripts/watchdog.sh` (el supervisor: cap/stall/ceiling) detrás. Los dos suites corren
+    como step del job (`Shell suites`).
+  - **Presupuesto explícito** (`MUTATE_CAP=180s`, `WORKERS=4`, `STALL=8m`, `CEILING=13m`,
+    `SETUP_RESERVE=360s`, `JOB_CEILING=20m`): la cadena `2*cap < stall < ceiling` y
+    `ceiling + reserve < job` la valida el script y se niega a arrancar si no se cumple.
+  - **Dos checks que gitdash no tiene**, como steps del mismo job: `check_mutate_scope.py`
+    (todo `.go` nuevo tiene que estar clasificado contra `MUTATE_EXCLUDE`, que el script
+    **lee del Makefile** — una sola fuente) y `check_mutate_nc.py`, que exige la cuenta de
+    todo lo que gremlins no evaluó: conjunto exacto de `NOT COVERED` y techo por fichero
+    (`TIMEOUT_MAX`) de `TIMED OUT`, ambos en `.mutation-notcovered`.
 
 Aparte, `.github/workflows/ci-fast.yml` (`name: CI fast`) corre en **cada push a cualquier rama que no sea
 `main`** (WIP incluido): es la única señal que recibe un commit de rama sin PR, porque
@@ -75,16 +88,16 @@ que sí cubre la integración.
 **La mutación es un job de `ci.yml`** (antes era `mutation.yml`). Corre la suite
 entera otra vez para sacar la cobertura, y por eso **no** vive en `ci-fast.yml`: sobre
 esa suite reducida marcaría `NOT_COVERED` a los mutantes que sí cubre la integración,
-que es un perfil equivocado y no uno incompleto. En este repo **no es required check**
-— un job con `if:` se salta y un check saltado no se puede exigir — y `make mutate-diff`
-sigue siendo la vía local.
+que es un perfil equivocado y no uno incompleto. **Es required check** (`Mutation`, en
+verde con `Lint` y `Test`), y `make mutate-diff` sigue siendo la vía local — ejecuta el
+mismo `scripts/mutate.sh` que el job, así que local y CI miden lo mismo.
 
 Reglas de la rama por defecto (ruleset **`protect-main`**, reproducible con
 `scripts/setup-repo-protection.sh`; la rama se deriva del default branch real,
 no se hardcodea):
 
-- Merge **solo vía PR**, con los dos required checks (`Lint`, `Test`) en verde;
-  force-push y borrado de la rama por defecto bloqueados. `Build` **no es
+- Merge **solo vía PR**, con los tres required checks (`Lint`, `Test`, `Mutation`) en
+  verde; force-push y borrado de la rama por defecto bloqueados. `Build` **no es
   required** desde que se fundió con `Test`.
 - Existe **bypass de admin** y es **deliberado** (aprobado por el usuario): un
   admin *podría* pushear directo, pero la intención de trabajo es siempre el
