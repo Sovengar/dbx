@@ -142,6 +142,22 @@ print(f"**Diff vs {base}: "
          if diff_total else "no .go lines touched**") + "")
 print()
 
+# The floor's red has to be actionable: name the blocks that are still uncovered. A single
+# number is a red nobody can act on, and this is the list that says which test to write.
+project_uncovered = sorted(
+    f"{f}:{sl}-{el}"
+    for f, bs in blocks.items()
+    for (sl, sc, el, ec), c in bs.items() if c <= 0
+)
+if project_uncovered:
+    shown = project_uncovered[:25]
+    print(f"<details><summary>Uncovered blocks ({len(project_uncovered)})</summary>\n")
+    for s in shown:
+        print(f"- `{s}`")
+    if len(project_uncovered) > len(shown):
+        print(f"- … and {len(project_uncovered) - len(shown)} more")
+    print("\n</details>\n")
+
 if per_file:
     print("| File | Diff |")
     print("| --- | --- |")
