@@ -1,13 +1,9 @@
 name: CI
 
-# NOTE: this workflow intentionally has NO `paths` / `paths-ignore` filters.
-# A path-filtered push/PR skips the workflow entirely; a skipped workflow leaves
-# its required status checks stuck in "pending" forever, which deadlocks every
-# PR that does not touch the filtered paths. The gates run on every change.
+# No `paths` filters: this runs on every PR and on every push to `main`.
 on:
   pull_request:
-    # ready_for_review is NOT in the default set (opened, synchronize, reopened), so a
-    # draft flipped to ready would report no mutation check at all -- and it is required.
+    # ready_for_review: a draft flipped to ready reports Mutation too.
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
@@ -17,8 +13,7 @@ on:
 permissions:
   contents: read
 
-# Superseded runs on the same ref are cancelled so a new push ends the previous
-# check run. Main is exempt: every commit landing on main gets a complete run.
+# A new push cancels the previous run of the same ref; main is exempt.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -36,13 +31,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-          # Makefile is part of the cache key: GOLANGCI_LINT_VERSION lives there,
-          # so bumping the linter busts the cached modules instead of reusing stale ones.
+          # The Makefile is part of the cache key: GOLANGCI_LINT_VERSION lives there.
           cache-dependency-path: |
             go.sum
             Makefile
-      # Exact `make lint` parity: same pinned golangci-lint v2.13.2 as local,
-      # invoked through the repo Makefile (no .golangci.yml exists -> default linter set).
+      # Same path as `make lint` locally: golangci-lint v2.13.2 via the Makefile.
       - name: Lint
         run: make lint
 
@@ -54,9 +47,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Full history: the coverage gate needs `git merge-base <base> HEAD`, and a depth-1
-          # clone has no common ancestor to report — the gate would fail for a reason that has
-          # nothing to do with the diff.
+          # Full history: the coverage gate uses `git merge-base <base> HEAD`.
           fetch-depth: 0
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -64,11 +55,7 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
-      # The real-binary half of the fd story (internal/config/scanner_fd_integration_test.go)
-      # needs fd on the runner, which the image does not ship. Cached as a release binary
-      # rather than installed per run: the download happens once per key, and the version
-      # lives in the key so bumping it re-fetches. The unit suite uses a fake fd and is
-      # unaffected either way, so this widens what is checked without touching the floor.
+      # fd as a cached dependency: the release binary, version inside the key.
       - name: Cache fd
         id: fd-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -83,18 +70,8 @@ jobs:
             | tar -xz -C "$HOME/fd-bin" --strip-components=1
       - name: Put fd on PATH
         run: echo "$HOME/fd-bin" >> "$GITHUB_PATH"
-      # `go build ./...` used to be a step here and is GONE: redundant three ways --
-      # `go test ./...` compiles every package (that is what "[no test files]" means),
-      # golangci-lint type-checks, and `go build -x ./...` never invokes the linker. It
-      # was also on the critical path, costing 14 s in the job whose point is the suite.
-      # Same test set as `make test` (`go test -race`, no `-short`, so the
-      # integration tests run) plus an atomic coverage profile, with `-count=1`
-      # so a cached PASS can never stand in for a real run. The integration tests
-      # in internal/app start PostgreSQL through testcontainers, which uses the
-      # Docker daemon the ubuntu-24.04 runner ships with; the package-level
-      # testdb_test.go handles provisioning, so no `services:` block is needed.
-      # (internal/config's scanner tests use a discovery seam, so `fd` is not
-      # required on the runner — unlike the documented local environment.)
+      # Same suite as `make test` (no `-short`), atomic profile, `-count=1`.
+      # internal/app starts PostgreSQL through testcontainers on the runner's Docker.
       - name: Test
         run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
       - name: Coverage summary
@@ -124,15 +101,7 @@ jobs:
             }' coverage.out | sort
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # The gate goes last and without `continue-on-error`: if the profile was not written (the
-      # suite broke earlier), the step fails, which is what has to happen. A gate that is skipped
-      # when something fails protects nothing.
-      #
-      # The diff base is NOT the branch name: on the runner that does not exist as a comparable
-      # ref (Actions leaves the checkout on a synthetic merge), and `git diff main...HEAD` comes
-      # out empty — the gate would report "no lines touched", i.e. 100% of a diff that does not
-      # exist. What works in both cases (PR and push to main) is the explicit MERGE-BASE, which
-      # Actions does materialise at refs/pull/N/merge.
+      # 100% of the touched lines against the merge-base, total against scripts/coverage-floor.
       - name: Coverage gate
         run: |
           set -euo pipefail
@@ -153,49 +122,21 @@ jobs:
           scripts/diff-coverage.sh coverage.out "$merge_base" \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
-# -- de mutation.yml, trasladados aqui ------------------------------------
-# Este bloque era la cabecera del workflow `Mutation` (dos jobs: Calibration + Mutation),
-# y ahora es UN solo job, con la misma forma que el de gitdash.
-#
-# The check's rule, in one line: it goes GREEN only if the mutation really was measured and no new
-# survivor is left untested. "Could not measure" is a RED verdict, never a green one. And not every
-# green is the same green: one that measured NOTHING has to say so, or the team reads it as a
-# measurement. The step summary is where the reason of a red is read.
-#
-# The gate lives in scripts/mutate.sh, which measures AND decides in one process: this file only
-# keeps the PATHS and the REFS (checkout, fetch-depth, base resolution, artefacts). Its red paths
-# are pure functions of files, tested by scripts/mutate_test.sh in about a second; inline in the
-# YAML they could only be exercised with a synthetic Actions run, which is a hope and not a test.
-# That is how the previous gate stayed dead without anybody noticing: a scope mismatch left
-# Calibration green and Mutation skipped, on a check that was not required and therefore blocked
-# nothing.
-#
-# No `needs:` and no `continue-on-error`, and the ONLY `if:` is the draft gate below -- an EVENT
-# condition, never a measurement one. That is what makes `Mutation` a REQUIRED status check: a
-# skipped job in a required check stays pending forever and deadlocks every PR, which is exactly
-# why the two-job design could never be required.
+# -- Mutation ---------------------------------------------------------
+# Measured and decided by scripts/mutate.sh; this file carries paths, refs and budget.
+# No `needs:` and no `continue-on-error`; the only `if:` is the event gate below.
 
   Mutation:
-    # Runs only once the PR is up for review: a draft pays for nothing.
-    # This `if:` is an EVENT gate, not a measurement gate -- it says nothing about whether the
-    # mutation was measured. The fail-vs-skip decision is inside scripts/mutate.sh, which is why
-    # the rule above still holds. `ready_for_review` is in the workflow's pull_request types
-    # because it is not in the default set: without it, flipping a draft to ready would report no
-    # Mutation check at all, and being required that would block the merge.
+    # Only on a non-draft PR; the fail-vs-skip decision lives in scripts/mutate.sh.
     if: github.event_name == 'pull_request' && !github.event.pull_request.draft
     name: Mutation
     runs-on: ubuntu-24.04
-    # Everything that runs BEFORE the supervisor, plus its ceiling, has to fit in the job: with a
-    # 360s reserve and a 13m ceiling that is 1140s against these 1200s, so the platform never
-    # cancels a run the supervisor could still explain. scripts/mutate.sh asserts the chain
-    # (2*cap < stall < ceiling, ceiling + reserve < job) and refuses to start if it does not hold.
+    # 13m ceiling + 360s reserve < 20m job; scripts/mutate.sh asserts the chain.
     timeout-minutes: 20
     env:
-      # The scope's base is the merge-base, not the branch name: `git diff A...B` and the
-      # `git diff --merge-base` the engine runs internally describe the same set.
+      # Base = merge-base of the branch the PR targets.
       MUTATE_BASE: origin/${{ github.base_ref || github.event.repository.default_branch }}
-      # The budget is explicit and not optional because --ci demands it: a forgotten one would
-      # fall back to the local row and loosen the budget with no diff to show for it.
+      # Budget, mandatory under --ci: mutate.sh refuses to start without it.
       MUTATE_CAP: 180s
       MUTATE_WORKERS: 4
       MUTATE_STALL: 8m
@@ -203,17 +144,14 @@ jobs:
       MUTATE_JOB_CEILING: 20m
       MUTATE_SETUP_RESERVE: 360s
     steps:
-      # The job clock starts FIRST, before the checkout, because the measured half of the budget
-      # invariant has to know how much job time is already gone.
+      # The clock starts before the checkout: the reserve is measured from here.
       - name: Mark the job clock
         run: echo "MUTATE_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Full history so the PR base ref exists for `git diff <base>...HEAD` and for
-          # `gremlins --diff <base>`. A depth-1 clone makes that diff a no-op, and an empty diff
-          # from an unresolved base is indistinguishable from a PR with no changes.
+          # Full history: the scope is `git diff <base>...HEAD`.
           fetch-depth: 0
 
       - name: Set up Go
@@ -221,24 +159,19 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-          # scripts/mutate.sh is part of the cache key: it owns the engine wiring, so changing it
-          # busts stale module caches instead of reusing them.
+          # scripts/mutate.sh is part of the cache key.
           cache-dependency-path: |
             go.sum
             scripts/mutate.sh
 
-      # The supervisor and the gate are bash, and nothing in this repo lints bash (`make lint` is
-      # Go only), so these two suites are the only check there is over that code. They take about
-      # a second and they are the only proof that the gate's red paths still work.
+      # The two suites of the gate: mutate_test.sh and watchdog_test.sh (~1s).
       - name: Shell suites
         run: |
           set -euo pipefail
           bash scripts/watchdog_test.sh
           bash scripts/mutate_test.sh
 
-      # Without an allowlist every survivor would look new and the gate would have nothing to
-      # compare against. It fails here instead of skipping the job: a skipped job in a required
-      # check blocks every PR forever.
+      # Requires .mutation-allowlist: without it there is nothing to compare survivors with.
       - name: Calibration
         run: |
           set -euo pipefail
@@ -248,9 +181,7 @@ jobs:
           fi
           echo "calibrated: $(grep -cvE '^[[:space:]]*(#|$)' .mutation-allowlist) allowlisted mutants"
 
-      # Belt and braces: guarantee the base ref is fetched even on shallow setups. mutate.sh
-      # refuses to measure without it, so an empty diff from an unresolved base can no longer read
-      # as a PR with no changes.
+      # Fetches the base ref even on a shallow clone.
       - name: Resolve mutation scope
         run: |
           set -euo pipefail
@@ -258,10 +189,7 @@ jobs:
           git fetch --no-tags --depth=1 origin "+refs/heads/${{ github.base_ref || github.event.repository.default_branch }}:refs/remotes/origin/${{ github.base_ref || github.event.repository.default_branch }}" || \
             echo "could not fetch base ref; continuing with what is present"
 
-      # One step: measure AND decide. The exit code is the verdict, passed explicitly rather than
-      # through a step output, so no intermediate state can be mistaken for a result. The reason
-      # lines go to stdout and the script also writes them to $GITHUB_STEP_SUMMARY, which is where
-      # the reason of a red is read. A diff with no .go files is a GREEN here, and it says so.
+      # One step that measures and decides: the exit code is the verdict.
       - name: Mutate and gate
         id: mutate
         run: scripts/mutate.sh --diff --ci --summary "$GITHUB_STEP_SUMMARY"
@@ -271,9 +199,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mutation-report-${{ github.event.pull_request.number || github.run_id }}
-          # The paths come from the step that produced them, so the uploader and the script cannot
-          # disagree about where the artefacts are. The run log goes with the report: a red with no
-          # log attached is the red nobody can act on.
+          # The report and the run log of the step above.
           path: |
             ${{ steps.mutate.outputs.report }}
             ${{ steps.mutate.outputs.run_log }}
