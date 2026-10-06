@@ -1,0 +1,19 @@
+# Recorded hangs: mutants that expire on the per-mutant timeout and were never tested.
+#
+# Format: <file> <ceiling>, the number of expired mutants that file may produce in one run.
+# Anything above it, and any file absent here, is a red verdict. A ceiling per file and not an
+# exact set of lines because expiry is partly contention: highlight.go reported 9 hangs on one
+# run and 7 on the next with an identical suite.
+#
+# To clear an entry honestly: add a test that fails FAST and kills the mutant (assert the loop
+# terminates, with a deadline below gremlins' own), then drop the ceiling here. Raising the
+# ceiling without such a test only moves the number.
+#
+# Every entry below is a loop guard that is also the only thing advancing the index, whose
+# negation leaves the loop never terminating — a test cannot kill an infinite loop, and the
+# harness's own deadline is the only thing that stops the mutant.
+internal/ui/components/editor/highlight.go 16 the tokenizer loop guards, line-comment and word scans
+internal/ui/components/grid/table.go 6 the F-key page lookup and the row-padding loops
+internal/app/txn.go 10 the SQL lexer line-comment and blank loops
+internal/config/keybindings_groups.go 6 the group scan in digitRange
+internal/ui/bordered/bordered.go 8 the ANSI-escape scan
