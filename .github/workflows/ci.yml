@@ -21,31 +21,6 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  Build:
-    name: Build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-          cache-dependency-path: go.sum
-      # `go vet ./...` is deliberately NOT here. golangci-lint's standard set includes
-      # `govet`, which runs the same analyzer passes, and `make lint` in the job below is
-      # what invokes it -- so keeping a separate Vet step ran vet TWICE on every push.
-      # Verified on v2.13.2 with no .golangci.yml: `golangci-lint linters` lists govet under
-      # "Enabled by your configuration linters".
-      #
-      # `go build ./...` stays: it is the compile gate, and it is a different question from
-      # lint's type-check in one respect -- `go build -x ./...` still performs no link step,
-      # so this job's claim is exactly "the packages compile", nothing more.
-      - name: Build
-        run: go build ./...
-
   Lint:
     name: Lint
     runs-on: ubuntu-24.04
@@ -81,6 +56,17 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      # The compile gate lives HERE rather than in a job of its own. It used to be the
+      # third job, i.e. a third independent runner acquisition, and that is what turned an
+      # 112 s run into 11 min 42 s one day: Lint finished at t=1m47 and nothing ran at all
+      # until t=9m58. Build+Test together measure 82 s against Lint's 112 s, so the wall
+      # clock is unchanged while the run asks for two runners instead of three.
+      #
+      # `go build ./...` writes no binary and never invokes the linker (`go build -x ./...`
+      # shows no link step), so the claim is exactly "the packages compile". vet is not
+      # here either: it runs once, as golangci-lint's govet, in the Lint job.
+      - name: Build
+        run: go build ./...
       # Same test set as `make test` (`go test -race`, no `-short`, so the
       # integration tests run) plus an atomic coverage profile, with `-count=1`
       # so a cached PASS can never stand in for a real run. The integration tests

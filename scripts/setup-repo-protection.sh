@@ -35,7 +35,7 @@
 # Requires: gh (authenticated, repo admin) and jq.
 #
 # Usage:
-#   scripts/setup-repo-protection.sh [--dry-run] [--contexts Build,Lint,Test] [--sha <commit>]
+#   scripts/setup-repo-protection.sh [--dry-run] [--contexts Lint,Test] [--sha <commit>]
 #
 # Env overrides:
 #   RULESET_NAME=protect-<branch>   BRANCH=<default branch>   GH_ACTIONS_APP_ID=15368
@@ -44,7 +44,12 @@ set -euo pipefail
 
 # GitHub Actions is the integration that reports our CI check runs.
 GH_ACTIONS_APP_ID="${GH_ACTIONS_APP_ID:-15368}"
-REQUIRED_DEFAULT=(Build Lint Test)
+# Lint and Test ONLY. `Build` is gone: it was merged into Test's steps (compile gate +
+# suite on one runner = two acquisitions instead of three), so a required `Build` context
+# would now error here with "expected check 'Build' not found". If you resurrect a separate
+# Build job, put the context back here too -- this array and ci.yml are the two halves of
+# the same fact.
+REQUIRED_DEFAULT=(Lint Test)
 
 # Labels referenced by .github/dependabot.yml, as "name|color|description".
 LABELS=(
@@ -162,7 +167,7 @@ else
   fi
   if [ -z "$sha" ] || [ "$sha" = "null" ]; then
     echo "ERROR: no PR head SHA available to derive required check names from." >&2
-    echo "       Open a PR whose CI has run, or pass --sha <commit> / --contexts Build,Lint,Test." >&2
+    echo "       Open a PR whose CI has run, or pass --sha <commit> / --contexts Lint,Test." >&2
     exit 1
   fi
   echo "==> Deriving contexts from check runs of ${sha}"

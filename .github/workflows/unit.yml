@@ -1,0 +1,64 @@
+name: Unit
+
+# Per-commit signal for branches, WIP included.
+#
+# WHY THIS EXISTS SEPARATELY: `ci.yml` triggers on `pull_request` and on push to `main`
+# only. A commit pushed to a feature branch that has no open PR therefore gets NO CI at
+# all today -- the first feedback is when the PR is opened. This workflow is that first
+# feedback.
+#
+# WHAT IT IS NOT, and the distinction matters more than the speed:
+#
+#   - It is NOT a required check. `protect-main` requires `Lint` and `Test`; this one is
+#     advisory. A red `Unit` never blocks a merge, and a green one never authorises one.
+#   - It is NOT a smaller replacement for `ci.yml`'s Test job. The only functional
+#     difference is `DBX_SKIP_DOCKER=1`, which skips the real-PostgreSQL tests instead of
+#     starting testcontainers (measured: internal/app 22.1s -> 4.0s, 43 skips). The full
+#     suite still runs on every PR and every push to main, unchanged.
+#   - It is NOT the mutation gate. Mutation needs a full coverage profile; running it over
+#     this job's reduced suite would mark integration-covered mutants as not-covered and
+#     report a profile that is wrong rather than merely incomplete.
+#
+# Note the overlap this accepts: a branch with an open PR gets this workflow on push AND
+# `ci.yml` on pull_request. There is no native way to ask "does this branch have a PR",
+# and the cost is ~1 minute of an advisory run, so it is left alone rather than filtered
+# with an API call in a workflow condition.
+on:
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+
+# Least privilege by default; every job inherits this.
+permissions:
+  contents: read
+
+# Its own group, deliberately not `ci`'s: an advisory run must never cancel a required
+# one, and a required run must never leave this pending.
+concurrency:
+  group: unit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  Unit:
+    name: Unit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      # Same compile gate as ci.yml's Test job. `go build ./...` writes no binary and
+      # never invokes the linker, so the claim is exactly "the packages compile" -- it is
+      # here because it is 8 seconds and it fails before the suite does.
+      - name: Build
+        run: go build ./...
+      # The opt-out `testDSN` documents: skip before probing Docker, explicitly, rather
+      # than inferring anything. This is the ONLY command in this workflow that differs
+      # from ci.yml's Test, and ci.yml is the one that still runs the whole suite.
+      - name: Unit tests
+        run: DBX_SKIP_DOCKER=1 go test -race -count=1 ./...

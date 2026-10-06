@@ -32,30 +32,51 @@ abra dbx usará la nueva versión.
 
 CI vive en `.github/workflows/ci.yml` y corre en **todo PR** y en **todo push
 a `main`** (sin filtros `paths`: un workflow skipeado deja los required checks
-en pending para siempre y bloquea todos los PRs). Tres jobs:
+en pending para siempre y bloquea todos los PRs). **Dos jobs**:
 
-- **`Build`**: `go build ./...`. **Sin `go vet`**, a propósito: `govet` corre dentro
-  de golangci-lint (abajo), y con el paso aparte el mismo chequeo se ejecutaba dos
-  veces en cada push. `go build ./...` no enlaza tampoco (`go build -x ./...` no
-  invoca `link`), así que la afirmación del job es exactamente "los paquetes
-  compilan".
 - **`Lint`**: `make lint` → `fmt-check` (**gofmt**) + golangci-lint **v2.13.2**
   (versión pineada en el `Makefile`; no hay `.golangci.yml`, corre el set por
   defecto: errcheck, **govet**, ineffassign, staticcheck, unused). Antes de
   `fmt-check` no había **ningún** chequeo de formato en el repo: `gofmt -l .` está
   limpio, pero `make lint` sobre `func F(  a int ) int {` devolvía `0 issues`.
-- **`Test`**: `go test -race -covermode=atomic -coverprofile=… ./...` (suite
-  completo, sin `-short`). Los tests de integración de `internal/app` levantan
-  PostgreSQL vía **testcontainers** usando el Docker que ya trae el runner
-  `ubuntu-24.04`; no hace falta bloque `services:`. Los tests del scanner
-  (`internal/config`) usan un seam de discovery, así que **no** requieren `fd`.
+  Es el job **más largo** (112 s) y por eso el que fija el reloj.
+- **`Test`**: `go build ./...` + `go test -race -covermode=atomic
+  -coverprofile=… ./...` (suite completo, sin `-short`). Los tests de
+  integración de `internal/app` levantan PostgreSQL vía **testcontainers** usando
+  el Docker que ya trae el runner `ubuntu-24.04`; no hace falta bloque
+  `services:`. Los tests del scanner (`internal/config`) usan un seam de
+  discovery, así que **no** requieren `fd`.
+  - `go build` vive **AQUÍ** y no en un job propio: era el tercer job, es decir una
+    tercera adquisición independiente de runner, y eso convirtió una corrida de 112 s en
+    11 min 42 s (Lint acabó a t=1m47 y no corrió nada hasta t=9m58). `Build`+`Test` miden
+    82 s contra los 112 de `Lint`: el reloj no cambia y se piden **dos** runners en vez
+    de tres.
+  - `go build ./...` no escribe binario ni enlaza (`go build -x ./...` no invoca `link`),
+    así que su afirmación es exactamente "los paquetes compilan".
+  - **Sin `go vet`**, a propósito: `govet` corre dentro de golangci-lint, y con el paso
+    aparte el mismo chequeo se ejecutaba dos veces en cada push.
+
+Aparte, `.github/workflows/unit.yml` corre en **cada push a cualquier rama que no sea
+`main`** (WIP incluido): es la única señal que recibe un commit de rama sin PR, porque
+`ci.yml` solo cubre PRs y `main`. **No es required** y no sustituye a `ci.yml` — la única
+diferencia funcional es `DBX_SKIP_DOCKER=1`, que salta los 43 tests de PostgreSQL real
+(`internal/app`: 22,1 s → 4,0 s). Nunca pongas la mutación ahí: necesita el perfil de
+cobertura completo, y sobre esta suite reducida marcaría como `NOT_COVERED` a los mutantes
+que sí cubre la integración.
+
+**`Mutation (diff)`** vive en `.github/workflows/mutation.yml`, en su propio workflow y
+solo en `pull_request`/`workflow_dispatch`: corre la suite entera otra vez para sacar la
+cobertura, así que meterlo en un job de `ci.yml` lo convertiría en el camino crítico. En
+este repo **no es required check**, y como además este repo pushea directo a `main`, en la
+práctica el gate solo corre cuando se lanza a mano (`make mutate-diff`).
 
 Reglas de la rama por defecto (ruleset **`protect-main`**, reproducible con
 `scripts/setup-repo-protection.sh`; la rama se deriva del default branch real,
 no se hardcodea):
 
-- Merge **solo vía PR**, con los tres checks en verde; force-push y borrado de
-  la rama por defecto bloqueados.
+- Merge **solo vía PR**, con los dos required checks (`Lint`, `Test`) en verde;
+  force-push y borrado de la rama por defecto bloqueados. `Build` **no es
+  required** desde que se fundió con `Test`.
 - Existe **bypass de admin** y es **deliberado** (aprobado por el usuario): un
   admin *podría* pushear directo, pero la intención de trabajo es siempre el
   camino PR. Ningún actor no-admin puede hacerlo.
