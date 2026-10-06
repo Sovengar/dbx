@@ -69,7 +69,21 @@ run:
 test:
 	go test -race -count=1 -cover ./...
 
-lint:
+# gofmt is not a linter and no linter here replaces it: golangci-lint's standard set is
+# errcheck/govet/ineffassign/staticcheck/unused, and a deliberately mis-formatted
+# `func F(  a int ) int {` passes `make lint` with 0 issues. Without this the repo has NO
+# formatting gate at all, so a mis-formatted file lands on main in green CI and the next
+# `gofmt -w` silently rewrites it inside somebody else's diff.
+fmt-check:
+	@out="$$(gofmt -l .)"; \
+	if [ -n "$$out" ]; then echo "gofmt pending in:"; echo "$$out"; exit 1; fi
+
+# `vet` is deliberately NOT a prerequisite here either. golangci-lint's `govet` runs the same
+# analyzer passes ("roughly the same as 'go vet' and uses its passes"), and CI used to run a
+# separate `go vet ./...` step on top of that -- the same check twice on every push. It runs
+# ONCE, inside golangci-lint. The `make lint` recipe below is therefore gofmt + the linter and
+# nothing else; a standalone vet run is `go vet ./...` by hand.
+lint: fmt-check
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run
 
 # One-shot local gate. `build` compiles into the repo-local .local/bin/dbx and

@@ -34,9 +34,16 @@ CI vive en `.github/workflows/ci.yml` y corre en **todo PR** y en **todo push
 a `main`** (sin filtros `paths`: un workflow skipeado deja los required checks
 en pending para siempre y bloquea todos los PRs). Tres jobs:
 
-- **`Build`**: `go build ./...` y `go vet ./...`.
-- **`Lint`**: `make lint` → golangci-lint **v2.13.2** (versión pineada en el
-  `Makefile`; no hay `.golangci.yml`, corre el set por defecto).
+- **`Build`**: `go build ./...`. **Sin `go vet`**, a propósito: `govet` corre dentro
+  de golangci-lint (abajo), y con el paso aparte el mismo chequeo se ejecutaba dos
+  veces en cada push. `go build ./...` no enlaza tampoco (`go build -x ./...` no
+  invoca `link`), así que la afirmación del job es exactamente "los paquetes
+  compilan".
+- **`Lint`**: `make lint` → `fmt-check` (**gofmt**) + golangci-lint **v2.13.2**
+  (versión pineada en el `Makefile`; no hay `.golangci.yml`, corre el set por
+  defecto: errcheck, **govet**, ineffassign, staticcheck, unused). Antes de
+  `fmt-check` no había **ningún** chequeo de formato en el repo: `gofmt -l .` está
+  limpio, pero `make lint` sobre `func F(  a int ) int {` devolvía `0 issues`.
 - **`Test`**: `go test -race -covermode=atomic -coverprofile=… ./...` (suite
   completo, sin `-short`). Los tests de integración de `internal/app` levantan
   PostgreSQL vía **testcontainers** usando el Docker que ya trae el runner

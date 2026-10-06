@@ -34,10 +34,17 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      # `go vet ./...` is deliberately NOT here. golangci-lint's standard set includes
+      # `govet`, which runs the same analyzer passes, and `make lint` in the job below is
+      # what invokes it -- so keeping a separate Vet step ran vet TWICE on every push.
+      # Verified on v2.13.2 with no .golangci.yml: `golangci-lint linters` lists govet under
+      # "Enabled by your configuration linters".
+      #
+      # `go build ./...` stays: it is the compile gate, and it is a different question from
+      # lint's type-check in one respect -- `go build -x ./...` still performs no link step,
+      # so this job's claim is exactly "the packages compile", nothing more.
       - name: Build
         run: go build ./...
-      - name: Vet
-        run: go vet ./...
 
   Lint:
     name: Lint
