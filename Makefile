@@ -101,9 +101,8 @@ lint: fmt-check
 check: build lint test
 
 # Mutation testing. scripts/mutate.sh owns everything the engine needs -- the exclusion (read from
-# THIS file, which is exactly what scripts/check_mutate_scope.py validates against it), the budget,
-# the supervisor and the verdict -- so the local loop and CI run the same code path. These two
-# targets exist only so the local loop does not have to remember the flags.
+# THIS file), the budget, the supervisor and the verdict -- so the local loop and CI run the same
+# code path. These two targets exist only so the local loop does not have to remember the flags.
 #
 # A timed-out mutant is ABSENT from the totals, so it is dangerous rather than merely slow: a
 # surviving mutant that times out is not caught, and an allowlisted survivor that times out is not
@@ -120,8 +119,8 @@ check: build lint test
 #
 # Check `jq '[.files[].mutations[]|select(.status=="TIMED OUT")]|length' report.json` after any
 # change here: a jump in that number means results are no longer trustworthy, even when the gate
-# still passes. Whether the jump is ALLOWED is .mutation-notcovered's TIMEOUT_MAX, enforced by
-# scripts/check_mutate_nc.py -- this target does not get to decide it quietly.
+# still passes. Whether the jump is ALLOWED is .mutation-timeouts' ceiling, enforced inside
+# scripts/mutate.sh -- this target does not get to decide it quietly.
 mutate: ## Whole-module mutation run, with the verdict (same wiring as CI)
 	@MUTATE_DSN="$(MUTATE_DSN)" scripts/mutate.sh --run
 

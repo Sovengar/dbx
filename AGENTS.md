@@ -71,11 +71,10 @@ jobs**, de los que `Mutation` solo corre en PRs listos:
   - **Presupuesto explícito** (`MUTATE_CAP=180s`, `WORKERS=4`, `STALL=8m`, `CEILING=13m`,
     `SETUP_RESERVE=360s`, `JOB_CEILING=20m`): la cadena `2*cap < stall < ceiling` y
     `ceiling + reserve < job` la valida el script y se niega a arrancar si no se cumple.
-  - **Dos checks que gitdash no tiene**, como steps del mismo job: `check_mutate_scope.py`
-    (todo `.go` nuevo tiene que estar clasificado contra `MUTATE_EXCLUDE`, que el script
-    **lee del Makefile** — una sola fuente) y `check_mutate_nc.py`, que exige la cuenta de
-    todo lo que gremlins no evaluó: conjunto exacto de `NOT COVERED` y techo por fichero
-    (`TIMEOUT_MAX`) de `TIMED OUT`, ambos en `.mutation-notcovered`.
+  - **El mismo gate que gitdash, ni un step más**: los colgantes los decide el propio
+    `scripts/mutate.sh` contra `.mutation-timeouts` (techo por fichero), `MUTATE_EXCLUDE` se
+    lee del Makefile y lo fija un caso de `mutate_test.sh` (ampliarlo es un rojo), y el
+    "código nuevo sin probar" lo cierra el `Coverage gate` del job `Test`.
 
 Aparte, `.github/workflows/ci-fast.yml` (`name: CI fast`) corre en **cada push a cualquier rama que no sea
 `main`** (WIP incluido): es la única señal que recibe un commit de rama sin PR, porque

@@ -76,8 +76,8 @@ nc=  0 lived= 69 killed= 525  internal/ui/components/grid/table.go  <- DONE
 
 Zero survivors, zero uncovered. The only work is narrowing `MUTATE_EXCLUDE`,
 which is a regexp alternation, so a file is opted IN by naming its siblings OUT.
-`scripts/check_mutate_scope.py` now enforces both directions and fails on any
-new Go file nobody classified.
+`scripts/mutate_test.sh` pins the value the Makefile declares, so widening the
+regexp is a red instead of a silent hole.
 
 - [x] `internal/app/txn.go` — done in `ad614e3`
 - [x] `internal/ui/components/explorer/node.go` (11 killed)
@@ -282,11 +282,11 @@ gate indefinitely, and unlike a survivor — which shows up as a red build — t
 was completely silent. Same family as the TIMED OUT hazard, one level worse,
 because a timeout is at least absent from the report where you can count it.
 
-`scripts/check_mutate_nc.py` and `.mutation-notcovered` now make it a hard
-failure in both directions, and the Calibration job is not the only gate: the
-Mutation job runs it too. A new uncovered mutant is a red build; an entry that
-stops being uncovered is also a red build, so a suppressed gap cannot quietly
-become a real one.
+`scripts/mutate.sh` makes an expiry a hard failure unless `.mutation-timeouts`
+records a ceiling for that file, in both directions: a hang above the ceiling is
+red, and so is a file nobody recorded. NOT COVERED itself is reported and not
+gated — the `Coverage gate` already refuses a line the diff leaves untested,
+which is the same hazard measured where it happens.
 
 **And gremlins was wrong about a quarter of them.** `go tool cover` reported
 exactly **3** uncovered blocks in `internal/app/txn.go`; gremlins reported **25**
