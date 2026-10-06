@@ -1,4 +1,4 @@
-.PHONY: build install test lint run clean check mutate mutate-diff
+.PHONY: build install test lint run clean check mutate mutate-diff coverage coverage-check
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.Version=$(VERSION)"
@@ -68,6 +68,15 @@ run:
 
 test:
 	go test -race -count=1 -cover ./...
+
+COVER_PROFILE ?= coverage.out
+
+coverage: ## Deduplicated coverage profile of the whole suite
+	@go test -count=1 -covermode=atomic -coverprofile=$(COVER_PROFILE) ./... > /dev/null
+	@echo "profile: $(COVER_PROFILE)"
+
+coverage-check: coverage ## Gate: this change's DIFF at 100%, and the total against scripts/coverage-floor
+	@scripts/diff-coverage.sh "$(COVER_PROFILE)" "$(MUTATE_BASE)"
 
 # gofmt is not a linter and no linter here replaces it: golangci-lint's standard set is
 # errcheck/govet/ineffassign/staticcheck/unused, and a deliberately mis-formatted

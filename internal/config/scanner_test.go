@@ -21,6 +21,29 @@ func scannerFor(root string, paths ...string) *Scanner {
 	return s
 }
 
+// withFakeFD pone un `fd` de mentira delante del real en el PATH del test: find(1)
+// con la misma forma de llamada que usa scanWithFD (--hidden --type f <regex> <raiz>),
+// incluidos los directorios ocultos que el WalkDir no entra.
+//
+// Los tests no dependen de lo que la maquina tenga instalado. Sin esto, en un runner
+// sin fd los tests que comparan las dos descubrimientos se saltan, sus bloques de
+// scanner.go quedan sin cubrir y el total de cobertura baja un 0.07% respecto a una
+// maquina con fd: dos numeros distintos para el mismo codigo, y el floor no puede ser
+// dos cosas a la vez.
+func withFakeFD(t *testing.T) {
+	t.Helper()
+	script := `#!/bin/sh
+# argumentos de scanWithFD: --hidden --type f <pattern> <root>
+find "$5" -type f | grep -E "/$4"
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fd")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the fake fd: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // connectionSpec describes a project connection for test fixtures.
 type connectionSpec struct {
 	driver    string
@@ -985,9 +1008,9 @@ func TestScanWithFD_WhenInstalledItFindsTheProjects(t *testing.T) {
 // fd succeeds, its superset must be the one the user sees — falling back to the
 // subset would hide a project the tool can see.
 func TestDiscoverProjects_FDsSupersetIsKeptWhenItSucceeds(t *testing.T) {
-	if _, err := exec.LookPath("fd"); err != nil {
-		t.Skip("fd is not installed: the two discovery paths cannot be compared")
-	}
+	// fd de mentira en vez de un salto: el runner de CI no trae fd, y sin este camino el
+	// test se quedaba en la rama de fallo de scanWithFD y sus bloques sin cubrir.
+	withFakeFD(t)
 
 	root := t.TempDir()
 	writeConnections(t, filepath.Join(root, "visible"), map[string]string{"a": "postgres://x/1"})
