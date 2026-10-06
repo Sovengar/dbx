@@ -52,6 +52,12 @@ EXPECTED = [
     ("internal/app/txn.go", True),
     ("internal/app/router.go", True),
     # newly admitted
+    # internal/debuglog/debuglog.go was created by the round that collapsed nine
+    # duplicate log functions into one. It does NOT match MUTATE_EXCLUDE, so by this
+    # script's own rule it belongs to the gate -- and leaving it unclassified made
+    # scope=bad, which made the Mutation job's `if:` false and the gate silently
+    # SKIPPED on every PR. The mismatch is why the scope step now exits 1.
+    ("internal/debuglog/debuglog.go", True),
     ("internal/ui/components/explorer/node.go", True),
     ("internal/ui/components/palette/commands.go", True),
     # deliberately out

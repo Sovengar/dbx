@@ -151,6 +151,12 @@ jobs:
           else
             echo "scope=bad" >> "$GITHUB_OUTPUT"
             echo "::error title=Mutation scope mismatch::MUTATE_EXCLUDE and scripts/check_mutate_scope.py disagree. Add any new Go file to EXPECTED and flip it deliberately."
+            # Exit, or this step keeps going green and the only visible effect is the
+            # Mutation job vanishing as "skipped" -- which reads like an infra hiccup
+            # rather than a classification nobody did. That is exactly how dbx's gate
+            # went unnoticed for the whole coverage campaign: scope=bad, Calibration
+            # green, Mutation skipped, every PR apparently fine.
+            exit 1
           fi
 
       - name: Check calibration
