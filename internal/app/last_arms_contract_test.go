@@ -87,20 +87,35 @@ func TestASingleClickInTheExplorerSelectsWithoutToggling(t *testing.T) {
 		m.router.FocusPane(FocusExplorer)
 		m.explorer.Focus()
 		m.explorer.SetNodes([]*explorer.Node{db})
-		m.explorer.HandleClick(0)
 
 		at, ok := explorerClickPoint(t, m)
 		if !ok {
 			t.Fatal("no point belongs to the explorer and not to the grid or the sidebar")
 		}
-
-		out, cmd := fold(m, tea.MouseClickMsg{X: at.X, Y: at.Y, Button: tea.MouseLeft})
-
-		if out.explorer == nil {
-			t.Fatal("the model has no explorer")
+		// The zone's first row is the explorer's top border, which HandleClick
+		// discards; one row down is the first node — the database with children
+		// that ToggleExpand can act on.
+		click := tea.MouseClickMsg{X: at.X, Y: at.Y + 1, Button: tea.MouseLeft}
+		if !ui.InBounds(zonePaneExplorer, click) {
+			t.Fatal("one row below the zone's top is not inside the explorer")
 		}
-		if cmd == nil && out.explorer.Selected() == nil {
-			t.Error("the double click neither toggled nor selected anything")
+
+		// Both clicks go through Update, because it is the app that decides what
+		// counts as a double click; sent back to back, the second falls inside the
+		// 300ms window. The first selects, the second toggles.
+		first, _ := fold(m, click)
+		selected := first.explorer.Selected()
+		if selected == nil {
+			t.Fatal("the first click selected no node, so there is nothing to toggle")
+		}
+		expanded := selected.Expanded
+
+		out, _ := fold(first, click)
+		if out.explorer.Selected() == nil {
+			t.Fatal("the double click left no node selected")
+		}
+		if out.explorer.Selected().Expanded == expanded {
+			t.Error("the double click did not toggle the selected node")
 		}
 	})
 }

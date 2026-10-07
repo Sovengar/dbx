@@ -10,17 +10,9 @@
 # the clock resets, and the supervisor never fires. That is the failure this
 # script exists to prevent, and it is the most likely one.
 #
-# VENDORED COPY. Origin: ~/.local/share/chezmoi/home/dot_local/lib/swe/lib/
-# executable_watchdog.sh, which chezmoi installs as lib/watchdog.sh. It is
-# copied here frozen — no features are added on top of it, because scripts/
-# mutate_test.sh asserts the behaviour of THIS copy. Diverging from chezmoi is a
-# separate PR in the swe/chezmoi repo, not an edit here.
-#
-# It lives in the repo because the mutation gate used to invoke the chezmoi
-# path, which does not exist on a GitHub runner: the step died instantly,
-# continue-on-error swallowed it, and the gate then passed on "no report.json".
-# See the `Mutation (diff)` job in .github/workflows/ci.yml (it used to be
-# .github/workflows/mutation.yml, which no longer exists).
+# It lives in the repo because the mutation gate runs on a GitHub runner with no
+# dotfiles tree: scripts/mutate.sh invokes this copy from the `Mutation` job in
+# .github/workflows/ci.yml, and scripts/mutate_test.sh asserts its behaviour.
 #
 # Two contract notes, both load-bearing:
 #
