@@ -60,6 +60,12 @@ Ruleset **`protect-main`**, reproducible con `scripts/setup-repo-protection.sh`
 Tras un merge: verificar que el workflow de push de `main` quedó verde y que el
 badge del README reporta `passing` (el badge cachea unos segundos).
 
+### Esperar a la CI
+
+Para seguir los checks de un PR, esperar con `gh run watch <run-id> --exit-status`
+(o `gh pr checks <n> --watch`). Nunca `sleep` + `gh pr checks`: los runs quedan
+stale tras un force-push y hay que volver a pedir el id.
+
 ## Stack
 
 - **Go 1.22+** with Bubbletea v2 (TUI)
