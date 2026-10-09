@@ -24,6 +24,14 @@ El usuario ejecuta `~/.local/bin/dbx`, no el repo. No hace falta cerrar la TUI:
 en Linux el binario se reemplaza en disco y el proceso sigue con la copia en
 memoria hasta el próximo arranque.
 
+## New feature → docs/FEATURES.md
+
+Any **new feature** — and any user-visible change to an existing one — must be
+documented in `docs/FEATURES.md` **in the same change**: add or update its entry
+with what it does and how it is triggered (key, flag or command). A feature that
+is not in `docs/FEATURES.md` does not exist for the next reader. Keep it a
+concise inventory, not a tutorial: the details live in `README.md` and `docs/`.
+
 ## CI y protección de `main`
 
 `.github/workflows/ci.yml` es la gate: corre en **todo PR** y en **todo push a
