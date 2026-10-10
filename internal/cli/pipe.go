@@ -23,10 +23,21 @@ var replayCmd = &cobra.Command{
 	RunE:  runReplay,
 }
 
+var pipeCmd = &cobra.Command{
+	Use:   "pipe",
+	Short: "Execute SQL from stdin",
+	Long:  `Read SQL from stdin and execute it. Useful for piping.`,
+	RunE:  runPipe,
+}
+
 func init() {
 	replayCmd.Flags().StringP("connection", "c", "", "Connection name from config")
 	replayCmd.Flags().BoolP("json", "j", false, "Output as JSON")
 	rootCmd.AddCommand(replayCmd)
+
+	pipeCmd.Flags().StringP("connection", "c", "", "Connection name from config")
+	pipeCmd.Flags().BoolP("json", "j", false, "Output as JSON")
+	rootCmd.AddCommand(pipeCmd)
 }
 
 func runReplay(cmd *cobra.Command, args []string) error {
