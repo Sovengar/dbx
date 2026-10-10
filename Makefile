@@ -52,15 +52,10 @@ lint: fmt-check
 # check: build + lint + test, the one-shot local gate.
 check: build lint test
 
-# Mutation. scripts/mutate.sh reads MUTATE_EXCLUDE from this file and owns the budget,
-# the supervisor and the verdict: local and CI measure through the same path.
-#
-# The per-mutant deadline derives from ceil(cap / coverage pass); an expired mutant is
-# absent from the totals and its ceiling is decided by .mutation-timeouts inside the script.
-mutate: ## Whole-module mutation run, with the verdict (same wiring as CI)
+mutate:
 	@MUTATE_DSN="$(MUTATE_DSN)" scripts/mutate.sh --run
 
-mutate-diff: ## Mutation run over the diff vs MUTATE_BASE, with the verdict
+mutate-diff:
 	@MUTATE_DSN="$(MUTATE_DSN)" scripts/mutate.sh --diff
 
 clean:

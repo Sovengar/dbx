@@ -74,6 +74,31 @@ Para seguir los checks de un PR, esperar con `gh run watch <run-id> --exit-statu
 (o `gh pr checks <n> --watch`). Nunca `sleep` + `gh pr checks`: los runs quedan
 stale tras un force-push y hay que volver a pedir el id.
 
+### Mutation (`scripts/mutate.sh`)
+
+The gate is CI (the `Mutation` job of `ci.yml`, non-draft PRs, required check).
+`scripts/mutate.sh --diff --ci --summary …` measures AND decides in one step;
+"could not measure" is a red, never a green, and a red says how to fix it.
+
+- The gitconfig is neutralised (`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` →
+  `/dev/null`, `GIT_CONFIG_NOSYSTEM=1`): gremlins computes its `--diff` ranges
+  with a plain `git diff` run with the AMBIENT config, so a dev's
+  `diff.algorithm`/`diff.interhunkcontext` would make the local loop measure a
+  different mutant set than CI's defaults. Hermetic by construction.
+- `EXPECTED_MEASURED` counts the in-scope `RUNNABLE` mutants only (gremlins'
+  `mutants_total` = killed + lived + notViable): `SKIPPED` leaves the scope and
+  `NOT COVERED` sits in no cover block (Go cover starts a case clause after the
+  colon), so neither belongs in the denominator; the verdict publishes the
+  exclusion and its reason, and an all-uncoverable diff is the green "nothing
+  measurable".
+- Committed files that make the gate possible: `.mutation-allowlist` (survivors
+  accepted **by line**; missing = red with the seeding command),
+  `.mutation-timeouts` (`<file> <ceiling>` for expired mutants),
+  `scripts/coverage-floor`, `scripts/watchdog.sh` (vendored frozen copy) and
+  `scripts/mutate_test.sh` (the gate's red paths, ~1s, the `Shell suites` step).
+- Locally mutation is never automatic: `make mutate` (whole module) or
+  `make mutate-diff` (diff vs `MUTATE_BASE`), manually and only when needed.
+
 ## Stack
 
 - **Go 1.22+** with Bubbletea v2 (TUI)
