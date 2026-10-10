@@ -65,6 +65,14 @@ Emits the whole schema as indented JSON — schemas (system schemas excluded),
 each table with its columns, indexes and foreign keys. `-o/--output` writes to a
 file (mode 0644) instead of stdout; `-j` defaults to true. Built for agents.
 
+### Session logs — written by dbx
+
+With `session.enabled` (default true) the TUI appends NDJSON entries to a daily
+file `<session.dir>/YYYY-MM-DD.jsonl` (`session.dir` default `/tmp/dbx/sessions`):
+`query` (sql, duration, rows), `error` and `connect` entries. Files older than
+`session.retention_days` (default 30) are pruned at startup. A failed log open
+never blocks the TUI — logging is the one feature allowed to be unavailable.
+
 ### `dbx replay [session-file]` — re-run a session log
 
 Reads a newline-delimited JSON session file from the session directory
@@ -72,12 +80,7 @@ Reads a newline-delimited JSON session file from the session directory
 `level == "query"` and a non-empty `sql`, in autocommit. Progress goes to
 stderr; JSON reports `{session, total, errors, queries:[…]}`. An entry needs at
 least `level` and `sql` (optionally `duration_ms`, `rows`, `error`, `metadata`,
-`timestamp`); malformed lines are skipped.
-
-> **Not implemented**: nothing in dbx *writes* these session logs today — the
-> logger exists but is never instantiated, and the `session.enabled` /
-> `retention_days` config values are inert. `replay` only works on externally
-> produced files.
+`timestamp`); malformed lines are skipped. Flags: `-c/--connection`, `-j/--json`.
 
 ### `dbx pipe` — SQL from stdin
 

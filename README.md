@@ -218,22 +218,21 @@ transaction.
 
 ### Session Logs
 
-> **Not implemented yet.** dbx does not write session logs: the logger exists in
-> the codebase but is never instantiated, and the `session.enabled` /
-> `retention_days` options are inert.
+dbx writes a session log when `session.enabled` is true (default): one
+newline-delimited JSON file per day (`YYYY-MM-DD.jsonl`) in `[session] dir`
+(default `$TMPDIR/dbx/sessions`), with one object per line for executed queries,
+errors and connects. Files older than `session.retention_days` (default 30) are
+pruned at startup.
 
-`dbx replay` can read session files that something else produced. The format is
-newline-delimited JSON, one object per line, with at least `level` (`"query"`)
-and `sql`:
+`dbx replay` re-executes the `query` entries of a session file:
 
 ```bash
 # Replay a session file (looked up in the session dir)
 dbx replay 2026-09-11.jsonl
 ```
 
-The session directory (`[session] dir`, default `$TMPDIR/dbx/sessions`) is only
-the search path for `dbx replay`. Queries you execute are instead recorded in the
-per-project query history that backs the query browser
+Queries you execute are also recorded in the per-project query history that
+backs the query browser
 (`~/.local/state/dbx/projects/{project}/query_history.json`).
 
 ### Schema Context for LLMs
