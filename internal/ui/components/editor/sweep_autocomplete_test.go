@@ -13,7 +13,7 @@ package editor
 
 import "testing"
 
-// Scenario: Una tabla sin esquema ofrece sus columnas igual.
+// Scenario: A schema-less table still offers its columns.
 //
 // Kills CONDITIONALS_NEGATION internal/ui/components/editor/autocomplete.go:324
 // (second conjunct, `ctx.table == ""` -> `!= ""`). Flipped, the guard of
