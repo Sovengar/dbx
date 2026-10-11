@@ -72,6 +72,47 @@ CONDITIONALS_BOUNDARY internal/ui/toast.go:130
 CONDITIONALS_BOUNDARY internal/ui/toast.go:133
 CONDITIONALS_BOUNDARY internal/ui/toast.go:78
 
+# ── non-Boundary sweep (ARITHMETIC_BASE, CONDITIONALS_NEGATION, INVERT_NEGATIVES,
+#    INCREMENT_DECREMENT) ─────────────────────────────────────────────────────
+#
+# ARITHMETIC_BASE internal/ai/session/logger.go:308   `64*1024` -> `64/1024`
+#
+#   The second argument of scanner.Buffer is the token limit; the first is only the
+#   INITIAL capacity of the buffer, and bufio.Scanner grows it itself, by doubling,
+#   until the limit. A starting capacity of 0 changes how many allocations the scan
+#   performs and nothing else: the same lines are read, the same over-limit line
+#   stops Scan, and no test can observe an allocation count. Equivalent, because the
+#   only number that gates behaviour -- maxLogLine -- is untouched by the mutant.
+#
+# ARITHMETIC_BASE internal/ui/components/editor/autocomplete.go:174   `len(keywords)+len(functions)` -> `-`
+#
+#   Same shape one layer down: the sum is the capacity HINT of the byName map in
+#   SetKeywords, and nothing else. `make(map, n)` with a negative n does not even
+#   panic (verified: it yields an empty map), so the mutant differs only in how much
+#   memory is reserved before the two range loops insert every entry. The map that
+#   comes out is identical -- same keys, same values -- so every consumer, including
+#   the sorted a.all that SetKeywords derives from it, is identical too.
+#
+# CONDITIONALS_NEGATION internal/ui/components/editor/autocomplete.go:324   `ctx.schema == "" && ctx.table == ""` (first conjunct)
+#
+#   The guard of columnItems returns nil when no table is in play. The negated FIRST
+#   conjunct (`schema != ""`) fires only with schema set, table empty and no refs,
+#   and in exactly that state columnMatches falls through to its default branch,
+#   which walks the (empty) ctx.tables and returns false for every column -- so the
+#   guarded path and the fall-through both produce an empty list. The SECOND
+#   conjunct's mutant (table) is NOT equivalent and is killed by
+#   TestAnUnreachableQualifierStillOffersItsColumns; this entry covers the first.
+#
+# ARITHMETIC_BASE internal/ui/components/editor/autocomplete.go:677   `len(passed) - 1` -> `+`   (and its INVERT_NEGATIVES twin)
+#
+#   lastClause scans the tokens backwards from len(passed)-1. The mutant starts at
+#   len(passed)+1, and the first thing every iteration does is
+#   `if len(phrase) > len(passed)-i { continue }`: for i in {len+1, len} the bound is
+#   -1 and -2, and every phrase has length >= 1, so both extra iterations skip
+#   before touching passed[i+k]. Execution resumes at i = len(passed)-1, the real
+#   start. Identical results for every input; INVERT_NEGATIVES on the same `-`
+#   produces the same mutant, hence the twin entry.
+
 # ── gridpreview, round 31 ──────────────────────────────────────────────────
 #
 # preview.go:861   `len(p.jqSugs) == 0` -> `<= 0`: provably equivalent. len() on a slice
@@ -85,3 +126,125 @@ CONDITIONALS_BOUNDARY internal/ui/toast.go:78
 #                  this repository, and they are all `<` becoming `<=` where the body is
 #                  `x = <something x already is>`.
 CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:861
+
+# gridpreview/preview.go:1229 — the type column's padding, both arithmetics
+#
+# `typePad := 14 - lipgloss.Width(typeStr)` padded with `14 + width` instead. The
+# padding is appended AFTER the styled type and the row ends there, so it is pure
+# trailing whitespace on a row that ALREADY overflows the box on dead code:
+# content = 4 + pathWidth(maxWidth-14) + 1 + 14 = maxWidth+5, inner width is
+# maxWidth-2. lipgloss wraps the row and trims the whitespace tail, so the extra
+# `width` columns lengthen only the invisible run; the wrap point of the visible
+# glyphs and every rendered pixel are unchanged. Verified byte-identical output
+# (raw ANSI, not stripped) for widths 100/38, types string/object/array-iter and
+# selected rows 0, 1 and none.
+ARITHMETIC_BASE internal/ui/components/gridpreview/preview.go:1229
+INVERT_NEGATIVES internal/ui/components/gridpreview/preview.go:1229
+
+# grid/where_filter.go:594 + 595 — the detail column's padding
+#
+# 594 is `detailPad := 14 - detailWidth` mutated to `+` (pads the detail to 14 PLUS its
+# own width); 595 is the guard `if detailPad > 0` mutated to `<=` (skips that padding for
+# every padded detail). Both change ONLY how many spaces follow the detail TEXT, and the
+# detail is the last column of the row, so the change is a run of trailing whitespace:
+# lipgloss trims it before wrapping and the border pads the row back out to popupWidth.
+# Proven by asserting on dead code, for a short and a long detail, on a plain and a
+# selected row, that the mutant's render is identical: same 3 lines, same row width. No
+# render assertion can separate them, and gremlins' probe agrees (both LIVED through the
+# whole grid suite including the sweep tests). See where_filter_sweep_test.go,
+# TestTheDetailPaddingIsInvisibleTrailingWhitespace.
+ARITHMETIC_BASE internal/ui/components/grid/where_filter.go:594
+INVERT_NEGATIVES internal/ui/components/grid/where_filter.go:594
+CONDITIONALS_NEGATION internal/ui/components/grid/where_filter.go:595
+
+# grid/table.go:1907 — the first-column wrap
+#
+# 1907 is `g.cursorCol = len(g.columns) - 1` (wrap onto the last column) mutated to `+`,
+# parking the cursor one past the end. moveLeft() calls g.syncScroll() immediately after,
+# and syncScroll clamps any cursorCol >= len(g.widths) back to len(g.widths)-1 — the very
+# index the dead code assigned. Both variants converge onto the same cursor before
+# anything observes it. widths is built 1:1 with columns in SetData, so the clamp target
+# is exactly len(g.columns)-1. The only state where syncScroll would skip the clamp (an
+# empty widths slice with non-empty columns) is unreachable: SetData builds both together.
+ARITHMETIC_BASE internal/ui/components/grid/table.go:1907
+INVERT_NEGATIVES internal/ui/components/grid/table.go:1907
+
+# grid/table.go:2203 — the edit-row test's window clause
+#
+# The `+` in `g.editRow >= offset+g.scrollRow`, the THIRD clause of isEditing. The first
+# clause is `visibleCount == (g.editRow-(offset+g.scrollRow))`: when it holds,
+# editRow == offset+scrollRow+visibleCount, which is >= offset+scrollRow (visibleCount >= 0)
+# and therefore also >= offset-scrollRow (scrollRow is clamped >= 0 everywhere) — the
+# clause is true for both variants. When the first clause does not hold, the && is already
+# false and this clause is never consulted. No input can separate them.
+ARITHMETIC_BASE internal/ui/components/grid/table.go:2203
+
+# grid/table.go:2283 — the empty-table branch's counter
+#
+# `visibleCount++` after appending the "Empty table" message, mutated to `--`. The counter
+# then only feeds the padding loop below it, which appends `""` rows until contentHeight:
+# the dead code adds contentHeight-1 of them, the mutant contentHeight+1. Those pads are
+# trailing empty lines, and line 2339 does `body = strings.TrimRight(body, "\n")` BEFORE
+# the body gap is computed — the extra lines are stripped, the gap recomputes to the same
+# value, and the render is byte-identical. Proven by diffing the full empty-grid render
+# under the mutant against dead code. TestTheRecordsViewNeverOutgrows-style line counting
+# cannot see it either: the gap is defined as target - bodyLines - 1 and absorbs exactly
+# the lines the counter shifts.
+INCREMENT_DECREMENT internal/ui/components/grid/table.go:2283
+
+# palette/palette.go:194 — the item's trailing pad
+#
+# `padLen := inputW - lipgloss.Width(sc.command.Name) - 2`, both `-` signs mutated to `+`
+# (ARITHMETIC_BASE and INVERT_NEGATIVES, columns 21 and 55). padLen only ever appends
+# SPACES to the item, and the item is the last content of its line inside a modal rendered
+# with a fixed lipgloss Width: whatever extra spaces the mutant appends are clipped by the
+# border, and whatever fewer spaces it appends are padded back by the same border. Proven
+# byte-identical by diffing the full render under each of the two mutants against dead
+# code, over name widths 5..80 including both sides of the padLen>0 guard at 195.
+# TestANameWiderThanTheModalIsPaddedSafely pins the two observable invariants (no panic,
+# no line past the modal) that any future change to the line would have to keep.
+ARITHMETIC_BASE internal/ui/components/palette/palette.go:194
+INVERT_NEGATIVES internal/ui/components/palette/palette.go:194
+
+# querybrowser/querybrowser.go:269 — the window height
+#
+# `maxVisible := modalH - 4` mutated to `+ 4` (ARITHMETIC_BASE and INVERT_NEGATIVES on
+# the same `-`). maxVisible feeds two things: how many entries are rendered, and the
+# pad-to-fill loop's target (`maxVisible+2`). Both effects move content INSIDE a frame
+# rendered by bordered.RenderWithTitleEx at the fixed modalH: entries or pads that
+# overflow are clipped by the border, and content that falls short is padded back by it.
+# Proven byte-identical by diffing the full render under the mutant against dead code for
+# an empty store and for stores of 22 and 40 entries (both sides of the window).
+ARITHMETIC_BASE internal/ui/components/querybrowser/querybrowser.go:269
+INVERT_NEGATIVES internal/ui/components/querybrowser/querybrowser.go:269
+
+# explorerpreview/ere.go:552 + 553 — the selection state's initial values
+#
+# 552 is `selCol := -1` and 553 is `selRow := -1`, the "no selection" values, each
+# mutated to `1` (INVERT_NEGATIVES and ARITHMETIC_BASE produce the same mutant).
+# The pair is only consulted by the `switch selCol` below, which re-renders a column
+# with selRow when selCol is 0 or 1. When nav has no selection the mutants reach that
+# switch with selCol=1/selRow=-1 (552) or selCol=-1/selRow=1 (553): the first
+# re-renders column 2 with selectedRow=-1 — byte-identical to the unconditional render
+# two lines above — and the second never matches a case, so the mutated selRow is never
+# read. When nav HAS a selection, both values are overwritten by nav.ActiveColumn()/
+# ActiveRow() before the switch. Proven byte-identical (sha256 of 24 renders: nil nav,
+# no selection, all four col×row selections, full and empty diagrams, widths 70/40)
+# with each mutation applied in turn.
+ARITHMETIC_BASE internal/ui/components/explorerpreview/ere.go:552
+INVERT_NEGATIVES internal/ui/components/explorerpreview/ere.go:552
+ARITHMETIC_BASE internal/ui/components/explorerpreview/ere.go:553
+INVERT_NEGATIVES internal/ui/components/explorerpreview/ere.go:553
+
+# app/txn.go:423 — the escape guard's lookahead inside the blanking loop
+#
+# `i+1 < len(sql)` -> `i-1 < len(sql)`. The mutated guard is true at EVERY loop
+# position (i < len(sql) implies i-1 < len(sql)), so the two versions diverge on
+# exactly one shape: a backslash as the LAST byte of the statement. There the
+# original advances i by one (i == len) and the mutant by two (i == len+1); then
+# blankRange clamps `to > len(out)` (txn.go:382), so both blank [start, len)
+# byte-identically and the outer `i < len(sql)` terminates the loop either way.
+# Proven by exhaustive differential testing over every string of length <= 6 over
+# {'"', ''', 'a', 'E', '\', ' ', '-', '\n', 'e'} (zero differing outputs) and by the
+# whole ./internal/app suite passing with the mutant applied.
+ARITHMETIC_BASE internal/app/txn.go:423

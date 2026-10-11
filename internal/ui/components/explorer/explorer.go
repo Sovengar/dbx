@@ -1,15 +1,14 @@
 package explorer
 
 import (
-	"fmt"
 	"image/color"
-	"os"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/buble/dbx/internal/config"
+	"github.com/buble/dbx/internal/debuglog"
 	"github.com/buble/dbx/internal/theme"
 	"github.com/buble/dbx/internal/ui/bordered"
 )
@@ -359,14 +358,11 @@ func (e *Explorer) ToggleExpand() tea.Cmd {
 		node.ToggleExpand()
 		e.tree.flattenNodes() // clamps the cursor
 
-		// DEBUG
-		f, _ := os.Create("/tmp/dbx_explorer_debug.log")
-		if f != nil {
-			_, _ = fmt.Fprintf(f, "ToggleExpand Table: name=%q schema=%q\n", node.Name, schema)
-			_, _ = fmt.Fprintf(f, "  node.Expanded=%v\n", node.Expanded)
-			_, _ = fmt.Fprintf(f, "  children count: %d\n", len(node.Children))
-			_ = f.Close()
-		}
+		// DEBUG: one appended line per toggle, through the one place that writes these
+		// logs. The arm that gives up when the log cannot be opened lives there, tested;
+		// here there is nothing left to check but the facts worth logging.
+		debuglog.Write("explorer", "ToggleExpand", "table=%q schema=%q expanded=%v children=%d",
+			node.Name, schema, node.Expanded, len(node.Children))
 
 		return func() tea.Msg {
 			return TableSelectedMsg{

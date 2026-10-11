@@ -13,7 +13,7 @@ MUTATE_DSN ?=
 # Mutation scope. Only code the suite reaches: no tests, no mutants.
 # Granularity is PER PACKAGE (RE2 has no lookahead, so "everything but these two
 # files" is not expressible) and, in ai/cli/drivers, PER FILE: an exclusion list opts
-# a file in by naming its siblings out. TODO.md carries the detail.
+# a file in by naming its siblings out. The tsk task list carries the detail.
 #
 # The alternation MUST stay quoted where it expands: unquoted, sh reads each '|' as a
 # pipe and `make mutate` dies with "broken pipe".

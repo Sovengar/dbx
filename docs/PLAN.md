@@ -125,12 +125,10 @@ plan called for fuzzy matching. Nice-to-have.
 
 ## 9. Keybind modes
 
-**Status:** not implemented.
+**Status:** dropped — decision made 2026-10-10.
 
-The plan described vim / modern / emacs keybind modes. There is a single
-registry (with per-context keys) and no mode field anywhere in the config. Given
-that the registry already covers vim-style navigation, decide whether a mode
-switch is worth the added surface — otherwise drop it from the roadmap.
+No keybind modes. The registry already covers vim-style navigation, and a mode
+switch would add surface without solving a real problem. This item is closed.
 
 ---
 

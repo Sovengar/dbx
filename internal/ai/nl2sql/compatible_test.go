@@ -48,6 +48,32 @@ func TestStripJSONCDropsTrailingCommas(t *testing.T) {
 	}
 }
 
+// A config read from disk is a truncated write away from ending mid-token, and the reader
+// runs on whatever file it finds. Every input below ends at the one byte where the scan
+// looks ONE byte ahead, so a reader that trusts the lookahead panics instead of failing.
+func TestStripJSONCSurvivesTruncatedInput(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"a string ending in an escape", `{"a":"x\`},
+		{"an unterminated block comment", `{"a":1} /* x*`},
+		{"an unterminated comment after a trailing comma", `{"a":1, /* x*`},
+		{"an unterminated line comment", `{"a":1 // x`},
+		{"a lone opening quote", `{"a":"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("stripJSONC panicked on %q: %v", tc.in, r)
+				}
+			}()
+			_ = stripJSONC([]byte(tc.in))
+		})
+	}
+}
+
 func TestBaseURLFromOpenCodeConfig(t *testing.T) {
 	cases := []struct {
 		name string

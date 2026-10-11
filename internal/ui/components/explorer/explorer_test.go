@@ -2,10 +2,13 @@ package explorer
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/buble/dbx/internal/config"
+	"github.com/buble/dbx/internal/debuglog"
 	"github.com/buble/dbx/internal/theme"
 )
 
@@ -59,6 +62,50 @@ func TestExplorer_HandleAction_NoOpWhileFiltering(t *testing.T) {
 	}
 	if e.tree.cursor != before {
 		t.Fatalf("cursor moved from %d to %d while filtering", before, e.tree.cursor)
+	}
+}
+
+// Scenario: toggling a table logs which table, to the one place the logs live.
+//
+// The log is not decoration: the debug files under /tmp are how this codebase is
+// investigated, so a toggle that silently stopped writing one is a regression worth a
+// test. The directory is redirected rather than the path hard-coded, which is the whole
+// reason the writer takes it as an argument.
+func TestExplorer_ToggleExpandLogsTheTable(t *testing.T) {
+	dir := t.TempDir()
+	old := debuglog.DefaultDir
+	debuglog.DefaultDir = dir
+	t.Cleanup(func() { debuglog.DefaultDir = old })
+
+	e := newExplorerTest()
+	for _, n := range e.tree.filtered {
+		if n.Type == NodeTable {
+			n.Metadata["schema"] = "public"
+		}
+	}
+	e.tree.cursor = 2 // the first table, under the database and its schema
+
+	msg := e.ToggleExpand()
+	if msg == nil {
+		t.Fatal("toggling a table produced no message")
+	}
+	got := msg()
+	table, ok := got.(TableSelectedMsg)
+	if !ok {
+		t.Fatalf("toggling a table produced a %T, want a TableSelectedMsg", got)
+	}
+	if table.Table != "t0" || table.Schema != "public" {
+		t.Errorf("the toggle announced %q in %q, want %q in %q", table.Table, table.Schema, "t0", "public")
+	}
+
+	data, err := os.ReadFile(debuglog.Path("explorer"))
+	if err != nil {
+		t.Fatalf("the toggle was not logged: %v", err)
+	}
+	for _, want := range []string{`table="t0"`, `schema="public"`, "expanded=true"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("the log %q does not carry %q", data, want)
+		}
 	}
 }
 

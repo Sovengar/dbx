@@ -13,7 +13,12 @@
 # negation leaves the loop never terminating — a test cannot kill an infinite loop, and the
 # harness's own deadline is the only thing that stops the mutant.
 internal/ui/components/editor/highlight.go 16 the tokenizer loop guards, line-comment and word scans
+internal/ui/components/editor/autocomplete.go 1 the lastClause backward scan at 677, whose `i--` negated never reaches the floor
+internal/ui/components/editor/sql.go 1 the height-padding loop at 624, which appends while `len(lines) < e.height` and never stops once negated
 internal/ui/components/grid/table.go 6 the F-key page lookup and the row-padding loops
 internal/app/txn.go 10 the SQL lexer line-comment and blank loops
 internal/config/keybindings_groups.go 6 the group scan in digitRange
 internal/ui/bordered/bordered.go 8 the ANSI-escape scan
+internal/ui/components/gridpreview/preview.go 2
+internal/ui/components/querybrowser/querybrowser.go 1 the pad-to-fill loop at 319, whose `<` negated appends until the heap ends
+internal/ai/nl2sql/compatible.go 2 the scanner loops, whose negated guards never reach the end of input

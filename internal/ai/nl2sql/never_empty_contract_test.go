@@ -302,6 +302,8 @@ func TestTheStatementDetectorTellsProseFromSQL(t *testing.T) {
 		{"a sentence of explanation first", "The query you asked for is below.\n\nSELECT id FROM users", true},
 		{"a comment then the statement", "-- the busiest users\nSELECT 1", true},
 		{"a comment only, then the statement", "/* filter */\nSELECT 1", true},
+		{"a block comment and the statement on one line", "/* filter */ SELECT 1", true},
+		{"a parenthesised block comment and the statement", "/*(x)*/(SELECT 1)", true},
 		{"a parenthesised statement", "(SELECT 1)", true},
 		{"a double parenthesised statement", "((SELECT 1))", true},
 		{"the keyword after some indentation", "    SELECT 1", true},
@@ -322,6 +324,7 @@ func TestTheStatementDetectorTellsProseFromSQL(t *testing.T) {
 		{"SETTINGS is not SET", "SETTINGS table", false},
 		{"a word ending in a keyword is not a keyword", "MyRESET", false},
 		{"CREATED is not CREATE", "CREATED yesterday", false},
+		{"a digit inside the first word is not a keyword", "SELECT1 columns are not SQL", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := looksLikeSQL(tc.in); got != tc.want {
