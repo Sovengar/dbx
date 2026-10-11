@@ -277,3 +277,15 @@ ARITHMETIC_BASE internal/app/txn.go:423
 # over {/ * ' " $ a ␣ \n E \} plus 21 comment-boundary fixtures (identical), and by
 # the whole ./internal/app suite passing with the mutant applied.
 ARITHMETIC_BASE internal/app/txn.go:465
+
+# editor/sql.go:449 + explorerpreview/ere.go:369 — two clamps, the `x = <what x already is>` shape
+#
+# sql.go:449 `if e.cursorCol > lastCol` -> `>=`: the body assigns `e.cursorCol = lastCol`,
+#   which is the value the variable already holds in the case the mutant adds
+#   (cursorCol == lastCol), so the extra branch does nothing.
+# ere.go:369 `if scrollable < 0` -> `<= 0`: in the case the mutant adds (scrollable == 0)
+#   the body returns 0, which is what the function returns anyway.
+# Both survivors come from the lint rename commit; verified with each mutant applied
+# (sed), the whole editor and explorerpreview suites stay green.
+CONDITIONALS_BOUNDARY internal/ui/components/editor/sql.go:449
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:369
