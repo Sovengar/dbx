@@ -83,6 +83,10 @@ CONDITIONALS_BOUNDARY internal/ui/toast.go:78
 #   performs and nothing else: the same lines are read, the same over-limit line
 #   stops Scan, and no test can observe an allocation count. Equivalent, because the
 #   only number that gates behaviour -- maxLogLine -- is untouched by the mutant.
+#   Verified with the mutant applied: sha256 of parseEntries over 46 inputs (0 B to
+#   2 MiB, exact 4 KiB/64 KiB/1 MiB boundaries, over-limit, corrupt, CRLF) identical,
+#   whole ./internal/ai/session suite green.
+ARITHMETIC_BASE internal/ai/session/logger.go:308
 #
 # ARITHMETIC_BASE internal/ui/components/editor/autocomplete.go:174   `len(keywords)+len(functions)` -> `-`
 #
@@ -91,7 +95,10 @@ CONDITIONALS_BOUNDARY internal/ui/toast.go:78
 #   panic (verified: it yields an empty map), so the mutant differs only in how much
 #   memory is reserved before the two range loops insert every entry. The map that
 #   comes out is identical -- same keys, same values -- so every consumer, including
-#   the sorted a.all that SetKeywords derives from it, is identical too.
+#   the sorted a.all that SetKeywords derives from it, is identical too. Verified with
+#   the mutant applied: 7 differential map-pair cases (negative hint included) produce
+#   byte-identical output and the whole editor suite stays green.
+ARITHMETIC_BASE internal/ui/components/editor/autocomplete.go:174
 #
 # CONDITIONALS_NEGATION internal/ui/components/editor/autocomplete.go:324   `ctx.schema == "" && ctx.table == ""` (first conjunct)
 #
@@ -99,9 +106,13 @@ CONDITIONALS_BOUNDARY internal/ui/toast.go:78
 #   conjunct (`schema != ""`) fires only with schema set, table empty and no refs,
 #   and in exactly that state columnMatches falls through to its default branch,
 #   which walks the (empty) ctx.tables and returns false for every column -- so the
-#   guarded path and the fall-through both produce an empty list. The SECOND
-#   conjunct's mutant (table) is NOT equivalent and is killed by
-#   TestAnUnreachableQualifierStillOffersItsColumns; this entry covers the first.
+#   guarded path and the fall-through both produce an empty list. Verified with the
+#   mutant applied: 9 ctx-state differential cases, byte-identical, whole suite green.
+#   The SECOND conjunct's mutant (table) is NOT equivalent and is killed by
+#   TestColumnItemsOffersTheColumnsOfASchemaLessTable (sweep_autocomplete_test.go);
+#   the THIRD (len(tables)) is killed by the existing suite. A line-keyed entry
+#   accepts every mutant of the line, so both of those must keep their kill test.
+CONDITIONALS_NEGATION internal/ui/components/editor/autocomplete.go:324
 #
 # ARITHMETIC_BASE internal/ui/components/editor/autocomplete.go:677   `len(passed) - 1` -> `+`   (and its INVERT_NEGATIVES twin)
 #
@@ -110,8 +121,13 @@ CONDITIONALS_BOUNDARY internal/ui/toast.go:78
 #   `if len(phrase) > len(passed)-i { continue }`: for i in {len+1, len} the bound is
 #   -1 and -2, and every phrase has length >= 1, so both extra iterations skip
 #   before touching passed[i+k]. Execution resumes at i = len(passed)-1, the real
-#   start. Identical results for every input; INVERT_NEGATIVES on the same `-`
-#   produces the same mutant, hence the twin entry.
+#   start. Identical results for every input: 12 differential token cases (ORDER BY,
+#   LEFT OUTER JOIN, IS NOT, lowercase, empty) byte-identical under the mutant and the
+#   whole suite green. INVERT_NEGATIVES on the same `-` produces the same mutant, hence
+#   the twin entry. (The 677 HANG is the INCREMENT_DECREMENT mutant, already in
+#   .mutation-timeouts.)
+ARITHMETIC_BASE internal/ui/components/editor/autocomplete.go:677
+INVERT_NEGATIVES internal/ui/components/editor/autocomplete.go:677
 
 # ── gridpreview, round 31 ──────────────────────────────────────────────────
 #
@@ -248,3 +264,16 @@ INVERT_NEGATIVES internal/ui/components/explorerpreview/ere.go:553
 # {'"', ''', 'a', 'E', '\', ' ', '-', '\n', 'e'} (zero differing outputs) and by the
 # whole ./internal/app suite passing with the mutant applied.
 ARITHMETIC_BASE internal/app/txn.go:423
+
+# app/txn.go:465 — the block-comment closer's lookahead
+#
+# `i+1 < len(sql)` -> `i-1 < len(sql)`. Loop exit B (a real `*/`) satisfies the
+# original guard, so both versions do `i += 2` and are identical there. Exit A
+# (unterminated comment, including a degenerate `/*` at the very end) sets i to len
+# in the original and to len+1/len+2 in the mutant; `blankRange` clamps
+# `to > len(out)` (txn.go:382), so both blank [start, len) byte-identically, and the
+# outer `i < len(sql)` terminates for every one of those values -- i has no other
+# observer. Proven by sha256 of maskNonCode over ALL 177,156 strings of length <= 5
+# over {/ * ' " $ a ␣ \n E \} plus 21 comment-boundary fixtures (identical), and by
+# the whole ./internal/app suite passing with the mutant applied.
+ARITHMETIC_BASE internal/app/txn.go:465
