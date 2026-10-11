@@ -55,14 +55,14 @@ func TestCanonicalPath_MissingPathFallsBackToAbsolute(t *testing.T) {
 // share one identity and the scanner can collapse their projects.
 func TestCanonicalPath_ResolvesSymlinkToSameIdentity(t *testing.T) {
 	root := t.TempDir()
-	real := filepath.Join(root, "real")
-	mkGitRepo(t, real)
+	target := filepath.Join(root, "real")
+	mkGitRepo(t, target)
 	link := filepath.Join(root, "link")
-	if err := os.Symlink(real, link); err != nil {
-		t.Fatalf("symlink(%q, %q): %v", real, link, err)
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink(%q, %q): %v", target, link, err)
 	}
 
-	if a, b := canonicalPath(real), canonicalPath(link); a != b {
-		t.Errorf("canonicalPath(%q) = %q and canonicalPath(%q) = %q, want the same identity", real, a, link, b)
+	if a, b := canonicalPath(target), canonicalPath(link); a != b {
+		t.Errorf("canonicalPath(%q) = %q and canonicalPath(%q) = %q, want the same identity", target, a, link, b)
 	}
 }

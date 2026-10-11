@@ -318,8 +318,8 @@ func TestAskAndReport_ABadQueryIsReportedAsAQueryFailure(t *testing.T) {
 		{contains: "information_schema.tables", spec: rowsSpec{rows: [][]any{{"users", "BASE TABLE", 3}}}},
 		{contains: "information_schema.columns", spec: rowsSpec{rows: [][]any{{"id", "integer", "NO", nil}}}},
 	}}
-	conn.perStatement = []queryAnswer{{err: errors.New(`column "nmae" does not exist`)}}
-	provider := &stubProvider{name: "p", sql: "SELECT nmae FROM users"}
+	conn.perStatement = []queryAnswer{{err: errors.New(`column "nam" does not exist`)}}
+	provider := &stubProvider{name: "p", sql: "SELECT nam FROM users"}
 
 	var stdout, stderr bytes.Buffer
 	err := askAndReport(&stdout, &stderr, conn, provider, "names?", false)
@@ -329,7 +329,7 @@ func TestAskAndReport_ABadQueryIsReportedAsAQueryFailure(t *testing.T) {
 	if !strings.Contains(err.Error(), "query failed") {
 		t.Errorf("error = %v, want it to say the query failed, not that the model failed", err)
 	}
-	if !strings.Contains(err.Error(), "nmae") {
+	if !strings.Contains(err.Error(), "nam") {
 		t.Errorf("error = %v, want the driver's message with the offending name", err)
 	}
 }

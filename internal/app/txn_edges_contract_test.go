@@ -1,6 +1,6 @@
 package app
 
-// Scenario: El masker de literales y el arranque de una transaccion.
+// Scenario: The literal masker and the start of a transaction.
 //
 // Two things with the same shape: a guard that is only reachable through a dependency, and a
 // guard that is only reachable through a state the happy path never visits.

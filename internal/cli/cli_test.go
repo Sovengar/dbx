@@ -180,8 +180,9 @@ func (f *fakeConn) Ping(ctx context.Context) error {
 
 // Exec exists because postgres.Conn grew the method, not because a CLI path needs it.
 // This fake and pgxfake.Conn are two implementations of the same interface with overlapping
-// fixtures, which is the duplication worth fixing; pinned in TODO.md rather than collapsed
-// here, because collapsing it is a round of its own and this was only a compile error.
+// fixtures, which is the duplication worth fixing; pinned as a tsk task rather than
+// collapsed here, because collapsing it is a round of its own and this was only a
+// compile error.
 func (f *fakeConn) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	f.queried = append(f.queried, sql)
 	return pgconn.NewCommandTag("EXEC 1"), nil
@@ -215,7 +216,7 @@ func toAnyRows(vals []string) [][]any {
 
 // --- writeQueryResult --------------------------------------------------------
 
-// Scenario: La salida de texto son columnas de 20 celdas y un recuento.
+// Scenario: The text output is columns of 20 cells and a count.
 //
 // The exact bytes matter: this format is what scripts parsing `dbx query` read,
 // so a padding change or a lost trailing newline is a breaking change with no
@@ -294,7 +295,7 @@ func TestWriteQueryResult_TextShapeHandlesAnEmptyResult(t *testing.T) {
 	}
 }
 
-// Scenario: La salida JSON lleva columnas, filas y recuento.
+// Scenario: La salida JSON lleva columns, filas y recuento.
 //
 // The keys are the contract with whatever consumes `dbx query -j`.
 func TestWriteQueryResult_JSONShapeCarriesColumnsRowsAndCount(t *testing.T) {
@@ -689,7 +690,7 @@ func TestRunTUI_BuildsTheModelFromTheLoadedConfig(t *testing.T) {
 
 // --- execute -----------------------------------------------------------------
 
-// Scenario: El error de la línea de comandos sale de execute().
+// Scenario: The command-line error comes out of execute().
 //
 // This is why execute exists: `Execute` wraps it in os.Exit(1), which no test can
 // survive, so the decision has to be observable before the exit.

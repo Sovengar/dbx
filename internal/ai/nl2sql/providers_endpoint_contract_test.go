@@ -106,7 +106,7 @@ func TestANilContextIsRefusedBeforeAnythingIsSent(t *testing.T) {
 	for _, p := range everyProvider("http://127.0.0.1:1") {
 		t.Run(p.Name(), func(t *testing.T) {
 			//nolint:staticcheck // deliberately nil: that is the case under test
-			sql, err := p.Generate(nil, "q", "s") //nolint:staticcheck
+			sql, err := p.Generate(nil, "q", "s")
 			if err == nil {
 				t.Fatalf("%s: a nil context produced SQL %q and no error", p.Name(), sql)
 			}

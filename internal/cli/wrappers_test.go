@@ -177,7 +177,7 @@ func TestGetConnection_AnUnloadableConfigIsReportedAsSuch(t *testing.T) {
 
 // --- the RunE wrappers -------------------------------------------------------
 
-// Scenario: Cada comando propaga el fallo de conexión y cierra lo que abrió.
+// Scenario: Every command propagates the connection failure and closes what it opened.
 //
 // A wrapper that returned a zero value on failure would run a command against no
 // database and report "no rows", which is worse than an error.
@@ -212,7 +212,7 @@ func TestRunCommands_AllOfThemRefuseToRunWithoutAConnection(t *testing.T) {
 	}
 }
 
-// Scenario: Una conexión que sí se abre se cierra al terminar el comando.
+// Scenario: A connection that does open is closed when the command ends.
 //
 // Every command defers a Close, and leaking a connection per invocation is the kind
 // of bug that only shows up after a few hundred calls in a script.
@@ -334,7 +334,7 @@ func TestRunContext_WritesTheFileAndClosesTheConnection(t *testing.T) {
 	}
 }
 
-// Scenario: Si la exportación falla el comando falla.
+// Scenario: If the export fails, the command fails.
 //
 // A schema export that cannot read the schemas is not an empty schema, and
 // reporting "no schemas" would be a plausible lie.
@@ -566,7 +566,7 @@ func TestPostgresConn_RealConnectionSatisfiesTheInterface(t *testing.T) {
 
 // --- Execute, the last untestable statement ----------------------------------
 
-// Scenario: Un comando que falla imprime el error y sale con código 1.
+// Scenario: A command that fails prints the error and exits with code 1.
 //
 // This is the program's whole failure contract, and it is the one thing a test
 // could not see while the exit was a direct os.Exit call: the code would have had
@@ -602,7 +602,7 @@ func TestExecute_FailurePrintsTheErrorAndExitsOne(t *testing.T) {
 	}
 }
 
-// Scenario: Un comando que funciona no imprime nada ni sale.
+// Scenario: A command that works prints nothing and does not exit.
 //
 // The happy path matters as much: a version that always exited 1 would make every
 // successful run look like a failure, and one that always printed would corrupt

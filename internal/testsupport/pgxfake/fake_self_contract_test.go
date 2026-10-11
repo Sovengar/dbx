@@ -1,6 +1,6 @@
 package pgxfake
 
-// Scenario: El contrato del propio fake, que es codigo de PRODUCCION.
+// Scenario: The contract of the fake itself, which is PRODUCTION code.
 //
 // This package is not a test helper in the ordinary sense: internal/drivers/postgres's
 // tests and internal/app's tests both decide what is true by believing it. A fake that

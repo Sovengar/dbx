@@ -171,13 +171,3 @@ func TestTheScrollOffsetIsAlwaysLegal(t *testing.T) {
 		}
 	}
 }
-
-// max is here because the test file targets a Go version whose predeclared max would shadow
-// nothing but is worth being explicit about: this is a two-number comparison, not a
-// refactor.
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

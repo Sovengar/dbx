@@ -24,7 +24,7 @@ func press(t *testing.T, ep *ExportPicker, msg tea.KeyPressMsg) (tea.Cmd, bool) 
 	return ep.Update(msg)
 }
 
-// Scenario: El cursor recorre las tres opciones y se para en los dos extremos.
+// Scenario: The cursor walks the three options and stops at the two ends.
 //
 // The list is the whole picker, so the cursor has exactly one stop per option
 // and nowhere else. If the last stop were exclusive the CSV option would be
@@ -436,7 +436,7 @@ func TestExportPicker_KeepsTheContextItWasOpenedWith(t *testing.T) {
 	}
 }
 
-// Scenario: Tamaño y visibilidad son ajustes, no decisiones del render.
+// Scenario: Size and visibility are settings, not decisions of the render.
 //
 // The picker keeps width and height as state, and neither changes what it draws:
 // a modal is sized by its caller. Storing them without a single use is worth

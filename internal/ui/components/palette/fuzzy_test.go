@@ -271,7 +271,7 @@ func TestFuzzySort_EqualScoresKeepTheirInputOrder(t *testing.T) {
 	}
 }
 
-// Scenario: El alias rescues un comando cuyo nombre no coincide.
+// Scenario: The alias rescues a command whose name does not match.
 //
 // Plenty of commands are named for the menu ("Refresh Schema") and typed by
 // their short form ("rs"). Without the alias those would be unreachable, so
@@ -323,7 +323,7 @@ func TestFuzzySort_AliasOnlyRescuesAFullMiss(t *testing.T) {
 	}
 }
 
-// Scenario: Un comando que no coincide en ninguno de los dos nombres desaparece.
+// Scenario: A command that matches neither name disappears.
 //
 // Filtering is what turns a list of every command into a search result, so a
 // command that matches nothing must not be shown as a fallback row.
@@ -367,7 +367,7 @@ func TestFuzzySort_EmptyQueryKeepsEverythingInRegistryOrder(t *testing.T) {
 	}
 }
 
-// Scenario: El comando viaja entero, con su acción y su sección.
+// Scenario: The command travels whole, with its action and its section.
 //
 // fuzzySort reorders; it must not rebuild the commands. A copy that lost the
 // Action would make the palette run the wrong thing, and one that lost the

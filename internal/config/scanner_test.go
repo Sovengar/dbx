@@ -20,19 +20,18 @@ func scannerFor(root string, paths ...string) *Scanner {
 	return s
 }
 
-// withFakeFD pone un `fd` de mentira delante del real en el PATH del test: find(1)
-// con la misma forma de llamada que usa scanWithFD (--hidden --type f <regex> <raiz>),
-// incluidos los directorios ocultos que el WalkDir no entra.
+// withFakeFD puts a fake `fd` in front of the real one on the test's PATH: find(1)
+// with the same call shape scanWithFD uses (--hidden --type f <regex> <root>), the
+// hidden directories included that WalkDir does not enter.
 //
-// Los tests no dependen de lo que la maquina tenga instalado. Sin esto, en un runner
-// sin fd los tests que comparan las dos descubrimientos se saltan, sus bloques de
-// scanner.go quedan sin cubrir y el total de cobertura baja un 0.07% respecto a una
-// maquina con fd: dos numeros distintos para el mismo codigo, y el floor no puede ser
-// dos cosas a la vez.
+// The tests do not depend on what the machine has installed. Without this, on a runner
+// without fd the tests comparing the two discoveries skip, their blocks in scanner.go
+// stay uncovered and the coverage total drops 0.07% against a machine with fd: two
+// different numbers for the same code, and the floor cannot be two things at once.
 func withFakeFD(t *testing.T) {
 	t.Helper()
 	script := `#!/bin/sh
-# argumentos de scanWithFD: --hidden --type f <pattern> <root>
+# arguments of scanWithFD: --hidden --type f <pattern> <root>
 find "$5" -type f | grep -E "/$4"
 `
 	dir := t.TempDir()

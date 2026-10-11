@@ -237,8 +237,8 @@ func TestKeybindsPane_ZeroWidthRendersOneJoinedLine(t *testing.T) {
 	}
 }
 
-// Scenario: Una línea nunca excede el presupuesto de ancho (ancho - 2), porque el
-// borde del panel se come 2 columnas.
+// Scenario: A line never exceeds the width budget (width - 2), because the
+// panel border eats 2 columns.
 //
 // The fixture is tuned so the second segment would land at exactly 48 columns
 // against a 47-column budget: one column of slack, so any change to the reserved

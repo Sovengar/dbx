@@ -1,7 +1,7 @@
 package gridpreview
 
-// Scenario: La aritmetica del preview de JSON — la resolucion de rutas con puntos, el
-// parseo de una clave de una linea, y los clamps de ancho y de scroll.
+// Scenario: The arithmetic of the JSON preview — resolving dotted paths, parsing a
+// one-line key, and the width and scroll clamps.
 //
 // SetRow takes a []string of columns and a []interface{} row, and everything the preview
 // draws comes from walking the row as a tree of maps and slices. The path syntax is the

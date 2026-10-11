@@ -43,8 +43,8 @@ func exportSteps(schema, table string, tables [][]any, columns [][]any) []pgxfak
 
 // --- ExportSchema: the shape the model is given ------------------------------
 
-// Scenario: La exportación lleva base, esquemas, tablas, columnas, índices y
-// claves foráneas.
+// Scenario: The export carries the database, schemas, tables, columns, indexes and
+// foreign keys.
 //
 // This JSON is what a model is asked to write SQL against, so every field in it is
 // load-bearing: a missing index means it invents a slow query, a missing foreign
@@ -170,7 +170,7 @@ func TestExportSchema_SystemSchemasAreNotExported(t *testing.T) {
 	}
 }
 
-// Scenario: Una tabla sin columnas sigue apareciendo, y el error se descarta.
+// Scenario: A table without columns still shows up, and the error is discarded.
 //
 // Columns, indexes and foreign keys are read with their errors DISCARDED, unlike
 // the schema and table lists where a failure skips the schema. That asymmetry is

@@ -365,11 +365,11 @@ func NewERDiagramViewport(paneHeight, contentHeight int) *ERDiagramViewport {
 }
 
 func (v *ERDiagramViewport) MaxScroll() int {
-	max := v.ContentHeight - v.PaneHeight
-	if max < 0 {
+	scrollable := v.ContentHeight - v.PaneHeight
+	if scrollable < 0 {
 		return 0
 	}
-	return max
+	return scrollable
 }
 
 func (v *ERDiagramViewport) ScrollDown() {

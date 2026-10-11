@@ -141,7 +141,7 @@ func styledChar(style *ansi.Style, char string) string {
 func buildTopLine(style *ansi.Style, topLeft, topChar, topRight string, tlW, trW, innerWidth, align int, title string) string {
 	// Strip ANSI from title to get display width — NEVER use len()
 	titleDisplay := ansi.Strip(title)
-	titleWidth := ansi.StringWidth(string(titleDisplay))
+	titleWidth := ansi.StringWidth(titleDisplay)
 
 	// If title is wider than inner width, truncate it
 	if titleWidth > innerWidth {
@@ -183,7 +183,7 @@ func buildBottomLine(style *ansi.Style, bottomLeft, bottomChar, bottomRight stri
 
 	// Strip ANSI from footer to get display width
 	footerDisplay := ansi.Strip(footer)
-	footerWidth := ansi.StringWidth(string(footerDisplay))
+	footerWidth := ansi.StringWidth(footerDisplay)
 
 	// If footer is wider than inner width, truncate it
 	if footerWidth > innerWidth {

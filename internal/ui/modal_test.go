@@ -121,8 +121,8 @@ func widestLine(t *testing.T, view string) int {
 	return widest
 }
 
-// Scenario: El modal ocupa el 70% del ancho, acotado a un mínimo y un máximo
-// legibles, y descuenta 4 columnas de marco. The clamps and the -4 are the
+// Scenario: The modal takes 70% of the width, bounded by a readable minimum
+// and maximum, and subtracts 4 columns of frame. The clamps and the -4 are the
 // modal's whole layout contract, so they get pinned instead of eyeballed.
 func TestHelpModal_WidthIsSeventyPercentClamped(t *testing.T) {
 	clamp := func(w int) int {

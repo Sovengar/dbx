@@ -94,7 +94,7 @@ func TestDataTypeOID_OIDsThatShareANameShareAMapping(t *testing.T) {
 
 // --- ExecuteQuery ------------------------------------------------------------
 
-// Scenario: Un resultado trae sus columnas, sus filas y su recuento.
+// Scenario: Un resultado trae sus columns, sus filas y su recuento.
 //
 // The count is the number of rows actually read, not the number the server said,
 // so it stays right when a statement returns fewer rows than expected.

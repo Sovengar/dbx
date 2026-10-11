@@ -504,7 +504,7 @@ func TestRenderBox_EveryLineIsExactlyTheRequestedWidthAndTheNameIsCentred(t *tes
 	}
 }
 
-// Scenario: La caja central dice qué columnas tiene y de qué clase son.
+// Scenario: The central box says which columns it has and what class they are.
 //
 // A column line is `badge + name + " " + datatype`, and the badge is "PK ", "FK " or
 // three spaces — always three cells, so every column line starts at the same offset
@@ -565,7 +565,7 @@ func TestRenderBox_ColumnLinesCarryTheirBadgeNameAndType(t *testing.T) {
 	}
 }
 
-// Scenario: Una caja central sin columnas conserva el divisor, aunque no haya nada debajo.
+// Scenario: A central box without columns keeps the divider, even with nothing below it.
 //
 // The name is followed by the divider that separates it from the column list, whether or
 // not there is a column list. With no columns the divider sits directly above the bottom
@@ -590,7 +590,7 @@ func TestRenderBox_WithNoColumnsIsAFrameAroundTheName(t *testing.T) {
 	}
 }
 
-// Scenario: El asterisco de junction es su propia línea, debajo de las columnas.
+// Scenario: The junction asterisk is its own line, below the columns.
 //
 // A junction table is drawn with a lone "  *" row after its columns, so the marker is
 // below the data rather than next to the name. It is two spaces then the star, which
@@ -1222,7 +1222,7 @@ func pk(columns ...string) postgres.ConstraintInfo {
 	return postgres.ConstraintInfo{Type: "PRIMARY KEY", Columns: strings.Join(columns, ", ")}
 }
 
-// Scenario: La caja central enseña las columnas PK y FK, y solo esas.
+// Scenario: The central box shows the PK and FK columns, and only those.
 //
 // The centre box is the one that answers "how does this table key and join", so it
 // shows the columns that take part in a key or a reference and leaves the rest out. A
@@ -1269,7 +1269,7 @@ func TestBuildERDiagram_TheCentreShowsKeyAndReferenceColumnsOnly(t *testing.T) {
 	}
 }
 
-// Scenario: Una tabla sin claves enseña todas sus columnas.
+// Scenario: Una tabla sin claves enseña todas sus columns.
 //
 // The fallback: a table with no primary key and no foreign keys would otherwise draw an
 // empty frame, which tells the reader nothing about the table at all. Showing every
@@ -1355,7 +1355,7 @@ func TestBuildERDiagram_AJunctionCentreTableIsMarked(t *testing.T) {
 	}
 }
 
-// Scenario: Una clave compuesta cuenta TODAS sus columnas.
+// Scenario: Una clave compuesta cuenta TODAS sus columns.
 //
 // A composite primary key is written as one constraint with a comma-separated column
 // list, and every column in it is a key column. Reading only the first would badge one
@@ -1448,7 +1448,7 @@ func TestBuildERDiagram_TheHubCapIsSymmetricAndExact(t *testing.T) {
 	})
 }
 
-// Scenario: Una tabla aparece UNA vez, aunque la referencie con varias columnas.
+// Scenario: Una tabla aparece UNA vez, aunque la referencie con varias columns.
 //
 // Two foreign keys from the same table are two columns of the same relationship, and
 // the diagram draws relationships between TABLES. Listing the table twice would show
@@ -1608,7 +1608,7 @@ func TestRenderERDiagram_OnlyATotallyIsolatedTableGetsTheEmptySentence(t *testin
 	}
 }
 
-// Scenario: Las dos columnas usan la mitad del ancho, MENOS un gutter de dos.
+// Scenario: Las dos columns usan la mitad del ancho, MENOS un gutter de dos.
 //
 // The neighbour columns split the pane between them with a two-space gutter down the
 // middle. So each column is (paneWidth-4)/2: the four cells are the outer margin and

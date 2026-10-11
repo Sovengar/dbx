@@ -281,7 +281,7 @@ func TestFindColumns_ACannotListSchemasIsReportedAsSuch(t *testing.T) {
 	}
 }
 
-// Scenario: Un error al leer las columnas de un esquema se salta al siguiente.
+// Scenario: Un error al leer las columns de un esquema se salta al siguiente.
 //
 // Same reasoning as the table listing: one bad schema must not end the search.
 func TestFindColumns_AnUnreadableColumnListMovesOn(t *testing.T) {
@@ -295,7 +295,7 @@ func TestFindColumns_AnUnreadableColumnListMovesOn(t *testing.T) {
 	}
 }
 
-// Scenario: `dbx list columns` imprime el bloque de columnas con sus anotaciones.
+// Scenario: `dbx list columns` imprime el bloque de columns con sus anotaciones.
 //
 // NULL marks a nullable column and DEFAULT prints the default expression; both are
 // what a user needs to write an INSERT by hand.

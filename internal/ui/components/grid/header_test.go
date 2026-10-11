@@ -307,7 +307,7 @@ func TestHeader_CellWidthComesFromTheColumnNotTheFallback(t *testing.T) {
 	}
 }
 
-// Scenario: Se dibujan exactamente las columnas pedidas, ni una más.
+// Scenario: Se dibujan exactamente las columns pedidas, ni una más.
 //
 // Render(startCol, count) is a window, and the caller passes the number of
 // visible columns. Drawing one extra would push the row of data out of
@@ -347,7 +347,7 @@ func TestHeader_RendersExactlyTheRequestedNumberOfColumns(t *testing.T) {
 	}
 }
 
-// Scenario: Una ventana en scroll muestra las columnas por su índice absoluto.
+// Scenario: Una ventana en scroll muestra las columns por su índice absoluto.
 //
 // Key icons and the sort arrow are keyed by the ABSOLUTE column index, so a
 // horizontally scrolled grid decorates the right column rather than the first
@@ -375,7 +375,7 @@ func TestHeader_ScrolledWindowDecoratesTheAbsoluteColumn(t *testing.T) {
 	}
 }
 
-// Scenario: SortColumn solo responde para un índice dentro de las columnas.
+// Scenario: SortColumn solo responde para un índice dentro de las columns.
 //
 // The header is created with sortCol -1, meaning "no sort", and -1 is not a
 // valid index. A cleared sort and an out-of-range sort are both "no column",
@@ -474,7 +474,7 @@ func TestHeader_TruncatingTextThatAlreadyFitsChangesNothing(t *testing.T) {
 	}
 }
 
-// Scenario: Sin columnas, o sin celdas pedidas, la cabecera no dibuja nada.
+// Scenario: Sin columns, o sin celdas pedidas, la cabecera no dibuja nada.
 //
 // Both are ordinary states, not errors: a table with no columns, and a grid too
 // narrow to show any. Returning anything other than an empty string would paint

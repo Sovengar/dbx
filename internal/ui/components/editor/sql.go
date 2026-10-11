@@ -445,9 +445,9 @@ func (e *SQLEditor) deleteForward() {
 }
 
 func (e *SQLEditor) clampCol() {
-	max := len(e.lines[e.cursorRow])
-	if e.cursorCol > max {
-		e.cursorCol = max
+	lastCol := len(e.lines[e.cursorRow])
+	if e.cursorCol > lastCol {
+		e.cursorCol = lastCol
 	}
 }
 

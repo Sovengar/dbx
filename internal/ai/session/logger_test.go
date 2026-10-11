@@ -574,7 +574,7 @@ func TestCleanup_DeletesEveryOldFileWhatextensionItHas(t *testing.T) {
 	}
 }
 
-// Scenario: Cleanup no toca los directorios, por viejos que estén.
+// Scenario: Cleanup leaves the directories alone, however old they are.
 //
 // A subdirectory in the session dir is skipped rather than removed. Removing a
 // directory with `os.Remove` only works when it is empty, so the guard is what keeps

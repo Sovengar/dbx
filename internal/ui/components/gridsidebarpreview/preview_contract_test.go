@@ -127,7 +127,7 @@ func TestPreview_WithoutARowItSaysNoData(t *testing.T) {
 	})
 }
 
-// Scenario: Una fila con MENOS valores que columnas muestra los que tiene.
+// Scenario: Una fila con MENOS valores que columns muestra los que tiene.
 //
 // A projection can return fewer values than the result has columns, so the row is shorter
 // than the header. The pairing walks the COLUMNS and takes what is there, which means the

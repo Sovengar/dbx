@@ -1,6 +1,6 @@
 package app
 
-// Scenario: Cada llave de configuracion que se declara, HACE algo.
+// Scenario: Every configuration key that is declared DOES something.
 //
 // Seven settings were declared in the config struct, given defaults, and read by nothing
 // at all. A user who set one got no effect and no message: the file said `statusbar_help =

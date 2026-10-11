@@ -65,8 +65,8 @@ func TestRouter_FocusPaneSetsTheFocus(t *testing.T) {
 	}
 }
 
-// Scenario: CycleFocus recorre los dos paneles cyclables y vuelve al punto de
-// partida.
+// Scenario: CycleFocus walks the two cyclable panels and returns to the
+// starting point.
 //
 // Only the explorer and the grid are in the cycle: the editor and the two
 // preview panes are cycled out of deliberately, so reaching them by cycling

@@ -454,7 +454,7 @@ func TestPalette_TheCursorStaysInsideTheFilteredList(t *testing.T) {
 // P4: enter selects, and the selection is the highlighted row
 // ---------------------------------------------------------------------------
 
-// Scenario: Enter elige lo que esta RESALTADO, y devuelve un comando ejecutable.
+// Scenario: Enter picks what is HIGHLIGHTED and returns an executable command.
 //
 // The returned tea.Cmd is the only output of the whole widget, so it is asserted by
 // running it: a command that returns nil, or the wrong action, or a message that does not
@@ -541,7 +541,7 @@ func TestPalette_EnterRunsTheHighlightedCommand(t *testing.T) {
 // P4: what is drawn
 // ---------------------------------------------------------------------------
 
-// Scenario: Los comandos se agrupan por SECCION, en un orden fijo.
+// Scenario: The commands are grouped by SECTION, in a fixed order.
 //
 // The grouping is the palette's whole navigability: a flat list of twenty entries is a
 // list you have to read, and a grouped one is a list you can jump around. The order is a

@@ -318,7 +318,7 @@ func TestListColumns_KeepsNullableAndDefault(t *testing.T) {
 
 // --- the by-schema maps ------------------------------------------------------
 
-// Scenario: Las columnas de un esquema se agrupan por tabla, en orden.
+// Scenario: Las columns de un esquema se agrupan por tabla, en orden.
 //
 // Grouping is what lets LoadDatabase attach columns to the right table in one pass
 // instead of one query per table, and the order inside a group is the column
@@ -351,7 +351,7 @@ func TestListColumnsBySchema_GroupsByTablePreservingOrder(t *testing.T) {
 	}
 }
 
-// Scenario: Un esquema sin columnas da un mapa vacío, no un error.
+// Scenario: Un esquema sin columns da un mapa vacío, no un error.
 //
 // An empty map and a nil map both range as nothing, and the caller's next step is
 // the same either way. What matters is that it is not an error.
@@ -446,7 +446,7 @@ func loadConn(tables map[string][][]any) *pgxfake.Conn {
 	}}
 }
 
-// Scenario: El árbol tiene base, esquemas, tablas y columnas, y solo lo del usuario.
+// Scenario: El árbol tiene base, esquemas, tablas y columns, y solo lo del usuario.
 //
 // The shape is what the explorer renders, so it is asserted as a tree and not as a
 // set of queries. The system schemas are dropped here even though the server was
@@ -548,7 +548,7 @@ func TestLoadDatabase_BuildsTheTreeWithoutSystemSchemas(t *testing.T) {
 	}
 }
 
-// Scenario: Una tabla sin columnas sigue apareciendo, sin hijos.
+// Scenario: Una tabla sin columns sigue apareciendo, sin hijos.
 //
 // A table the column query did not return is still a table. Dropping it would make
 // the explorer disagree with `dbx list tables`, and a user comparing the two would
@@ -931,7 +931,7 @@ func TestSchemaText_SeparatesSchemasWithABlankLine(t *testing.T) {
 	}
 }
 
-// Scenario: Una tabla sin columnas aparece igual, con su recuento.
+// Scenario: Una tabla sin columns aparece igual, con su recuento.
 //
 // The model needs to know the table exists and roughly how big it is even if the
 // column query returned nothing. Dropping the table would make a table invisible

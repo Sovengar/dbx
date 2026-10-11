@@ -244,8 +244,8 @@ func TestTheConnectionIsLoggedByNameAndTheFailureByNothing(t *testing.T) {
 		m := connecting(t)
 		m.project = &config.FoundProject{Name: "STALE", Path: t.TempDir(), Active: true}
 
-		real := &config.FoundProject{Name: "shopdb", Path: t.TempDir(), Active: true}
-		out, _ := fold(m, dbConnectedMsg{conn: conn, project: real})
+		live := &config.FoundProject{Name: "shopdb", Path: t.TempDir(), Active: true}
+		out, _ := fold(m, dbConnectedMsg{conn: conn, project: live})
 
 		if out.project == nil || out.project.Name != "shopdb" {
 			t.Errorf("the model kept the project %+v, want the one the message named", out.project)

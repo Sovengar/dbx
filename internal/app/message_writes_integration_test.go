@@ -1,7 +1,7 @@
 package app
 
-// Scenario: Los mensajes queelets hacen algo irreversible se ejecutan con los argumentos
-// que llevan, y se detienen en el primer fallo.
+// Scenario: The messages that let something irreversible happen run with the
+// arguments they carry, and stop at the first failure.
 //
 // Four handlers write to the database or move the user somewhere they did not choose to go.
 // Three of them run SQL with bound arguments — a grid commit, a pending-row commit and an

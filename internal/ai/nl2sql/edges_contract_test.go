@@ -1,6 +1,6 @@
 package nl2sql
 
-// Scenario: Los bordes de la deteccion de config y de la extraccion de SQL de un modelo.
+// Scenario: The edges of config detection and of SQL extraction from a model.
 //
 // Three functions, three different reasons their last branch had no test:
 //

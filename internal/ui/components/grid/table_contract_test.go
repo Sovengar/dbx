@@ -368,7 +368,7 @@ func TestGrid_TheColumnWindowAlwaysContainsTheCursorColumn(t *testing.T) {
 	}
 }
 
-// Scenario: Las columnas horizontalmente ENVUELTAN, no se detienen.
+// Scenario: Las columns horizontalmente ENVUELTAN, no se detienen.
 //
 // Right from the last column goes to the first AND resets the window; left from
 // the first goes to the last. So a cursor on a one-column grid moves right and
@@ -429,14 +429,14 @@ func TestGrid_ColumnWidthsAreCappedAndTheVisibleSetFits(t *testing.T) {
 
 				// Every column has a width, they are all at least the
 				// floor, and none is wider than the cap.
-				cap := (width - 2) / max(min(nCols, 5), 1)
-				cap = max(cap, 10)
+				colCap := (width - 2) / max(min(nCols, 5), 1)
+				colCap = max(colCap, 10)
 				for i, w := range g.widths {
 					if w < 6 {
 						t.Errorf("column %d is %d cells wide, want at least 6", i, w)
 					}
-					if w > cap {
-						t.Errorf("column %d is %d cells wide, over the cap of %d for %d columns in a %d-cell pane", i, w, cap, nCols, width)
+					if w > colCap {
+						t.Errorf("column %d is %d cells wide, over the cap of %d for %d columns in a %d-cell pane", i, w, colCap, nCols, width)
 					}
 				}
 
@@ -716,8 +716,8 @@ func TestGrid_RowsAreTheWindowOntoTheDataInOrder(t *testing.T) {
 
 					// Real rows first, from the window, capped by the
 					// height.
-					real := min(nRows-scrollRow, ch)
-					for i := range real {
+					visible := min(nRows-scrollRow, ch)
+					for i := range visible {
 						want := marker(scrollRow+i, 0)
 						if !strings.Contains(ansi.Strip(block[i]), want) {
 							t.Errorf("row line %d carries %q, want the first column of row %d (%q):\n%s",
@@ -725,12 +725,12 @@ func TestGrid_RowsAreTheWindowOntoTheDataInOrder(t *testing.T) {
 						}
 					}
 					// Then the inserts, while there is room.
-					pend := min(2, max(ch-real, 0))
+					pend := min(2, max(ch-visible, 0))
 					for i := range pend {
 						want := fmt.Sprintf("p%dc0", i)
-						if !strings.Contains(ansi.Strip(block[real+i]), want) {
+						if !strings.Contains(ansi.Strip(block[visible+i]), want) {
 							t.Errorf("insert line %d carries %q, want %q: pending inserts are drawn BELOW the real rows:\n%s",
-								i, ansi.Strip(block[real+i]), want, strings.Join(out, "\n"))
+								i, ansi.Strip(block[visible+i]), want, strings.Join(out, "\n"))
 						}
 					}
 					// The block is exactly the height: rows, then
@@ -740,9 +740,9 @@ func TestGrid_RowsAreTheWindowOntoTheDataInOrder(t *testing.T) {
 					}
 					// A blank line where a row should be would be an
 					// iteration that advanced without drawing.
-					for i := range real + pend {
+					for i := range visible + pend {
 						if ansi.Strip(block[i]) == "" {
-							t.Errorf("row line %d is blank although %d rows should be drawn", i, real+pend)
+							t.Errorf("row line %d is blank although %d rows should be drawn", i, visible+pend)
 						}
 					}
 				})
@@ -1326,7 +1326,7 @@ func TestBuildDeleteQuery_KeysOnThePrimaryKeyWhenThereIsOne(t *testing.T) {
 	})
 }
 
-// Scenario: Las columnas de clave primaria se SACAN de las restricciones.
+// Scenario: Las columns de clave primaria se SACAN de las restricciones.
 //
 // Three filters in one function, and all three are silent when wrong: the
 // constraint TYPE, the composite split, and the requirement that the name is a
@@ -1371,7 +1371,7 @@ func TestGrid_PrimaryKeyColumnsComeFromTheConstraints(t *testing.T) {
 	}
 }
 
-// Scenario: Una lista de columnas se parte por comas, sin huecos.
+// Scenario: Una lista de columns se parte por comas, sin huecos.
 //
 // The column list comes from information_schema and has its own formatting, so
 // the splitter has to tolerate the spaces and the trailing comma that shows up
@@ -3157,7 +3157,7 @@ func TestGrid_AnOffScreenEditedColumnDrawsAsAnOrdinaryRow(t *testing.T) {
 // Window and cursor clamps
 // ---------------------------------------------------------------------------
 
-// Scenario: La ventana se ajusta SIEMPRE al cursor, incluso si el indice estaba corrupto.
+// Scenario: The window ALWAYS resizes to the cursor, even if the index was corrupt.
 //
 // syncScroll is called after every width change and every horizontal move, and it
 // is the only thing standing between a stale index and a panic on g.widths[i]. Both
@@ -4197,7 +4197,7 @@ func TestGrid_ReloadingTheSameTableKeepsTheFilterAndSort(t *testing.T) {
 	}
 }
 
-// Scenario: Las columnas marcadas son las de la constraint, y las demas no.
+// Scenario: Las columns marcadas son las de la constraint, y las demas no.
 //
 // The key icons are the * marker in the header and the +2 of column width the icons
 // reserve. A column marked because it is part of a UNIQUE constraint would be a lie
@@ -4564,7 +4564,7 @@ func TestGrid_TheFirstRowCanBeEdited(t *testing.T) {
 	}
 }
 
-// Scenario: La busqueda de columna deja la vista dos columnas ANTES del resultado.
+// Scenario: La busqueda de columna deja la vista dos columns ANTES del resultado.
 //
 // The jump puts the matched column two from the left edge, so the reader can see
 // what it is next to. A window that stopped exactly on the match would be a worse
@@ -5412,7 +5412,7 @@ func TestGrid_AColumnWiderThanThePaneKeepsTheWindowOnIt(t *testing.T) {
 	}
 }
 
-// Scenario: Las columnas que llenan el panel EXACTAMENTE se recuperan a la izquierda.
+// Scenario: Las columns que llenan el panel EXACTAMENTE se recuperan a la izquierda.
 //
 // The expand-left loop stops when one more column would not fit. At exactly filling
 // the pane, that last column DOES fit — so the window reaches the leftmost column it
@@ -5657,7 +5657,7 @@ func TestGrid_APageDrawsItsOwnRowsAndNoMore(t *testing.T) {
 // Every offset at once
 // ---------------------------------------------------------------------------
 
-// Scenario: Con pagina, scroll Y columnas, cada indice cuenta las tres.
+// Scenario: Con pagina, scroll Y columns, cada indice cuenta las tres.
 //
 // Three offsets are added to name the row the user is looking at: the page's, the
 // window's within the page, and the cursor's within the drawn block. And a fourth —
@@ -5804,7 +5804,7 @@ func mustNotPanic(t *testing.T, what string, f func()) {
 	f()
 }
 
-// Scenario: Una fila con MAS celdas que columnas no se sale de la lista de anchos.
+// Scenario: Una fila con MAS celdas que columns no se sale de la lista de anchos.
 //
 // calculateWidths sizes the width list from the COLUMN list and then walks each row,
 // guarding against a row that is longer than the columns describe. That mismatch is

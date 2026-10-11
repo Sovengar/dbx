@@ -492,7 +492,7 @@ func TestStripJSONCConvertsCommentsWithoutTouchingStrings(t *testing.T) {
 // C5: the opencode config reader
 // ---------------------------------------------------------------------------
 
-// Scenario: El lector de opencode entiende LAS DOS versiones y busca donde dice.
+// Scenario: The opencode reader understands BOTH versions and looks where it says.
 //
 // Two schemas, two spellings, two file names — and this is a user's own agent config,
 // which is full of comments. Getting it wrong does not crash: it returns "" and dbx

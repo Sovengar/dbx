@@ -439,8 +439,8 @@ func TestToastManager_WideRunesWidenTheToast(t *testing.T) {
 	}
 }
 
-// Scenario: El texto se parte contra el ancho del toast menos las 4 columnas
-// del marco, no contra el mensaje.
+// Scenario: The text is split against the toast width minus the 4 columns of
+// the frame, not against the message.
 //
 // The toast is sized to fit its message, so an uncapped toast always has more
 // budget than text and never wraps. Wrapping only happens once the toast hits

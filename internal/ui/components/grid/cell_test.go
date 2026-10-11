@@ -82,7 +82,7 @@ func sumWidths(ws []int) int {
 	return total
 }
 
-// Scenario: Una fila mide exactamente la suma de las anchuras de sus columnas.
+// Scenario: Una fila mide exactamente la suma de las anchuras de sus columns.
 //
 // The row IS the grid's geometry: the cells are concatenated and drawn inside a
 // box whose width was computed from the same column widths. A row that is one cell
@@ -330,7 +330,7 @@ func TestEditRowRenderers_PutTheCursorInTheEditedColumn(t *testing.T) {
 				// assertion wrong the first time.
 				var wantText strings.Builder
 				for i, v := range values {
-					text := string(v.(string))
+					text := v.(string)
 					if i == editCol {
 						text = shown
 					}

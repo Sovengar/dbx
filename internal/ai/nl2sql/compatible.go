@@ -102,7 +102,7 @@ const defaultOpenCodeBaseURL = "https://opencode.ai/zen/go/v1"
 func DetectOpenCodeConfig() (apiKey, model, baseURL string, found bool) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return
+		return "", "", "", false
 	}
 
 	// Check environment variables first
@@ -148,7 +148,7 @@ func DetectOpenCodeConfig() (apiKey, model, baseURL string, found bool) {
 		model = "mimo-v2.5"
 	}
 
-	return
+	return apiKey, model, baseURL, found
 }
 
 // detectOpenCodeBaseURL reads the opencode config and returns a configured
@@ -421,13 +421,13 @@ func (p *PiProvider) Generate(ctx context.Context, prompt string, schema string)
 func DetectJCodeConfig() (provider, apiKey, model, baseURL string, found bool) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return
+		return "", "", "", "", false
 	}
 
 	configPath := filepath.Join(home, ".jcode", "config.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return
+		return "", "", "", "", false
 	}
 
 	var cfg struct {
@@ -439,7 +439,7 @@ func DetectJCodeConfig() (provider, apiKey, model, baseURL string, found bool) {
 	}
 
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return
+		return "", "", "", "", false
 	}
 
 	// Which provider to use when several hold a key. The config is decoded into a
@@ -475,5 +475,5 @@ func DetectJCodeConfig() (provider, apiKey, model, baseURL string, found bool) {
 	// suggest an override that is not there.
 	model = cfg.Model
 
-	return
+	return provider, apiKey, model, baseURL, found
 }

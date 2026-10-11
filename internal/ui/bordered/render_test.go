@@ -32,8 +32,8 @@ func allEqual(widths []int, want int) bool {
 	return len(widths) > 0
 }
 
-// Scenario: Una caja con título y contenido sale con exactamente `width`
-// columnas en cada línea, y con una línea de borde arriba y otra abajo.
+// Scenario: A box with title and content comes out with exactly `width`
+// columns per line, and one border line above and one below.
 func TestRenderWithTitle_BoxIsExactlyWidthWide(t *testing.T) {
 	const width = 30
 	got := RenderWithTitle(lipgloss.RoundedBorder(), nil, " Title ", "hello", width, 0)
@@ -330,7 +330,7 @@ func TestRenderWithTitle_MinimumWidthIsNotClampedUp(t *testing.T) {
 	}
 }
 
-// Scenario: Un interior de 0 columnas trunca el título sin romper la caja.
+// Scenario: A 0-column interior truncates the title without breaking the box.
 //
 // `titleWidth > innerWidth` guards the truncation, so with a zero-width interior
 // the boundary is what matters: an empty title is already zero-width and passes
@@ -584,9 +584,9 @@ func TestRenderWithTitle_BorderColorAppliesToFrameOnly(t *testing.T) {
 	}
 }
 
-// Scenario: Las cuatro variantes públicas producen la misma caja cuando los
-// argumentos coinciden. They are thin wrappers over renderBox, and a drifted
-// wrapper would silently change the panel's look.
+// Scenario: The four public variants produce the same box when the arguments
+// match. They are thin wrappers over renderBox, and a drifted wrapper would
+// silently change the panel's look.
 func TestRenderWithTitle_VariantsAgree(t *testing.T) {
 	b := lipgloss.RoundedBorder()
 	const width = 24

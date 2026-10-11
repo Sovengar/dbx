@@ -1,7 +1,7 @@
 package config
 
-// Scenario: La identidad de un repo git se deriva SIN ejecutar git, y un worktree
-// comparte identidad con su repo.
+// Scenario: The identity of a git repo is derived WITHOUT running git, and a worktree
+// shares identity with its repo.
 //
 // This is the whole reason the file exists. Spawning `git rev-parse` would be simpler,
 // but it costs a process per directory scanned and it is unavailable in the container
@@ -86,7 +86,7 @@ func TestASubdirectoryOfTheRepoHasTheSameIdentity(t *testing.T) {
 	}
 }
 
-// Scenario: Un worktree enlazado comparte identidad con su repo principal.
+// Scenario: A linked worktree shares identity with its main repo.
 func TestALinkedWorktreeSharesItsReposIdentity(t *testing.T) {
 	root := t.TempDir()
 
@@ -386,15 +386,15 @@ func TestCanonicalPathResolvesSymlinks(t *testing.T) {
 	// Without this, the same project reached by two paths — a symlinked $HOME and the
 	// real one — would be two projects with two histories.
 	root := t.TempDir()
-	real := filepath.Join(root, "real")
-	mustMkdir(t, real)
+	target := filepath.Join(root, "real")
+	mustMkdir(t, target)
 
 	link := filepath.Join(root, "link")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlinks are unavailable here: %v", err)
 	}
 
-	if canonicalPath(link) != canonicalPath(real) {
-		t.Errorf("a symlink and its target have identities %q and %q", canonicalPath(link), canonicalPath(real))
+	if canonicalPath(link) != canonicalPath(target) {
+		t.Errorf("a symlink and its target have identities %q and %q", canonicalPath(link), canonicalPath(target))
 	}
 }

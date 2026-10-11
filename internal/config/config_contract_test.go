@@ -37,7 +37,7 @@ func hasField(t reflect.Type, name string) bool {
 	return false
 }
 
-// Scenario: Los directorios son ABSOLUTOS o no son nada.
+// Scenario: The directories are ABSOLUTE or they are nothing.
 //
 // A relative path is not a smaller version of an absolute one — it names a different
 // place, chosen by whoever launched the process. This is not hypothetical: dbx is a TUI

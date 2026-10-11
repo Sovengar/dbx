@@ -159,8 +159,8 @@ func TestTheSessionListingSkipsAFileItCannotStat(t *testing.T) {
 	dir := t.TempDir()
 	// A real session file, so the listing has something to return alongside the entry it
 	// cannot stat — and so "the listing is empty" is distinguishable from "it skipped one".
-	real := "2020-06-15"
-	if err := os.WriteFile(path.Join(dir, real+".jsonl"), []byte("{}\n"), 0o644); err != nil {
+	stamp := "2020-06-15"
+	if err := os.WriteFile(path.Join(dir, stamp+".jsonl"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -168,7 +168,7 @@ func TestTheSessionListingSkipsAFileItCannotStat(t *testing.T) {
 	r.readDir = func(string) ([]os.DirEntry, error) {
 		return []os.DirEntry{
 			unstattableEntry{name: "vanished.jsonl"},
-			staleEntry{name: real + ".jsonl", age: time.Hour},
+			staleEntry{name: stamp + ".jsonl", age: time.Hour},
 			// And one whose NAME is not a date at all, which is the other continue in the
 			// loop: a stray file in the session directory is not a session.
 			staleEntry{name: "notes.txt", age: time.Hour},
@@ -183,7 +183,7 @@ func TestTheSessionListingSkipsAFileItCannotStat(t *testing.T) {
 	if len(sessions) != 1 {
 		t.Fatalf("the listing returned %d sessions, want the one real date", len(sessions))
 	}
-	want, err := time.Parse("2006-01-02", real)
+	want, err := time.Parse("2006-01-02", stamp)
 	if err != nil {
 		t.Fatal(err)
 	}

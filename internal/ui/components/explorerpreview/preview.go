@@ -501,7 +501,7 @@ func formatTime(t *time.Time) string {
 	return t.Format("2006-01-02 15:04:05")
 }
 
-//nolint:unused // debug helper kept per AGENTS.md
+// Kept per AGENTS.md as a debug helper: it renders the diagram the ERE viewport draws.
 func debugLogERE(diagram *ERDiagram, selectedIdx int) {
 	centerColsPKFK := 0
 	for _, col := range diagram.Center.Columns {
