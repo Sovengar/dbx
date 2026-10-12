@@ -276,16 +276,21 @@ func TestTheCursorAlwaysIndexesARowThatExists(t *testing.T) {
 		}
 	})
 
-	t.Run("the TREE windows itself to its height, and the PANE is clipped on top of that", func(t *testing.T) {
+	t.Run("the TREE windows itself to its height, and the PANE is exactly the height it was given", func(t *testing.T) {
 		// Two separate guarantees, and they are separate because they are
 		// enforced in two places.
 		//
 		// The tree's own window is `if height > 0 && end > start+height`, and
 		// Explorer.SetHeight(h) hands the tree h-2 — so for h < 2 the tree's
 		// height is NEGATIVE and the tree renders its whole list. That is
-		// wasteful, not visible: bordered.RenderWithTitleEx clips to h+2, so the
-		// pane is right anyway. Asserted on both so a future change to either
-		// half knows the other one is holding it up.
+		// wasteful, not visible: the border is what sizes the pane.
+		//
+		// The pane itself is a bordered box whose `height` is the TOTAL height
+		// in lines, borders included (see bordered.renderBox). View() passes
+		// e.height — the same number SetHeight was given — exactly like
+		// Grid.View. So the rendered pane is the height the caller asked for,
+		// which is what keeps it flush with the grid pane and the keybinds pane
+		// on screen.
 		f := newFixture(t)
 		f.explorer.tree.SetFilter("")
 		total := len(f.explorer.tree.filtered)
@@ -307,9 +312,15 @@ func TestTheCursorAlwaysIndexesARowThatExists(t *testing.T) {
 			if h-2 >= 1 && treeRows > h-2 {
 				t.Errorf("a tree %d rows high rendered %d rows", h-2, treeRows)
 			}
-			// The pane adds the filter line and the two border rows.
-			if paneRows > h+3 {
-				t.Errorf("a pane %d rows high rendered %d non-blank lines", h, paneRows)
+			// The pane is exactly h lines. renderBox clamps a target content
+			// height below 1 up to 1, so the smallest box it can draw is 3
+			// lines (top border + 1 content + bottom border): max(h, 3).
+			want := h
+			if want < 3 {
+				want = 3
+			}
+			if paneRows != want {
+				t.Errorf("a pane asked for %d rows rendered %d non-blank lines, want exactly %d", h, paneRows, want)
 			}
 		}
 

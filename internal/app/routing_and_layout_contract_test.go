@@ -838,3 +838,93 @@ func TestTheHelpModalDeclinesAKeyItDoesNotBind(t *testing.T) {
 		t.Errorf("an unbound key reached the grid behind the modal: cursor %d -> %d", before, out.grid.CursorRow())
 	}
 }
+
+// The whole reason for this fix, asserted end to end.
+//
+// renderMainView stacks the top line, the pane lane (explorer OR grid) and the
+// keybinds pane. The lane's height and the keybinds pane's own height are
+// subtracted from the window height, so if the lane draws even one line more
+// than it was given, the keybinds pane is pushed past the bottom and appears
+// cut. Before the fix the explorer arm rendered h+2 lines for a lane of h and
+// this test would have failed at every one of these sizes.
+func TestTheMainViewIsExactlyTheWindowHeightAndKeepsTheKeybindsPaneOnScreen(t *testing.T) {
+	// Heights are chosen so the lanes have at least the 3 lines bordered.renderBox
+	// can draw. 80x15 is deliberately absent for the breadcrumb cases: there the
+	// keybinds pane wraps to 10 lines and 10+3 of the 15 are status, leaving the
+	// lane a contentHeight of 2 that renderBox floors to 3 — a pre-existing
+	// short-window condition on main, not this fix, and one that overflows on its
+	// own. The fix's contract is what is asserted, so the cases below stay clear
+	// of that degenerate regime.
+	for _, size := range []struct{ w, h int }{{120, 40}, {100, 24}, {80, 20}} {
+		for _, focus := range []FocusPane{FocusGrid, FocusExplorer} {
+			for _, breadcrumbs := range []bool{false, true} {
+				m := focusedGrid(t, 60)
+				m.state = StateMain
+				m = resize(m, size.w, size.h)
+				// The layout contract is about the keybinds pane being on
+				// screen, so it has to be visible. The bare &config.Config{}
+				// fixture leaves it hidden.
+				m.keybindsPane.SetVisible(true)
+				m.router.FocusPane(focus)
+				if breadcrumbs {
+					m.navStack = []NavigationEntry{{Schema: "public", Table: "orders"}}
+				}
+
+				out := m.renderMainView()
+				lines := strings.Split(out, "\n")
+				if len(lines) != size.h {
+					t.Errorf("at %dx%d focus=%v breadcrumbs=%v the main view rendered %d lines, want exactly %d",
+						size.w, size.h, focus, breadcrumbs, len(lines), size.h)
+				}
+
+				// The keybinds pane is appended last, so its final line has to be
+				// the view's final line. Comparing the content, not just the row
+				// count, is what proves the pane was not clipped rather than
+				// merely that the arithmetic adds up.
+				kb := m.keybindsPane.View()
+				if kb == "" {
+					t.Fatal("the keybinds pane renders nothing, so this fixture proves nothing")
+				}
+				kbLines := strings.Split(kb, "\n")
+				if len(lines) == 0 {
+					t.Fatal("the main view rendered no lines at all")
+				}
+				if got, want := lines[len(lines)-1], kbLines[len(kbLines)-1]; got != want {
+					t.Errorf("at %dx%d focus=%v breadcrumbs=%v the keybinds pane is cut: its last line does not end the view",
+						size.w, size.h, focus, breadcrumbs)
+				}
+				if !strings.Contains(out, "Keybinds") {
+					t.Errorf("at %dx%d focus=%v breadcrumbs=%v the keybinds pane title is not on screen",
+						size.w, size.h, focus, breadcrumbs)
+				}
+			}
+		}
+	}
+}
+
+// The nil-explorer fallback, which the app draws before a schema arrives.
+//
+// It is not reachable while connected (schemaLoadedMsg assigns the explorer at the
+// same time as StateMain), but "unreachable" is not "may ignore the contract": it
+// has to occupy the same h lines as the grid pane, or it reintroduces the off-by-two
+// on any future path that renders before the explorer exists.
+func TestTheExplorerFallbackIsTheSameHeightAsTheGridPane(t *testing.T) {
+	m := routerModel(t)
+	if m.explorer != nil {
+		t.Fatal("this fixture must have no explorer to exercise the fallback")
+	}
+	m.state = StateMain
+	m.grid.SetData(dataOf(30, 3), "public", "t")
+
+	for _, h := range []int{5, 10, 20, 38} {
+		fallback := strings.Split(m.renderExplorer(60, h), "\n")
+		if len(fallback) != h {
+			t.Errorf("the fallback explorer at height %d rendered %d lines, want exactly %d", h, len(fallback), h)
+		}
+		grid := strings.Split(m.renderGrid(60, h), "\n")
+		if len(fallback) != len(grid) {
+			t.Errorf("at height %d the fallback explorer rendered %d lines and the grid %d; they must match",
+				h, len(fallback), len(grid))
+		}
+	}
+}

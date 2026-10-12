@@ -278,7 +278,12 @@ func (e *Explorer) View() string {
 		borderFg = e.styles.Border.GetBorderTopForeground()
 	}
 
-	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Explorer ", output, e.width, e.height+2)
+	// e.height is the TOTAL box height in lines, borders included — the same
+	// contract grid passes (see Grid.View). The box already adds the two border
+	// rows itself, so offsetting by +2 here made the explorer pane render two
+	// lines taller than the grid pane for the same available height, pushing
+	// the keybinds pane off-screen.
+	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Explorer ", output, e.width, e.height)
 }
 
 func (e *Explorer) StartFilter() {
