@@ -1,7 +1,7 @@
 package session
 
-// Scenario: Un logger que no debe romperse por un fichero roto, y una guarda que no se
-// puede probar.
+// Scenario: Un logger que no debe romperse por un fichero roto, y la guarda que lo
+// evita.
 //
 // The logger reads a DIRECTORY of session files it did not write and cannot control: the
 // user can put anything there, a sync client can leave a half-written file, a symlink can
@@ -9,24 +9,25 @@ package session
 // alternative — a cleanup or a history read that aborts on one bad entry — makes the whole
 // log inaccessible over one stray file.
 //
-// THE GUARD AT THE BOTTOM OF THIS FILE IS NOT COVERED, and the reason is not tidiness.
+// The `if err != nil { continue }` after DirEntry.Info() looks untestable, and the obvious
+// fixtures cannot reach it:
 //
 //	entries, _ := os.ReadDir(dir)
 //	for _, entry := range entries {
 //	    if entry.IsDir() { continue }
 //	    _, err := entry.Info()
-//	    if err != nil { continue }      // ← unreachable from a test
+//	    if err != nil { continue }      // ← the guard
 //
-// os.ReadDir's DirEntry.Info() calls lstat, and lstat does NOT follow a symlink — so a
-// dangling symlink is stat'ed successfully and never reaches the guard. Making it fail
-// needs EACCES on the directory, and that fails for EVERY entry at once, so it cannot
-// demonstrate "skip one, keep the rest"; it only demonstrates "skip all". The remaining
-// trigger is the file disappearing between the ReadDir and the Info, which is a race no
-// test can schedule without a seam in the loop.
+// Info() calls lstat, which does NOT follow a symlink — a dangling symlink is stat'ed
+// successfully and never reaches the guard. EACCES on the directory fails for EVERY entry at
+// once, so it demonstrates "skip all", not "skip one, keep the rest". The only thing that
+// reaches the guard is a file disappearing between the ReadDir and the Info — a race no test
+// should try to win.
 //
-// So the guard is a TOCTOU check with no reachable input, kept because removing it turns a
-// benign race into a crash of the history screen, and pinned here so that its absence from
-// the coverage report is a decision rather than an oversight.
+// So the listing is injected: readDir on both the Logger and the Reader (production passes
+// os.ReadDir; nothing else can tell), and readdir_contract_test.go drives the guard with an
+// entry whose Info() always fails. The guard stays because removing it turns a benign race
+// into a crash of the history screen.
 
 import (
 	"os"

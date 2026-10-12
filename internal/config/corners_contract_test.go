@@ -162,7 +162,7 @@ func TestLoadingAProjectConfigThatIsNotThere(t *testing.T) {
 	}
 }
 
-// The two guards in repoid.go and canonicalPath that a test cannot honestly reach.
+// The guard in repoid.go that a test cannot honestly reach.
 //
 //	findDotGit's `parent == cur` is a loop terminator, and it cannot fire. Reaching it means
 //	  passing the guard above, which returns unless `cur != root && pathWithin(cur, root)`
@@ -170,15 +170,17 @@ func TestLoadingAProjectConfigThatIsNotThere(t *testing.T) {
 //	  exactly one path, the filesystem root. The terminator guards a case the guard above
 //	  already handles.
 //
-//	canonicalPath's `filepath.Abs` error needs os.Getwd to fail, which means deleting the
-//	  process's working directory. That is a real state and it is not reachable from a test
-//	  without syscalls that would outlive the test.
+// It is not written off as untested-and-therefore-fine: it is a terminator whose removal
+// would hang the scanner if the invariant it relies on were ever broken, so it stays. It is
+// recorded here so that a reader who sees it uncovered knows it was a decision and not an
+// oversight.
 //
-// Neither is written off as untested-and-therefore-fine: the first is a terminator whose
-// removal would hang the scanner if the invariant it relies on were ever broken, so it
-// stays. Both are recorded here so that a reader who sees them uncovered knows it was a
-// decision and not an oversight.
-func TestTheTwoGuardsThatCannotBeReached(t *testing.T) {
+// canonicalPath's absolute-path error used to be listed here too. It is reachable now:
+// TestCanonicalPathWithADeletedWorkingDirectory changes into a temporary directory, deletes
+// it, and restores the working directory in a cleanup — the only state in which
+// filepath.Abs fails, and the state a shell ends up in when someone removes the directory
+// it is sitting in.
+func TestTheGuardThatCannotBeReached(t *testing.T) {
 	t.Run("filepath.Dir is its own argument only at the filesystem root", func(t *testing.T) {
 		// The premise the terminator relies on, asserted rather than assumed.
 		if got := filepath.Dir("/"); got != "/" {
@@ -191,7 +193,7 @@ func TestTheTwoGuardsThatCannotBeReached(t *testing.T) {
 
 	t.Run("and a real repository still resolves", func(t *testing.T) {
 		// The counterweight: the walk the terminator belongs to still terminates, and does
-		// the right thing, on the path where the other guard returns.
+		// the right thing, on the path where the guard above returns.
 		dir := t.TempDir()
 		if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
 			t.Fatal(err)
