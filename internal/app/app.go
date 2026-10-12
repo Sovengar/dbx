@@ -3218,11 +3218,16 @@ func (m Model) renderTopLine(selSchema, selTable string) string {
 
 func (m Model) renderExplorer(w, h int) string {
 	if m.explorer == nil {
-		return m.styles.Border.
-			Width(w - 2).
-			Height(h - 2).
-			MaxHeight(h - 2).
-			Render(m.styles.TextMuted.Render("Explorer"))
+		// The placeholder has to obey the same total-height contract as the real
+		// explorer and the grid pane: `h` lines, borders included. It used to
+		// build a lipgloss box with Height(h-2).MaxHeight(h-2), which capped the
+		// whole block to h-2 lines — two lines short of the grid for the same
+		// window, and the same off-by-two this fix repaired on the real path.
+		// Rendering through the shared helper with the explorer's own thick
+		// border and title keeps the placeholder flush with everything else.
+		border := lipgloss.ThickBorder()
+		borderFg := m.styles.Border.GetBorderTopForeground()
+		return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Explorer ", m.styles.TextMuted.Render("Explorer"), w, h)
 	}
 
 	m.explorer.SetWidth(w)
