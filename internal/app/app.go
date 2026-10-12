@@ -1840,6 +1840,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editor.Blur()
 		m.keybindsPane.SetEditorOpen(false)
 		m.editor.PushHistory(msg.sql)
+		// The buffer is emptied on success, and the reason is the history sentinel:
+		// PushHistory parks historyIdx at len(history) to mean "not browsing", which only
+		// makes sense for a fresh prompt. Keeping the executed SQL on screen made the first
+		// ctrl+p reload the newest entry — the very text already shown — so it looked like a
+		// no-op and only the second press stepped back. Clearing here retires that collision;
+		// the ERROR path above deliberately keeps the SQL so the user can fix it.
+		m.editor.Clear()
 		m.queryStore.Add(msg.sql)
 
 		if m.isDDL(msg.sql) && m.conn != nil && m.project != nil {
