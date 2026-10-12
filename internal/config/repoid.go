@@ -91,9 +91,9 @@ func findDotGit(dir, root string) (string, bool) {
 		// descendants, each of which strictly shortens, and termination follows from the
 		// path's finite depth rather than from a test.
 		//
-		// The premise is asserted by TestTheTwoGuardsThatCannotBeReached, so the argument
-		// cannot rot unnoticed: if Dir ever stopped shortening a proper descendant, that
-		// test fails instead of this scan hanging.
+		// The premise is asserted by TestTheWalkWithoutATerminatorReliesOnDirShortening, so
+		// the argument cannot rot unnoticed: if Dir ever stopped shortening a proper
+		// descendant, that test fails instead of this scan hanging.
 		cur = filepath.Dir(cur)
 	}
 }

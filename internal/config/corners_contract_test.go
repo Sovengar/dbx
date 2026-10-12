@@ -162,29 +162,28 @@ func TestLoadingAProjectConfigThatIsNotThere(t *testing.T) {
 	}
 }
 
-// The guard in repoid.go that a test cannot honestly reach.
+// The premise findDotGit's terminator-less walk relies on.
 //
-//	findDotGit's `parent == cur` is a loop terminator, and it cannot fire. Reaching it means
-//	  passing the guard above, which returns unless `cur != root && pathWithin(cur, root)`
-//	  — so cur is a proper descendant of root, and filepath.Dir returns its own argument for
-//	  exactly one path, the filesystem root. The terminator guards a case the guard above
-//	  already handles.
+//	findDotGit has no loop terminator: the guard above the walk has already returned unless
+//	  cur is root or a descendant of it, and termination is argued from the path's finite
+//	  depth — every proper descendant strictly shortens under filepath.Dir, so the walk must
+//	  eventually reach the guard. That argument rests on one premise: filepath.Dir returns
+//	  its own argument for exactly one path, the filesystem root. If Dir ever stopped
+//	  shortening a proper descendant, the scan would hang instead of terminating.
 //
-// It is not written off as untested-and-therefore-fine: it is a terminator whose removal
-// would hang the scanner if the invariant it relies on were ever broken, so it stays. It is
-// recorded here so that a reader who sees it uncovered knows it was a decision and not an
-// oversight.
+// The premise is asserted below rather than assumed, and the walk is exercised on both
+// sides of the guard: a real repository resolves, and a .git above root is not found.
 //
 // canonicalPath's absolute-path error used to be listed here too. It is reachable now:
-// TestCanonicalPathWithADeletedWorkingDirectory changes into a temporary directory, deletes
-// it, and restores the working directory in a cleanup — the only state in which
-// filepath.Abs fails, and the state a shell ends up in when someone removes the directory
-// it is sitting in.
-func TestTheGuardThatCannotBeReached(t *testing.T) {
+// the absolute-path step reads the working directory from a package-level getwd, and
+// TestCanonicalPathWithADeletedWorkingDirectory substitutes one that fails with ENOENT —
+// the state a shell ends up in when someone removes the directory it is sitting in,
+// arranged without deleting the test binary's own working directory.
+func TestTheWalkWithoutATerminatorReliesOnDirShortening(t *testing.T) {
 	t.Run("filepath.Dir is its own argument only at the filesystem root", func(t *testing.T) {
-		// The premise the terminator relies on, asserted rather than assumed.
+		// The premise the walk relies on, asserted rather than assumed.
 		if got := filepath.Dir("/"); got != "/" {
-			t.Errorf("filepath.Dir(/) is %q, so the walk's terminator is not the only one", got)
+			t.Errorf("filepath.Dir(/) is %q, so the walk could hang", got)
 		}
 		if got := filepath.Dir("/a"); got == "/a" {
 			t.Error("a path below the root has no parent, so the walk could run away")
@@ -192,8 +191,8 @@ func TestTheGuardThatCannotBeReached(t *testing.T) {
 	})
 
 	t.Run("and a real repository still resolves", func(t *testing.T) {
-		// The counterweight: the walk the terminator belongs to still terminates, and does
-		// the right thing, on the path where the guard above returns.
+		// The counterweight: the walk still terminates, and does the right thing, on the
+		// path where the guard above returns.
 		dir := t.TempDir()
 		if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
 			t.Fatal(err)
@@ -210,9 +209,9 @@ func TestTheGuardThatCannotBeReached(t *testing.T) {
 		if got, ok := findDotGit(nested, filepath.Dir(dir)); !ok || got != want {
 			t.Errorf("findDotGit(%q, %q) = (%q, %t), want %q", nested, filepath.Dir(dir), got, ok, want)
 		}
-		// And the stop-at-root behaviour, which is the guard that makes the terminator
-		// unreachable: a .git ABOVE root must not be found, or a monorepo scan would walk
-		// out of the project it was asked about.
+		// And the stop-at-root behaviour, which is what bounds the walk: a .git ABOVE root
+		// must not be found, or a monorepo scan would walk out of the project it was asked
+		// about.
 		outside := t.TempDir()
 		if err := os.MkdirAll(filepath.Join(outside, ".git"), 0o755); err != nil {
 			t.Fatal(err)
