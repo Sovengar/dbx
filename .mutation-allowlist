@@ -44,13 +44,10 @@ CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:73
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:93
 CONDITIONALS_BOUNDARY internal/ui/bordered/bordered.go:96
 CONDITIONALS_BOUNDARY internal/ui/components/grid/cell.go:130
-CONDITIONALS_BOUNDARY internal/ui/components/grid/cell.go:49
 CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:101
 CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:138
-CONDITIONALS_BOUNDARY internal/ui/components/grid/header.go:141
 CONDITIONALS_BOUNDARY internal/ui/components/grid/mouse.go:28
 CONDITIONALS_BOUNDARY internal/ui/components/grid/mouse.go:61
-CONDITIONALS_BOUNDARY internal/ui/components/grid/mouse.go:66
 CONDITIONALS_BOUNDARY internal/ui/components/grid/pager.go:108
 CONDITIONALS_BOUNDARY internal/ui/components/grid/pager.go:131
 CONDITIONALS_BOUNDARY internal/ui/components/grid/pager.go:46
@@ -71,6 +68,227 @@ CONDITIONALS_BOUNDARY internal/ui/modal.go:88
 CONDITIONALS_BOUNDARY internal/ui/toast.go:130
 CONDITIONALS_BOUNDARY internal/ui/toast.go:133
 CONDITIONALS_BOUNDARY internal/ui/toast.go:78
+
+# ── CONDITIONALS_BOUNDARY sweep (tsk #27, 2026-10-12) ──────────────────────
+#
+# CONDITIONALS_BOUNDARY is gremlins' limit mutator: `x < n` -> `x <= n`,
+# `x > n` -> `x >= n` (and the <=/>= downgrades). It differs from the original
+# on EXACTLY ONE input — equality of the two operands — which is why so many
+# survive: most tests never place a datum on the boundary.
+#
+# Every entry below was measured with the mutant applied one operator at a
+# time (the whole suite per variant) and declared EQUIVALENT, each with a
+# WRITTEN PROOF: a test that builds the equality in the limit and asserts the
+# original's observable behaviour, and stays GREEN under the mutant. That
+# green test is the proof — it pins the boundary, so a refactor that ever
+# makes the boundary observable turns it red before the mutant could matter.
+#
+# The argument families, repeated across packages:
+#
+#   clamp idempotente   `x < n` -> `<=` at x == n assigns the value x already
+#                       holds (scroll, cursor, width floors/ceilings). The
+#                       largest family: modal/ask/toast width and height
+#                       clamps, pager/table scroll clamps, ere.go box sizes.
+#   zero padding        `pad > 0` -> `>=` at pad == 0: strings.Repeat(" ", 0)
+#                       is "" — the mutant's extra body is a no-op.
+#   exact-fit truncate  `w > len` -> `>=` at w == len: ansi.Truncate(s, w)
+#                       over a string of exactly w columns returns s intact
+#                       (measured: lipgloss v0.11.8), no "…" is appended.
+#   guarded neighbour   the equality state is unreachable because a nearby
+#                       invariant already excludes it, or a later clamp
+#                       re-converges both variants (tree.go:83's four reachable
+#                       states enumerated; scanner.go:49's Path tie-break dead
+#                       after dedup; toast.go:215-236's Unicode range arms
+#                       covered by an earlier Han/Hangul guard, measured).
+#   dead short-circuit  the mutated operand is never evaluated in the
+#                       boundary state (`i <= cursorCol` under a cursor clamp,
+#                       `len(tokenText) < 0` at minPrefix == 0, a loop that
+#                       cannot enter at equality).
+#
+# The proof tests live next to the code, one per package, named
+# sweep_boundary_*_test.go (plus grid's zz_kill_test.go /
+# zz_boundary_design_test.go from the earlier rounds):
+#
+#   grid            sweep_boundary_gridtable_test.go, sweep_boundary_wherefilter_test.go
+#   editor          sweep_boundary_editor_autocomplete_test.go, sweep_boundary_editor_sql_test.go
+#   explorer        sweep_boundary_explorer_test.go, sweep_boundary_explorerpreview_test.go
+#   querybrowser    sweep_boundary_querybrowser_test.go
+#   gridpreview     sweep_boundary_gridpreview_test.go
+#   palette         sweep_boundary_palette_test.go, sweep_boundary_picker_test.go,
+#                   sweep_boundary_gridsidebarpreview_test.go
+#   ui-core         sweep_boundary_toast/modal/keybindspane/bordered/ask_test.go
+#   small pkgs      sweep_boundary_nl2sql/txn/cli/config/postgres/store_test.go
+#
+# Re-verify any entry with: apply the operator swap at the recorded line and
+# run its package suite — the proof test must stay green. An entry is retired
+# the moment a test starts KILLING the mutant (4 were, this sweep: cell.go:49,
+# header.go:141, mouse.go:66, gridpreview/preview.go:861).
+
+CONDITIONALS_BOUNDARY internal/ai/nl2sql/anthropic.go:328
+CONDITIONALS_BOUNDARY internal/app/txn.go:379
+CONDITIONALS_BOUNDARY internal/app/txn.go:382
+CONDITIONALS_BOUNDARY internal/app/txn.go:423
+CONDITIONALS_BOUNDARY internal/app/txn.go:465
+CONDITIONALS_BOUNDARY internal/config/scanner.go:49
+CONDITIONALS_BOUNDARY internal/drivers/postgres/schema.go:534
+CONDITIONALS_BOUNDARY internal/store/query_history.go:134
+CONDITIONALS_BOUNDARY internal/store/query_history.go:148
+CONDITIONALS_BOUNDARY internal/store/query_history.go:86
+CONDITIONALS_BOUNDARY internal/ui/components/ask/ask.go:207
+CONDITIONALS_BOUNDARY internal/ui/components/ask/ask.go:240
+CONDITIONALS_BOUNDARY internal/ui/components/ask/ask.go:243
+CONDITIONALS_BOUNDARY internal/ui/components/ask/ask.go:248
+CONDITIONALS_BOUNDARY internal/ui/components/ask/ask.go:287
+CONDITIONALS_BOUNDARY internal/ui/components/editor/autocomplete.go:249
+CONDITIONALS_BOUNDARY internal/ui/components/editor/autocomplete.go:458
+CONDITIONALS_BOUNDARY internal/ui/components/editor/autocomplete.go:461
+CONDITIONALS_BOUNDARY internal/ui/components/editor/autocomplete.go:485
+CONDITIONALS_BOUNDARY internal/ui/components/editor/autocomplete.go:871
+CONDITIONALS_BOUNDARY internal/ui/components/editor/autocomplete.go:877
+CONDITIONALS_BOUNDARY internal/ui/components/editor/autocomplete.go:880
+CONDITIONALS_BOUNDARY internal/ui/components/editor/autocomplete.go:887
+CONDITIONALS_BOUNDARY internal/ui/components/editor/autocomplete.go:897
+CONDITIONALS_BOUNDARY internal/ui/components/editor/autocomplete.go:900
+CONDITIONALS_BOUNDARY internal/ui/components/editor/autocomplete.go:911
+CONDITIONALS_BOUNDARY internal/ui/components/editor/autocomplete.go:915
+CONDITIONALS_BOUNDARY internal/ui/components/editor/autocomplete.go:920
+CONDITIONALS_BOUNDARY internal/ui/components/editor/autocomplete.go:925
+CONDITIONALS_BOUNDARY internal/ui/components/editor/autocomplete.go:930
+CONDITIONALS_BOUNDARY internal/ui/components/editor/sql.go:138
+CONDITIONALS_BOUNDARY internal/ui/components/editor/sql.go:144
+CONDITIONALS_BOUNDARY internal/ui/components/editor/sql.go:147
+CONDITIONALS_BOUNDARY internal/ui/components/editor/sql.go:154
+CONDITIONALS_BOUNDARY internal/ui/components/editor/sql.go:364
+CONDITIONALS_BOUNDARY internal/ui/components/editor/sql.go:457
+CONDITIONALS_BOUNDARY internal/ui/components/editor/sql.go:485
+CONDITIONALS_BOUNDARY internal/ui/components/editor/sql.go:558
+CONDITIONALS_BOUNDARY internal/ui/components/editor/sql.go:587
+CONDITIONALS_BOUNDARY internal/ui/components/editor/sql.go:594
+CONDITIONALS_BOUNDARY internal/ui/components/editor/sql.go:60
+CONDITIONALS_BOUNDARY internal/ui/components/editor/sql.go:624
+CONDITIONALS_BOUNDARY internal/ui/components/editor/sql.go:629
+CONDITIONALS_BOUNDARY internal/ui/components/explorer/explorer.go:132
+CONDITIONALS_BOUNDARY internal/ui/components/explorer/tree.go:190
+CONDITIONALS_BOUNDARY internal/ui/components/explorer/tree.go:194
+CONDITIONALS_BOUNDARY internal/ui/components/explorer/tree.go:284
+CONDITIONALS_BOUNDARY internal/ui/components/explorer/tree.go:309
+CONDITIONALS_BOUNDARY internal/ui/components/explorer/tree.go:328
+CONDITIONALS_BOUNDARY internal/ui/components/explorer/tree.go:408
+CONDITIONALS_BOUNDARY internal/ui/components/explorer/tree.go:411
+CONDITIONALS_BOUNDARY internal/ui/components/explorer/tree.go:68
+CONDITIONALS_BOUNDARY internal/ui/components/explorer/tree.go:83
+CONDITIONALS_BOUNDARY internal/ui/components/explorer/tree.go:87
+CONDITIONALS_BOUNDARY internal/ui/components/explorer/tree.go:90
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:110
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:115
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:118
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:242
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:249
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:489
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:529
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:532
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:543
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:577
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:83
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/ere.go:86
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/preview.go:150
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/preview.go:307
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/preview.go:310
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/preview.go:314
+CONDITIONALS_BOUNDARY internal/ui/components/explorerpreview/preview.go:334
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1535
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1559
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1598
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1601
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1604
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1945
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1962
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:1965
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2046
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2059
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2078
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2182
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2187
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2203
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2232
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2241
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2266
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2280
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2286
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2342
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:2346
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:323
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:329
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:336
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:347
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:351
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:355
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:379
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:385
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:394
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:402
+CONDITIONALS_BOUNDARY internal/ui/components/grid/table.go:408
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:363
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:369
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:394
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:543
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:557
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:572
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:590
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:595
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:627
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:632
+CONDITIONALS_BOUNDARY internal/ui/components/grid/where_filter.go:654
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:1007
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:1015
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:1018
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:1120
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:1182
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:1206
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:1220
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:1224
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:1230
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:365
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:369
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:372
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:635
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:910
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:913
+CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:950
+CONDITIONALS_BOUNDARY internal/ui/components/gridsidebarpreview/preview.go:140
+CONDITIONALS_BOUNDARY internal/ui/components/gridsidebarpreview/preview.go:47
+CONDITIONALS_BOUNDARY internal/ui/components/gridsidebarpreview/preview.go:55
+CONDITIONALS_BOUNDARY internal/ui/components/palette/palette.go:149
+CONDITIONALS_BOUNDARY internal/ui/components/palette/palette.go:152
+CONDITIONALS_BOUNDARY internal/ui/components/palette/palette.go:195
+CONDITIONALS_BOUNDARY internal/ui/components/palette/palette.go:216
+CONDITIONALS_BOUNDARY internal/ui/components/palette/palette.go:219
+CONDITIONALS_BOUNDARY internal/ui/components/palette/palette.go:242
+CONDITIONALS_BOUNDARY internal/ui/components/palette/palette.go:247
+CONDITIONALS_BOUNDARY internal/ui/components/palette/palette.go:67
+CONDITIONALS_BOUNDARY internal/ui/components/palette/palette.go:93
+CONDITIONALS_BOUNDARY internal/ui/components/picker/picker.go:227
+CONDITIONALS_BOUNDARY internal/ui/components/picker/picker.go:236
+CONDITIONALS_BOUNDARY internal/ui/components/querybrowser/querybrowser.go:139
+CONDITIONALS_BOUNDARY internal/ui/components/querybrowser/querybrowser.go:185
+CONDITIONALS_BOUNDARY internal/ui/components/querybrowser/querybrowser.go:228
+CONDITIONALS_BOUNDARY internal/ui/components/querybrowser/querybrowser.go:238
+CONDITIONALS_BOUNDARY internal/ui/components/querybrowser/querybrowser.go:256
+CONDITIONALS_BOUNDARY internal/ui/components/querybrowser/querybrowser.go:259
+CONDITIONALS_BOUNDARY internal/ui/components/querybrowser/querybrowser.go:264
+CONDITIONALS_BOUNDARY internal/ui/components/querybrowser/querybrowser.go:305
+CONDITIONALS_BOUNDARY internal/ui/components/querybrowser/querybrowser.go:319
+CONDITIONALS_BOUNDARY internal/ui/components/querybrowser/querybrowser.go:349
+CONDITIONALS_BOUNDARY internal/ui/components/querybrowser/querybrowser.go:351
+CONDITIONALS_BOUNDARY internal/ui/components/querybrowser/querybrowser.go:353
+CONDITIONALS_BOUNDARY internal/ui/components/querybrowser/querybrowser.go:366
+CONDITIONALS_BOUNDARY internal/ui/components/querybrowser/querybrowser.go:393
+CONDITIONALS_BOUNDARY internal/ui/components/querybrowser/querybrowser.go:82
+CONDITIONALS_BOUNDARY internal/ui/toast.go:215
+CONDITIONALS_BOUNDARY internal/ui/toast.go:218
+CONDITIONALS_BOUNDARY internal/ui/toast.go:221
+CONDITIONALS_BOUNDARY internal/ui/toast.go:224
+CONDITIONALS_BOUNDARY internal/ui/toast.go:236
 
 # ── non-Boundary sweep (ARITHMETIC_BASE, CONDITIONALS_NEGATION, INVERT_NEGATIVES,
 #    INCREMENT_DECREMENT) ─────────────────────────────────────────────────────
@@ -141,7 +359,6 @@ INVERT_NEGATIVES internal/ui/components/editor/autocomplete.go:677
 #                  variable already holds; those are the other shape of equivalent mutant in
 #                  this repository, and they are all `<` becoming `<=` where the body is
 #                  `x = <something x already is>`.
-CONDITIONALS_BOUNDARY internal/ui/components/gridpreview/preview.go:861
 
 # gridpreview/preview.go:1229 — the type column's padding, both arithmetics
 #
