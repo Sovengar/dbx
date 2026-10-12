@@ -199,7 +199,9 @@ An overlay, toggled with `E` and also opened by `ctrl+enter`/`ctrl+r` (execute),
 `ctrl+y` (copy), explorer scaffolds, or a draft commit. It has syntax
 highlighting, a schema-aware autocomplete popup (`tab`, `ctrl+space`), query
 history (`ctrl+p`/`ctrl+n`) and clear (`ctrl+u`). Its title reads `commit on run`
-when it was opened to commit grid drafts.
+when it was opened to commit grid drafts. After a successful execution the buffer
+is left empty, so the first `ctrl+p` recalls the query that just ran; a failed
+execution keeps the SQL so it can be fixed.
 
 Autocomplete is clause-aware — suggestions follow the tokens of the current
 statement and ignore text inside strings and comments:
