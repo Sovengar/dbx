@@ -7,8 +7,8 @@ package config
 // single observable, and together they are the difference between a config package that
 // fails quietly and one that answers.
 //
-// The two that are NOT here are the ones a test cannot honestly reach, and they are named
-// at the bottom rather than left as an unexplained gap.
+// Nothing here is an unreachable guard: the bottom test pins the premise the terminator-less
+// findDotGit walk relies on, and canonicalPath's error is reachable through an injected getwd.
 
 import (
 	"os"
