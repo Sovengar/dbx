@@ -152,11 +152,18 @@ func readCommonDir(gitdir string) (string, bool) {
 	return rel, true
 }
 
+// getwd reports the process working directory. A package-level variable so a
+// test can substitute one that fails, which is the only state in which
+// canonicalPath's absolute-path step errors: os.Getwd fails only when the
+// working directory has been deleted, and deleting the process's real cwd to
+// reach that state would outlive the test.
+var getwd = os.Getwd
+
 // canonicalPath makes a path absolute and clean, resolving symlinks when
 // possible. If resolution fails (permissions, missing path) it falls back to the
 // absolute clean path: a conservative identity beats a panic.
 func canonicalPath(path string) string {
-	abs, err := filepath.Abs(path)
+	abs, err := absPath(path)
 	if err != nil {
 		return filepath.Clean(path)
 	}
@@ -166,4 +173,18 @@ func canonicalPath(path string) string {
 		return abs
 	}
 	return filepath.Clean(resolved)
+}
+
+// absPath mirrors filepath.Abs but takes the working directory from getwd, so
+// the deleted-cwd branch of canonicalPath is reachable in a test without
+// deleting the test binary's actual directory.
+func absPath(path string) (string, error) {
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path), nil
+	}
+	wd, err := getwd()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(wd, path), nil
 }
