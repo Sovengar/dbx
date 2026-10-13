@@ -16,7 +16,7 @@ func TestZZKill_CellExactWidthMultilineIsNotTruncated(t *testing.T) {
 	}
 	// And through the render path the value must survive too: both lines are
 	// still there (the cell pads each line out to its width).
-	if got := ansi.Strip(cr.RenderCell(text, 7, false)); !strings.Contains(got, "abcde") || !strings.Contains(got, "xy") {
+	if got := ansi.Strip(cr.RenderCell(text, 7, false, false)); !strings.Contains(got, "abcde") || !strings.Contains(got, "xy") {
 		t.Errorf("RenderCell(%q) lost the value: %q", text, got)
 	}
 }

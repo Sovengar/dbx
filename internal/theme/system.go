@@ -29,6 +29,7 @@ func generateFromColors(bg, fg string) *Theme {
 		BackgroundElement:  c("#313244"),
 		BackgroundSelected: c("#45475a"),
 		BackgroundCursor:   c("#585b70"),
+		BackgroundZebra:    c("#1c1c2e"),
 
 		Pending: c("#4ade80"),
 

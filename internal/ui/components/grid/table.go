@@ -2202,6 +2202,8 @@ func (g *Grid) renderRecordsView() string {
 		isMultiSelected := g.selectedRows[i]
 		isEditing := g.editing && visibleCount == (g.editRow-(offset+g.scrollRow)) && g.editRow >= offset+g.scrollRow && g.editRow < endRow
 		isDraftDelete := g.isRowDeleted(i)
+		isHovered := g.mouse.HoverRow() == visibleCount
+		isZebra := visibleCount%2 == 1
 		draftCols := make(map[int]bool)
 		if !isDraftDelete {
 			for j := range visCols {
@@ -2222,7 +2224,7 @@ func (g *Grid) renderRecordsView() string {
 				rendered = g.cells.RenderEditRow(visValues, visWidths, editColLocal, g.editValue, g.editCursor)
 			} else {
 				activeCol := g.cursorCol - g.scrollCol
-				rendered = g.cells.RenderRow(visValues, visWidths, activeCol)
+				rendered = g.cells.RenderRow(visValues, visWidths, activeCol, isZebra)
 			}
 		} else if isSelected && isMultiSelected {
 			activeCol := g.cursorCol - g.scrollCol
@@ -2233,16 +2235,23 @@ func (g *Grid) renderRecordsView() string {
 			if hasDrafts {
 				rendered = g.cells.RenderDraftUpdateRow(visValues, visWidths, draftCols, activeCol)
 			} else {
-				rendered = g.cells.RenderRow(visValues, visWidths, activeCol)
+				rendered = g.cells.RenderRow(visValues, visWidths, activeCol, isZebra)
 			}
 		} else if isMultiSelected {
 			rendered = g.cells.RenderSelectedRow(visValues, visWidths)
+		} else if isHovered {
+			hasDrafts := len(g.pendingUpdates) > 0
+			if hasDrafts {
+				rendered = g.cells.RenderDraftUpdateRow(visValues, visWidths, draftCols, -1)
+			} else {
+				rendered = g.cells.RenderHoveredRow(visValues, visWidths)
+			}
 		} else {
 			hasDrafts := len(g.pendingUpdates) > 0
 			if hasDrafts {
 				rendered = g.cells.RenderDraftUpdateRow(visValues, visWidths, draftCols, -1)
 			} else {
-				rendered = g.cells.RenderRow(visValues, visWidths, -1)
+				rendered = g.cells.RenderRow(visValues, visWidths, -1, isZebra)
 			}
 		}
 		rows = append(rows, rendered)

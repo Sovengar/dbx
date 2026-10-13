@@ -33,7 +33,7 @@ type rowRenderer struct {
 
 func rowRenderers() []rowRenderer {
 	return []rowRenderer{
-		{"RenderRow", func(v []interface{}, w []int, a int, _ map[int]bool) string { return cellRenderer().RenderRow(v, w, a) }, true},
+		{"RenderRow", func(v []interface{}, w []int, a int, _ map[int]bool) string { return cellRenderer().RenderRow(v, w, a, false) }, true},
 		{"RenderSelectedRow", func(v []interface{}, w []int, _ int, _ map[int]bool) string {
 			return cellRenderer().RenderSelectedRow(v, w)
 		}, false},
@@ -643,7 +643,7 @@ func TestRenderCell_IsExactlyTheGivenWidth(t *testing.T) {
 	// And the degenerate side, stated here so the invariant above is not read as
 	// "always": a cell narrower than 3 comes out WIDER than asked.
 	for _, w := range []int{0, 1, 2} {
-		if got := lipgloss.Width(cr.RenderCell("abc", w, false)); got <= w {
+		if got := lipgloss.Width(cr.RenderCell("abc", w, false, false)); got <= w {
 			t.Errorf("RenderCell(width %d) is %d cells, want it wider: there is no room for text", w, got)
 		}
 	}
@@ -653,7 +653,7 @@ func TestRenderCell_IsExactlyTheGivenWidth(t *testing.T) {
 	for _, selected := range []bool{false, true} {
 		for _, w := range []int{3, 4, 5, 10, 40} {
 			for _, v := range []interface{}{1, "abc", nil, "a very long value indeed", "日本"} {
-				got := cr.RenderCell(v, w, selected)
+				got := cr.RenderCell(v, w, selected, false)
 				if width := lipgloss.Width(got); width != w {
 					t.Errorf("RenderCell(%#v, %d, selected=%v) is %d cells, want %d", v, w, selected, width, w)
 				}
@@ -672,8 +672,8 @@ func TestRenderCell_SelectedChangesOnlyTheStyling(t *testing.T) {
 	styles := theme.Resolve("dark").Styles()
 
 	for _, v := range []interface{}{1, "abc", nil, true, "日本"} {
-		normal := cr.RenderCell(v, 20, false)
-		active := cr.RenderCell(v, 20, true)
+		normal := cr.RenderCell(v, 20, false, false)
+		active := cr.RenderCell(v, 20, true, false)
 
 		if normal == active {
 			t.Errorf("RenderCell(%#v, selected) is identical to the unselected one", v)
@@ -739,7 +739,7 @@ func TestRowRenderers_MoreValuesThanWidthsPanics(t *testing.T) {
 		}
 	}()
 	cr := newCellRendererForTest()
-	_ = cr.RenderRow([]interface{}{1, 2, 3}, []int{10, 10}, 0)
+	_ = cr.RenderRow([]interface{}{1, 2, 3}, []int{10, 10}, 0, false)
 }
 
 // Scenario: Cada columna recibe EXACTAMENTE el estilo que le toca.
@@ -777,7 +777,7 @@ func TestRowRenderers_EachColumnGetsExactlyItsOwnStyle(t *testing.T) {
 	}{
 		{
 			"RenderRow",
-			cr.RenderRow(values, widths, active),
+			cr.RenderRow(values, widths, active, false),
 			[]lipgloss.Style{styles.Text, styles.Text, styles.Selected, styles.Text},
 		},
 		{

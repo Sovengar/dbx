@@ -121,8 +121,9 @@ type Model struct {
 	askContextHint   string
 	askGenSeq        int
 	runner           *statementRunner
-	connectCancelled bool
-	forcePicker      bool
+	connectCancelled  bool
+	forcePicker       bool
+	contextMenuVisible bool
 }
 
 var spinnerChars = [9]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"}
@@ -1590,6 +1591,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.explorerPreview.SetData(msg.schema, msg.table, msg.columns, msg.constraints, msg.foreignKeys, msg.indexes, msg.overview)
 		return m, nil
 
+	case editorContentMsg:
+		m.editor.SetContent(msg.content)
+		m.editorOpen = true
+		m.editor.Focus()
+		m.keybindsPane.SetEditorOpen(true)
+		return m, nil
+
 	case explorerpreview.ERENavigateMsg:
 		if m.explorer != nil {
 			m.explorer.SelectTable(msg.Schema, msg.Table)
@@ -2548,6 +2556,39 @@ func (m Model) appActions() map[config.ActionID]func(Model) (tea.Model, tea.Cmd)
 			m.editor.Blur()
 			m.editor.SetCommitOnRun(false)
 			m.keybindsPane.SetEditorOpen(false)
+			return m, nil
+		},
+		"external_editor": func(m Model) (tea.Model, tea.Cmd) {
+			sql := m.editor.Content()
+			if sql == "" {
+				return m, nil
+			}
+			editor := os.Getenv("EDITOR")
+			if editor == "" {
+				editor = "vim"
+			}
+			tmpFile, err := os.CreateTemp("", "dbx-*.sql")
+			if err != nil {
+				m.toast.ShowError("Failed to create temp file")
+				return m, nil
+			}
+			tmpPath := tmpFile.Name()
+			tmpFile.WriteString(sql)
+			tmpFile.Close()
+			defer os.Remove(tmpPath)
+			m.editorOpen = false
+			m.editor.Blur()
+			cmd := tea.ExecProcess(exec.Command(editor, tmpPath), func(err error) tea.Msg {
+				data, readErr := os.ReadFile(tmpPath)
+				if readErr != nil {
+					return editorContentMsg{content: sql}
+				}
+				return editorContentMsg{content: string(data)}
+			})
+			return m, cmd
+		},
+		"context_menu": func(m Model) (tea.Model, tea.Cmd) {
+			m.contextMenuVisible = !m.contextMenuVisible
 			return m, nil
 		},
 		"commit_drafts": func(m Model) (tea.Model, tea.Cmd) {

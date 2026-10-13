@@ -57,12 +57,20 @@ func (cr *CellRenderer) Truncate(text string, maxWidth int) string {
 	return ansi.Truncate(text, maxWidth, tail)
 }
 
-func (cr *CellRenderer) RenderCell(value interface{}, width int, selected bool) string {
+func (cr *CellRenderer) RenderCell(value interface{}, width int, selected bool, zebra bool) string {
 	raw := cr.FormatValue(value)
 	truncated := cr.Truncate(raw, width-2)
 
 	if selected {
 		return cr.styles.Selected.
+			PaddingLeft(1).
+			PaddingRight(1).
+			Width(width).
+			Render(truncated)
+	}
+	if zebra {
+		return cr.styles.Zebra.
+			Foreground(cr.styles.Text.GetForeground()).
 			PaddingLeft(1).
 			PaddingRight(1).
 			Width(width).
@@ -75,10 +83,10 @@ func (cr *CellRenderer) RenderCell(value interface{}, width int, selected bool) 
 		Render(truncated)
 }
 
-func (cr *CellRenderer) RenderRow(values []interface{}, widths []int, activeCol int) string {
+func (cr *CellRenderer) RenderRow(values []interface{}, widths []int, activeCol int, zebra bool) string {
 	var cells []string
 	for i, val := range values {
-		cells = append(cells, cr.RenderCell(val, widths[i], i == activeCol))
+		cells = append(cells, cr.RenderCell(val, widths[i], i == activeCol, zebra))
 	}
 	return strings.Join(cells, "")
 }
@@ -151,8 +159,23 @@ func (cr *CellRenderer) RenderEditRow(values []interface{}, widths []int, editCo
 		if i == editCol {
 			cells = append(cells, cr.RenderEditCell(val, widths[i], editValue, editCursor))
 		} else {
-			cells = append(cells, cr.RenderCell(val, widths[i], false))
+			cells = append(cells, cr.RenderCell(val, widths[i], false, false))
 		}
+	}
+	return strings.Join(cells, "")
+}
+
+func (cr *CellRenderer) RenderHoveredRow(values []interface{}, widths []int) string {
+	var cells []string
+	for i, val := range values {
+		raw := cr.FormatValue(val)
+		truncated := cr.Truncate(raw, widths[i]-2)
+		cell := cr.styles.Hover.
+			PaddingLeft(1).
+			PaddingRight(1).
+			Width(widths[i]).
+			Render(truncated)
+		cells = append(cells, cell)
 	}
 	return strings.Join(cells, "")
 }

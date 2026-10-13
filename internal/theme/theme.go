@@ -26,6 +26,7 @@ type Theme struct {
 	BackgroundElement  color.Color
 	BackgroundSelected color.Color
 	BackgroundCursor   color.Color
+	BackgroundZebra    color.Color
 
 	Pending color.Color
 

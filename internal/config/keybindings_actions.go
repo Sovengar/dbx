@@ -192,6 +192,10 @@ func defaultActions() []Action {
 			Contexts: []string{ContextEditor}, Owner: "editor"},
 		{ID: "close_editor", Keys: []string{"esc"}, Section: SectionUI, Description: "Close Editor",
 			Contexts: []string{ContextEditor}, Owner: "app"},
+		{ID: "external_editor", Keys: []string{"ctrl+e"}, Section: SectionQuery, Description: "Open in External Editor",
+			Contexts: []string{ContextEditor}, Owner: "app"},
+		{ID: "context_menu", Keys: []string{"ctrl+shift+c"}, Section: SectionUI, Description: "Context Menu",
+			Contexts: []string{ContextGrid, ContextExplorer}, Owner: "app"},
 	}
 
 	return actions

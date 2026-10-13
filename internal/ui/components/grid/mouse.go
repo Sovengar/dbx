@@ -3,11 +3,20 @@ package grid
 import tea "charm.land/bubbletea/v2"
 
 type MouseHandler struct {
-	grid *Grid
+	grid     *Grid
+	hoverRow int
 }
 
 func NewMouseHandler(grid *Grid) *MouseHandler {
-	return &MouseHandler{grid: grid}
+	return &MouseHandler{grid: grid, hoverRow: -1}
+}
+
+func (mh *MouseHandler) HoverRow() int {
+	return mh.hoverRow
+}
+
+func (mh *MouseHandler) SetHover(row int) {
+	mh.hoverRow = row
 }
 
 // HandleClick handles a click at coordinates relative to the grid's bordered
@@ -32,9 +41,11 @@ func (mh *MouseHandler) HandleClick(x, y int) (tea.Cmd, bool) {
 	dataY := y - headerY - 1
 	rows := mh.grid.visibleRows()
 	if dataY < 0 || dataY >= rows {
+		mh.SetHover(-1)
 		return nil, false
 	}
 
+	mh.SetHover(dataY)
 	mh.grid.cursorRow = dataY
 	if vj := mh.visibleColumnAtX(x); vj >= 0 {
 		mh.grid.cursorCol = mh.grid.scrollCol + vj

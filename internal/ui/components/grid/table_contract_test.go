@@ -3893,11 +3893,11 @@ func TestGrid_ExactlyTheCursorColumnIsHighlighted(t *testing.T) {
 			if got[0] != marker(1, col) {
 				t.Errorf("the highlighted cell holds %q, want the cursor column's value %q", got[0], marker(1, col))
 			}
-			// And no other cell on that row carries a background, so the
-			// highlight is unambiguous.
+			// And no other cell on that row carries a selection background.
+			// Zebra striping is allowed (it's not the selection colour).
 			for _, c := range cells(rowLine(t, h, 1)) {
 				cp := c[1].(paint)
-				if cp.bg != "" && cp.bg != sel.bg {
+				if cp.bg != "" && cp.bg != sel.bg && !strings.Contains(cp.bg, "28,28,46") {
 					t.Errorf("cell %q is painted on %s, so only the cursor cell is not distinguished", c[0], cp)
 				}
 			}

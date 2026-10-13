@@ -94,3 +94,11 @@ type explorerPreviewDataMsg struct {
 	indexes     []postgres.IndexInfo
 	overview    *postgres.TableOverview
 }
+
+type editorContentMsg struct {
+	content string
+}
+
+type contextMenuMsg struct {
+	action string
+}

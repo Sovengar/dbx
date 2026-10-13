@@ -35,6 +35,8 @@ type QueryBrowser struct {
 	height       int
 	filter       string
 	filterActive bool
+	naming       bool
+	nameInput    string
 }
 
 func New(styles *theme.Styles, qs *store.QueryStore) *QueryBrowser {
@@ -113,6 +115,33 @@ func (b *QueryBrowser) Update(msg tea.Msg) (tea.Cmd, bool) {
 func (b *QueryBrowser) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	key := msg.String()
 	qbDebugLog("handleKey: key=%q filterActive=%v entries=%d cursor=%d", key, b.filterActive, len(b.entries), b.cursor)
+
+	if b.naming {
+		switch key {
+		case "esc":
+			b.naming = false
+			b.nameInput = ""
+			return nil, true
+		case "enter":
+			if b.cursor >= 0 && b.cursor < len(b.entries) {
+				b.store.SetName(b.cursor, b.nameInput)
+				b.refreshEntries()
+			}
+			b.naming = false
+			b.nameInput = ""
+			return nil, true
+		case "backspace":
+			if runes := []rune(b.nameInput); len(runes) > 0 {
+				b.nameInput = string(runes[:len(runes)-1])
+			}
+			return nil, true
+		default:
+			if len(msg.Text) > 0 {
+				b.nameInput += msg.Text
+			}
+			return nil, true
+		}
+	}
 
 	if b.filterActive {
 		switch key {
@@ -214,6 +243,13 @@ func (b *QueryBrowser) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 		return nil, true
 
+	case "n":
+		if b.cursor >= 0 && b.cursor < len(b.entries) {
+			b.naming = true
+			b.nameInput = b.entries[b.cursor].Name
+		}
+		return nil, true
+
 	case "/":
 		b.filterActive = true
 		b.filter = ""
@@ -284,6 +320,12 @@ func (b *QueryBrowser) View() string {
 	lines = append(lines, historyTab+"  "+favoritesTab)
 	lines = append(lines, "")
 
+	// Naming
+	if b.naming {
+		lines = append(lines, b.styles.Primary.Render(" Name: "+b.nameInput+"_"))
+		lines = append(lines, "")
+	}
+
 	// Filter
 	if b.filterActive {
 		lines = append(lines, b.styles.Primary.Render("/ "+b.filter+"_"))
@@ -321,8 +363,13 @@ func (b *QueryBrowser) View() string {
 	}
 
 	// Footer
-	footer := keydisplay.Key(" j/k navigate · Enter load · f favorite · d delete · / filter · Tab switch · Esc close")
-	lines = append(lines, b.styles.Help.Render(footer))
+	if b.naming {
+		footer := keydisplay.Key(" Enter save · Esc cancel")
+		lines = append(lines, b.styles.Help.Render(footer))
+	} else {
+		footer := keydisplay.Key(" j/k navigate · Enter load · f favorite · n name · d delete · / filter · Tab switch · Esc close")
+		lines = append(lines, b.styles.Help.Render(footer))
+	}
 
 	content := strings.Join(lines, "\n")
 
@@ -381,6 +428,11 @@ func (b *QueryBrowser) renderEntry(idx int, e store.QueryEntry, maxW int) string
 		parts = append(parts, b.styles.Primary.Render("★ "))
 	} else {
 		parts = append(parts, "  ")
+	}
+
+	if e.Name != "" {
+		nameStyled := b.styles.TextBright.Render(e.Name + "  ")
+		parts = append(parts, nameStyled)
 	}
 
 	sqlStyled := b.styles.Text.Render(sql)

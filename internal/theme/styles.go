@@ -21,6 +21,8 @@ type Styles struct {
 	Text       lipgloss.Style
 	TextMuted  lipgloss.Style
 	TextBright lipgloss.Style
+	Zebra      lipgloss.Style
+	Hover      lipgloss.Style
 
 	Primary lipgloss.Style
 	Success lipgloss.Style
@@ -102,6 +104,13 @@ func NewStyles(t *Theme) *Styles {
 
 		TextMuted: lipgloss.NewStyle().
 			Foreground(t.TextMuted),
+
+		Zebra: lipgloss.NewStyle().
+			Background(t.BackgroundZebra),
+
+		Hover: lipgloss.NewStyle().
+			Background(t.BackgroundElement).
+			Foreground(t.TextBright),
 
 		TextBright: lipgloss.NewStyle().
 			Foreground(t.TextBright),
