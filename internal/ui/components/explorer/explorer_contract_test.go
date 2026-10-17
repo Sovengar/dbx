@@ -539,6 +539,16 @@ func TestFuzzyScoreRanksTheBetterMatchFirst(t *testing.T) {
 		}
 	})
 
+	t.Run("the start-of-target bonus is applied exactly once", func(t *testing.T) {
+		// A first match at index 0 earns 10 for the match, 8 for the word
+		// start, and 10 for matching at the very beginning. Pinned exactly so
+		// the matchStart sentinel cannot collapse to a value that silently
+		// drops the final bonus while the ranking above still happens to hold.
+		if score, ok := fuzzyScore("u", "users"); !ok || score != 28 {
+			t.Errorf("fuzzyScore(\"u\", \"users\") = %d, %v, want 28, true", score, ok)
+		}
+	})
+
 	t.Run("a word boundary earns a bonus", func(t *testing.T) {
 		plain, _ := fuzzyScore("b", "axb")
 		for _, target := range []string{"a_b", "a-b", "a b"} {
