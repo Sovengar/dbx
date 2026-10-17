@@ -110,19 +110,19 @@ type Model struct {
 	// sessionLogger records the SQL that ran, for `dbx pipe`. Nil when
 	// session.enabled is false or the log could not be opened, so every call site
 	// nil-checks rather than testing a flag.
-	sessionLogger    *session.Logger
-	queryBrowser     *querybrowser.QueryBrowser
-	queryBrowserOpen bool
-	ask              *ask.Ask
-	askOpen          bool
-	aiProvider       nl2sql.Provider
-	aiProviderErr    error
-	askSchemaText    string
-	askContextHint   string
-	askGenSeq        int
-	runner           *statementRunner
-	connectCancelled  bool
-	forcePicker       bool
+	sessionLogger      *session.Logger
+	queryBrowser       *querybrowser.QueryBrowser
+	queryBrowserOpen   bool
+	ask                *ask.Ask
+	askOpen            bool
+	aiProvider         nl2sql.Provider
+	aiProviderErr      error
+	askSchemaText      string
+	askContextHint     string
+	askGenSeq          int
+	runner             *statementRunner
+	connectCancelled   bool
+	forcePicker        bool
 	contextMenuVisible bool
 }
 
