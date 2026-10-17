@@ -111,15 +111,15 @@ func TestResolveIsCaseSensitive(t *testing.T) {
 	}
 }
 
-// TestAnUnknownModeGetsTheSystemTheme pins the fallback, and this one is worth reading
-// twice because "system" does not mean what the name suggests.
+// TestAnUnknownModeGetsTheSystemTheme pins the fallback: an unknown mode still runs
+// detection, it does not silently become the dark theme.
 //
-// `detectTerminalColors` takes no arguments and returns two hardcoded hex strings, so the
-// system theme is a fixed palette and not a detection of anything. Combined with the
-// `default:` arm of Resolve — which returns the same thing — an unknown mode, an empty
-// mode, and the literal "system" all produce one identical palette. Asserted as three
-// cases with the SAME expected answer on purpose: it documents that the fallback is the
-// system palette rather than the dark one a reader would assume from the case order.
+// Combined with the `default:` arm of Resolve — which returns the same thing — an unknown
+// mode, an empty mode, and the literal "system" all produce one identical palette.
+// Asserted as several cases with the SAME expected answer on purpose: it documents that
+// the fallback is the system palette rather than the dark one a reader would assume from
+// the case order. What detection answers is pinned in system_test.go, and TestMain there
+// fixes the environment so this comparison is machine-independent.
 func TestAnUnknownModeGetsTheSystemTheme(t *testing.T) {
 	want := Resolve("system")
 	if want == nil {
