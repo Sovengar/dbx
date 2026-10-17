@@ -2573,18 +2573,12 @@ func (m Model) appActions() map[config.ActionID]func(Model) (tea.Model, tea.Cmd)
 				return m, nil
 			}
 			tmpPath := tmpFile.Name()
-			tmpFile.WriteString(sql)
-			tmpFile.Close()
-			defer os.Remove(tmpPath)
+			_, _ = tmpFile.WriteString(sql)
+			_ = tmpFile.Close()
+			defer func() { _ = os.Remove(tmpPath) }()
 			m.editorOpen = false
 			m.editor.Blur()
-			cmd := tea.ExecProcess(exec.Command(editor, tmpPath), func(err error) tea.Msg {
-				data, readErr := os.ReadFile(tmpPath)
-				if readErr != nil {
-					return editorContentMsg{content: sql}
-				}
-				return editorContentMsg{content: string(data)}
-			})
+			cmd := tea.ExecProcess(exec.Command(editor, tmpPath), editorReadback{tmpPath: tmpPath, original: sql}.result)
 			return m, cmd
 		},
 		"context_menu": func(m Model) (tea.Model, tea.Cmd) {
@@ -2703,6 +2697,23 @@ func (m *Model) syncTxStatus() {
 		return
 	}
 	m.keybindsPane.SetTxPending(m.runner.pending())
+}
+
+// editorReadback is the ExecProcess callback for the external editor: once the
+// editor exits it reads the temp file back. A method rather than a closure so a
+// test can call it without a tea Program, and so the two outcomes — a file that
+// came back and one that did not — are testable directly.
+type editorReadback struct {
+	tmpPath  string
+	original string
+}
+
+func (r editorReadback) result(error) tea.Msg {
+	data, err := os.ReadFile(r.tmpPath)
+	if err != nil {
+		return editorContentMsg{content: r.original}
+	}
+	return editorContentMsg{content: string(data)}
 }
 
 func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {

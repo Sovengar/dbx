@@ -98,7 +98,3 @@ type explorerPreviewDataMsg struct {
 type editorContentMsg struct {
 	content string
 }
-
-type contextMenuMsg struct {
-	action string
-}
