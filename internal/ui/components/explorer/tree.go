@@ -118,8 +118,10 @@ func (t *Tree) applyFilter() {
 
 	matches := make(map[*Node]bool)
 	for _, n := range t.allNodes {
-		if n.Type == NodeTable && strings.Contains(strings.ToLower(n.Name), strings.ToLower(t.filter)) {
-			matches[n] = true
+		if n.Type == NodeTable {
+			if _, ok := fuzzyScore(t.filter, n.Name); ok {
+				matches[n] = true
+			}
 		}
 	}
 
