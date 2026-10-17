@@ -114,7 +114,8 @@ and any OpenAI-compatible endpoint.
 - **Help** — scrollable overlay with every keybind, including widget modes.
 - **Mouse** — click, double-click, scroll wheel, header click to sort.
 - **Toast notifications** — success/error/info feedback.
-- **Themes** — system, dark, light, nord, gruvbox, catppuccin.
+- **Themes** — system, dark, light, nord, gruvbox, catppuccin. `system`
+  follows the terminal/desktop background and falls back to dark.
 
 ## Dependencies
 

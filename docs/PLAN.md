@@ -105,12 +105,22 @@ cosmetic one.
 
 ## 7. Theme: real system detection
 
-**Status:** stubbed.
+**Status:** implemented.
 
-`theme.mode = "system"` is the default but `detectSystem()` is a stub that
-returns a hardcoded dark palette. Implement real terminal background/foreground
-detection so `system` actually adapts. The named themes (dark, light, nord,
-gruvbox, catppuccin) are complete.
+`theme.mode = "system"` (the default) resolves the palette from the environment.
+The terminal wins first: `COLORFGBG`, whose last field is the background index,
+separates the dark half of the ANSI palette (0–6, 8) from the light half (7,
+9–15). When the terminal does not answer, the desktop is asked —
+`defaults read -g AppleInterfaceStyle` on macOS, where the missing key *is* light
+mode, and `gsettings get org.gnome.desktop.interface color-scheme` on Linux.
+Anything else falls back to the dark palette, so an environment that answers
+nothing keeps the colours it had before. The detected theme reuses the designed
+dark/light palettes and keeps the name `system`.
+
+The probes (`getenv`, `run`, `goos`) are a `systemProbe` value rather than direct
+`os.Getenv`/`exec.Command` calls, so the suite injects a fake environment instead
+of reading the developer's terminal. The named themes (dark, light, nord, gruvbox,
+catppuccin) never run detection.
 
 ---
 

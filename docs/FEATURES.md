@@ -291,6 +291,15 @@ plus static sections for widget modes and mouse. Scrolls with `j`/`k`,
 Transient bottom-right notifications (success/error/info/warning), auto-dismissed
 after 3 seconds. Not interactive.
 
+### Themes
+
+`theme.mode` in the global config selects the palette: `system` (default), `dark`,
+`light`, `nord`, `gruvbox` or `catppuccin`; an unknown value also uses `system`.
+`system` detects the background — `COLORFGBG` from the terminal, then
+`AppleInterfaceStyle` on macOS or the GNOME `color-scheme` on Linux — and falls
+back to dark when nothing answers. It reuses the dark/light palettes under the
+name `system`; the named modes never run detection.
+
 ## Part 3 — Conventions
 
 ### Action Naming Convention
