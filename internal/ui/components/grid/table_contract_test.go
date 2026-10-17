@@ -2505,6 +2505,48 @@ func TestGrid_YankSwitchesToFileModeAtTheThreshold(t *testing.T) {
 	}
 }
 
+// Scenario: Con el cursor en una fila draft, y copia los datos de ESA fila.
+//
+// A pending insert lives in pendingRows, not in the loaded result, so the
+// arithmetic that names the cursor's row cannot see it: the absolute index it
+// builds points past the end of data.Rows and the bound check drops the row.
+// The picker was then handed no row at all — the grid drew a row under the
+// cursor and the yank copied nothing. The draft is the cursor's row like any
+// other, so the draft is what the picker has to get.
+func TestGrid_YankOnADraftInsertRowTakesTheDraftRow(t *testing.T) {
+	g := newGrid(t, 3, 2, 60, 16, 100)
+
+	// The real key path: i opens the insert editor, a typed value keeps the
+	// row alive on escape, and j walks the cursor down onto it.
+	if _, ok := g.HandleAction("insert_row"); !ok {
+		t.Fatal("insert_row refused")
+	}
+	typeIn(t, g, "draft0")
+	tap(t, g, tea.KeyEscape)
+	for range len(g.data.Rows) {
+		tap(t, g, 'j')
+	}
+	if got := g.cursorRowType(); got != "insert" {
+		t.Fatalf("the cursor is on a %q row, want the pending insert", got)
+	}
+	if len(g.pendingRows) != 1 {
+		t.Fatalf("the fixture has %d pending rows, want 1", len(g.pendingRows))
+	}
+
+	if !tap(t, g, 'y') {
+		t.Fatal("y was not handled")
+	}
+	if !g.exportPicker.IsVisible() {
+		t.Fatal("y did not open the yank picker")
+	}
+	if len(g.exportPicker.row) == 0 {
+		t.Fatal("the yank got no row for a draft insert, so the clipboard would get nothing")
+	}
+	if got := g.exportPicker.row[0]; got != "draft0" {
+		t.Errorf("the yank got %#v, want the draft row's own values", g.exportPicker.row)
+	}
+}
+
 // Scenario: Exportar SIN seleccion manda la tabla entera; con una fila, esa fila.
 //
 // Export and yank are the same picker with different defaults, and the difference

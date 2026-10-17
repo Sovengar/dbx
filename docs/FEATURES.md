@@ -168,9 +168,10 @@ deletion. Committing (`ctrl+s`) dumps the draft SQL into the editor with
 the changes become durable and **cannot** be undone with `U`. `D` discards drafts
 and `u` undoes row drafts. Export (`x`) writes SQL/JSON/CSV to a file next to the
 project, or copies to the clipboard for a single row; `y` always yanks to the
-clipboard. `s` cycles the server-side sort (ASC → DESC → none). `o` navigates an
-FK to its referenced table, `H` goes back through navigation history restoring
-the cursor and filter, and `r` refreshes.
+clipboard, and a pending insert row yanks its own draft values like any other
+row under the cursor. `s` cycles the server-side sort (ASC → DESC → none). `o`
+navigates an FK to its referenced table, `H` goes back through navigation
+history restoring the cursor and filter, and `r` refreshes.
 
 ### Grid preview
 
