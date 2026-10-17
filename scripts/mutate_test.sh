@@ -1415,5 +1415,125 @@ check "ambient diff config: the engine's git never sees it" "" "$(cat "$gr4/gitc
 contains "ambient diff config: the run is still enumerated" "1 measurable of 1 considered" "$out"
 
 echo
+echo "=== 26. gremlins' own concurrency panic is contained on the dbx side ==="
+# ============================================================================
+
+# (a) The verdict names the upstream defect instead of the generic engine error. gremlins v0.6.0 is
+# its latest release, so the red has to say "rerun", not point at a version to pin.
+d=$(new_case red-engine-panic)
+make_log "$d/run.log" 3 0 \
+	'panic: send on closed channel' \
+	'goroutine 42 [running]:' \
+	'github.com/go-gremlins/gremlins/internal/engine.(*Engine).executeTests.func1()'
+verdict "$d" 20 2
+check "engine panic: red" 1 $?
+out=$(cat "$d/verdict.out")
+contains "engine panic: names the defect" "send on closed channel" "$out"
+contains "engine panic: says no fixed version exists" "v0.6.0 is its latest release" "$out"
+contains "engine panic: says to rerun" "rerun the job" "$out"
+lacks "engine panic: not reported as a generic engine error" "engine exited 2" "$out"
+
+# (b) The same panic line without an engine frame belongs to somebody else, and is not misattributed.
+d=$(new_case red-foreign-panic)
+make_log "$d/run.log" 3 0 'panic: send on closed channel' 'goroutine 42 [running]:'
+verdict "$d" 20 2
+check "foreign panic text: red" 1 $?
+out=$(cat "$d/verdict.out")
+contains "foreign panic text: still the engine's own error" "engine exited 2" "$out"
+lacks "foreign panic text: not blamed on gremlins" "latest release" "$out"
+
+# An engine that reproduces the panic from its mutator run, so the run-phase containment is reachable
+# without gremlins. Mode once: the first mutator run panics and the second measures; mode always: every
+# mutator run panics; mode fail: exits 2 with an ordinary error and no panic. Every mutator run appends
+# a line to the attempts file, so "how many attempts happened" is observable from the outside, and
+# delay (seconds) lets a case spend job budget before it panics.
+make_panic_engine() { # make_panic_engine <path> <mode> <attempts-file> [delay-secs]
+	local delay=${4:-0}
+	cat >"$1" <<EOS
+#!/usr/bin/env bash
+dry=0
+out=report.json
+prev=
+for a in "\$@"; do
+	[[ \$prev == --output ]] && out=\$a
+	[[ \$a == --dry-run ]] && dry=1
+	prev=\$a
+done
+if [[ \$dry -eq 1 ]]; then
+	printf 'Starting...\nGathering coverage...\ndone in 2.5s\n'
+	printf '  RUNNABLE CONDITIONALS_BOUNDARY at pkg/gate.go:1:7\n'
+	printf '\nDry run completed in 2.5s\nRunnable: 1, Not covered: 0\n'
+	printf 'Mutator coverage: 100.00%%\n'
+	exit 0
+fi
+echo attempt >>"$3"
+printf '  RUNNABLE CONDITIONALS_BOUNDARY at pkg/gate.go:1:7\n'
+[[ $delay -gt 0 ]] && sleep "$delay"
+if [[ $2 == fail ]]; then
+	printf 'fatal: the mutator set is empty\n' >&2
+	exit 2
+fi
+if [[ $2 == always || \$(wc -l <"$3") -eq 1 ]]; then
+	printf 'panic: send on closed channel\n\ngoroutine 42 [running]:\n'
+	printf 'github.com/go-gremlins/gremlins/internal/engine.(*Engine).executeTests.func1()\n'
+	exit 2
+fi
+printf 'Killed: 1, Lived: 0, Not covered: 0\nTimed out: 0, Not viable: 0, Skipped: 0\n'
+printf '{"go_module":"gitdbx","mutants_total":1,"mutants_killed":1,"mutants_lived":0,"mutants_not_viable":0,"mutants_not_covered":0,"test_efficacy":100.00,"mutations_coverage":100.00,"elapsed_time":3.0,"mutator_statistics":{},"files":[{"file_name":"pkg/gate.go","mutations":[{"type":"CONDITIONALS_BOUNDARY","line":1,"column":7,"status":"KILLED"}]}]}' >"\$out"
+exit 0
+EOS
+	chmod +x "$1"
+}
+
+# (c) The panic is transient: one retry still produces the measurement, and the verdict is green.
+rm -f "$gr4/panic-once.attempts" "$gr4/report.json" "$gr4/run.log"
+make_panic_engine "$gr4/panic-once" once "$gr4/panic-once.attempts"
+out=$(cd "$gr4" && MUTATE_ENGINE="$gr4/panic-once" WATCHDOG_POLL=1 MUTATE_RUN_LOG=run.log \
+	MUTATE_SCOPE_FILE=scope.txt MUTATE_BUDGET_FILE=budget.txt bash scripts/mutate.sh --run 2>&1)
+rc=$?
+check "panic once then measured: green" 0 $rc
+contains "panic once then measured: announces the retry" "retrying once" "$out"
+contains "panic once then measured: the verdict is clean" "measured and clean" "$out"
+check "panic once then measured: two attempts" 2 "$(wc -l <"$gr4/panic-once.attempts" | tr -d ' ')"
+
+# (d) A panic that repeats is not transient: one retry and no more, then the red names the defect.
+rm -f "$gr4/panic-always.attempts" "$gr4/report.json"
+make_panic_engine "$gr4/panic-always" always "$gr4/panic-always.attempts"
+out=$(cd "$gr4" && MUTATE_ENGINE="$gr4/panic-always" WATCHDOG_POLL=1 MUTATE_RUN_LOG=run.log \
+	MUTATE_SCOPE_FILE=scope.txt MUTATE_BUDGET_FILE=budget.txt bash scripts/mutate.sh --run 2>&1)
+rc=$?
+check "panic twice: red" 1 $rc
+contains "panic twice: names the defect" "send on closed channel" "$out"
+lacks "panic twice: not called a clean measurement" "measured and clean" "$out"
+check "panic twice: two attempts and never a loop" 2 "$(wc -l <"$gr4/panic-always.attempts" | tr -d ' ')"
+
+# (e) An ordinary engine failure is NOT the panic: no retry, and the generic reason survives.
+rm -f "$gr4/fail-engine.attempts" "$gr4/report.json"
+make_panic_engine "$gr4/fail-engine" fail "$gr4/fail-engine.attempts"
+out=$(cd "$gr4" && MUTATE_ENGINE="$gr4/fail-engine" WATCHDOG_POLL=1 MUTATE_RUN_LOG=run.log \
+	MUTATE_SCOPE_FILE=scope.txt MUTATE_BUDGET_FILE=budget.txt bash scripts/mutate.sh --run 2>&1)
+rc=$?
+check "ordinary engine failure: red" 1 $rc
+lacks "ordinary engine failure: not retried" "retrying once" "$out"
+contains "ordinary engine failure: names the exit" "engine exited 2" "$out"
+check "ordinary engine failure: one attempt" 1 "$(wc -l <"$gr4/fail-engine.attempts" | tr -d ' ')"
+
+# (f) The retry obeys the same job-budget rule as the first attempt, so containment can never be what
+# makes the platform cancel a job with no reason. The engine burns 4s before it panics and the job
+# ceiling sits 4s above what a fresh attempt needs: the first attempt starts, the second does not.
+rm -f "$gr4/panic-broke.attempts" "$gr4/report.json"
+make_panic_engine "$gr4/panic-broke" always "$gr4/panic-broke.attempts" 4
+out=$(cd "$gr4" && MUTATE_ENGINE="$gr4/panic-broke" WATCHDOG_POLL=1 MUTATE_RUN_LOG=run.log \
+	MUTATE_SCOPE_FILE=scope.txt MUTATE_BUDGET_FILE=budget.txt \
+	MUTATE_CAP=1s MUTATE_WORKERS=4 MUTATE_STALL=3s MUTATE_CEILING=20s \
+	MUTATE_JOB_CEILING=29s MUTATE_SETUP_RESERVE=1s MUTATE_JOB_START="$(($(date +%s) - 5))" \
+	bash scripts/mutate.sh --run --ci 2>&1)
+rc=$?
+check "no budget for a retry: red" 1 $rc
+contains "no budget for a retry: says so" "not enough job budget left to retry" "$out"
+lacks "no budget for a retry: the engine is not run twice" "retrying once" "$out"
+check "no budget for a retry: one attempt" 1 "$(wc -l <"$gr4/panic-broke.attempts" | tr -d ' ')"
+
+echo
 printf '%d/%d passed\n' "$pass" "$((pass + fail))"
 [[ $fail -eq 0 ]]

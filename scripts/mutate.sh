@@ -122,6 +122,17 @@ _verdict_run_state() { # <run_log> <engine_rc>
 	fi
 
 	if [[ $engine_rc -ne 0 ]]; then
+		# The engine's OWN concurrency defect, told apart from its ordinary errors. report.json is
+		# written only AFTER the engine returns, so a mid-run panic leaves none and every mutant it
+		# had measured dies with it. The run phase retries this once; reaching the verdict means it
+		# panicked twice, or there was no job budget left to retry. Either way it is a red.
+		if _engine_panicked "$run_log"; then
+			_out "- **no measurement**: the mutation engine panicked with its own concurrency defect (\`panic: send on closed channel\`) and died before writing the report."
+			_out "- The defect is upstream in gremlins and v0.6.0 is its latest release, so there is no fixed version to pin: rerun the job."
+			_out ''
+			_log_tail "$run_log"
+			return 1
+		fi
 		_out "- **no measurement**: the mutation engine exited $engine_rc, so the run failed."
 		_out "- An exit that is not 124/130/143 is the engine's own error, not a cut by the supervisor."
 		_out ''
@@ -379,6 +390,16 @@ _log_tail() { # _log_tail <run_log>
 	local line
 	while IFS= read -r line; do _out "  $line"; done < <(tail -n 25 "$1")
 	_out '```'
+}
+
+# Whether the run log carries gremlins' OWN concurrency panic, as opposed to any other engine error.
+# In v0.6.0 the dispatcher Adds to its WaitGroup after Wait() can already have returned, so
+# close(outCh) races the last worker's send and the process dies before report.Do writes anything.
+# Matched on the panic line AND an engine frame, so a same-text panic raised anywhere else is not
+# misattributed to a tool we cannot patch.
+_engine_panicked() { # _engine_panicked <run_log>
+	grep -qE '^panic: send on closed channel' "$1" 2>/dev/null &&
+		grep -qE 'go-gremlins/gremlins/internal/engine' "$1" 2>/dev/null
 }
 
 # On every verdict: these numbers only mean something relative to the job ceiling, which the workflow hides.
@@ -730,19 +751,52 @@ fi
 
 # --- supervise: no exec, because it would take away the ability to tell 124 from a failed mutation
 echo "mutate: supervising (stall $STALL, ceiling $CEILING, $WATCH_LINES progress lines to watch)" >&2
-# stderr is folded into the SAME log: the supervisor's reasons go to its stderr, and a stdout-only
-# tee dropped the one line that explains a 124, so the verdict printed "reason not found in the log".
-# It cannot disturb the TIMED OUT cross-check: the supervisor prefixes every line with its own name.
-"$WATCHDOG" "$STALL" "$CEILING" "$WATCH_LINES" "$PROGRESS_RE" -- \
-	$ENGINE "${SCOPE_ARGS[@]}" "${ENGINE_FLAGS[@]}" \
-	--workers "$WORKERS" --timeout-coefficient "$COEF" --output "$REPORT" \
-	${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"} 2>&1 |
-	tee "$RUN_LOG"
 
-# Taken immediately: under pipefail a pipeline's status is "the last non-zero", so a failed tee would read as a failed run.
-ENGINE_RC=${PIPESTATUS[0]}
+# The supervised engine, as a function so the containment below can run it a second time with the
+# same arguments. stderr is folded into the SAME log: the supervisor's reasons go to its stderr, and a
+# stdout-only tee dropped the one line that explains a 124, so the verdict printed "reason not found
+# in the log". It cannot disturb the TIMED OUT cross-check: the supervisor prefixes its own lines.
+run_supervised() { # run_supervised <run_log>
+	"$WATCHDOG" "$STALL" "$CEILING" "$WATCH_LINES" "$PROGRESS_RE" -- \
+		$ENGINE "${SCOPE_ARGS[@]}" "${ENGINE_FLAGS[@]}" \
+		--workers "$WORKERS" --timeout-coefficient "$COEF" --output "$REPORT" \
+		${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"} 2>&1 |
+		tee "$1"
+	# The engine's own code, never tee's: under pipefail a pipeline's status is "the last non-zero",
+	# so a failed tee would otherwise read as a failed run.
+	return "${PIPESTATUS[0]}"
+}
+
+run_supervised "$RUN_LOG"
+ENGINE_RC=$?
 
 echo "mutate: engine exit $ENGINE_RC, log $RUN_LOG, report $REPORT" >&2
+
+# Containment for gremlins' own concurrency panic (see _engine_panicked): the process dies before
+# report.json exists and every mutant it had measured goes with it, so a fresh run is the only way
+# this change still gets a measurement. ONE retry and no more: the window is a schedule race, so a
+# rerun is worth one attempt, and a panic that repeats is not transient -- it is the red below.
+# The retry obeys the same job-budget rule as the first attempt, so containment can never be what
+# makes the platform cut the job with no reason.
+if [[ $ENGINE_RC -ne 0 && ! -f $REPORT ]] && _engine_panicked "$RUN_LOG"; then
+	retry=''
+	if [[ $JOB_CEILING_SECS -gt 0 && $JOB_START =~ ^[0-9]+$ && $JOB_START -gt 0 ]]; then
+		retry_elapsed=$(( $(date +%s) - JOB_START ))
+		retry_remaining=$(( JOB_CEILING_SECS - retry_elapsed ))
+		echo "mutate: retry budget: ${retry_elapsed}s spent, ${retry_remaining}s left, another supervisor ceiling is ${CEILING_SECS}s" >&2
+		[[ $retry_remaining -gt $CEILING_SECS ]] && retry=1
+	else
+		retry=1
+	fi
+	if [[ -n $retry ]]; then
+		echo "mutate: the engine panicked on its own concurrency (upstream gremlins) and left no report; retrying once" >&2
+		run_supervised "$RUN_LOG"
+		ENGINE_RC=$?
+		echo "mutate: retry exit $ENGINE_RC, log $RUN_LOG, report $REPORT" >&2
+	else
+		echo "mutate: the engine panicked on its own concurrency (upstream gremlins), and there is not enough job budget left to retry" >&2
+	fi
+fi
 
 # One path for producer, verdict and upload, so they cannot disagree if told the same one.
 if [[ -n ${GITHUB_OUTPUT:-} ]]; then
