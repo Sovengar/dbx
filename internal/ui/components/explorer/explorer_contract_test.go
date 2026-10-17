@@ -377,6 +377,42 @@ func TestTheFilterNarrowsToTableNamesAndKeepsTheWayThere(t *testing.T) {
 		}
 	})
 
+	t.Run("it matches a fuzzy subsequence, not only a substring", func(t *testing.T) {
+		f := newFixture(t)
+		for _, tc := range []struct {
+			filter string
+			want   string
+		}{
+			// None of these is a substring of its table: "tms" skips e and i
+			// inside items, "ors" skips d and e inside orders. A subsequence
+			// matcher finds them; strings.Contains did not.
+			{"ues", "users"},
+			{"ors", "orders"},
+			{"tms", "items"},
+			{"evt", "events"},
+			{"UES", "users"}, // fuzzy stays case-insensitive
+		} {
+			got := f.typeFilter(tc.filter)
+			wantTables := strings.Split(tc.want, "|")
+			if len(got) != len(wantTables)+2 {
+				t.Errorf("the fuzzy filter %q matched %v, want the database, the schema and %v", tc.filter, got, wantTables)
+				continue
+			}
+			if strings.Join(got[2:], "|") != strings.Join(wantTables, "|") {
+				t.Errorf("the fuzzy filter %q matched %v, want it to end at %v", tc.filter, got, wantTables)
+			}
+		}
+	})
+
+	t.Run("a subsequence out of order is not a match", func(t *testing.T) {
+		f := newFixture(t)
+		// "sru": the s and r are in "users", but u comes before s there, so
+		// the order rule rejects it. Without the order rule this would match.
+		if got := f.typeFilter("sru"); len(got) != 0 {
+			t.Errorf("the out-of-order filter matched %v, want nothing", got)
+		}
+	})
+
 	t.Run("a filter matching nothing shows nothing, not everything", func(t *testing.T) {
 		f := newFixture(t)
 		for _, filter := range []string{"zzzz", "publicXX", "  "} {
@@ -455,6 +491,70 @@ func TestTheFilterNarrowsToTableNamesAndKeepsTheWayThere(t *testing.T) {
 		f.explorer.tree.ClearFilter()
 		if strings.Contains(strings.Join(f.names(), "|"), "events") {
 			t.Errorf("after clearing the filter the collapsed schema's table is still shown: %v", f.names())
+		}
+	})
+}
+
+// The score is the matcher's other half: it ranks a contiguous, start-of-word
+// hit above a scattered one. Production keeps the tree's own order, so the score
+// is not what decides what is shown — but it is fuzzyScore's contract, and it is
+// asserted here so the arithmetic cannot drift.
+func TestFuzzyScoreRanksTheBetterMatchFirst(t *testing.T) {
+	t.Run("an empty query matches everything with no score", func(t *testing.T) {
+		if score, ok := fuzzyScore("", "anything"); !ok || score != 0 {
+			t.Errorf("fuzzyScore(\"\", ...) = %d, %v, want 0, true", score, ok)
+		}
+	})
+
+	t.Run("a query longer than the target cannot match", func(t *testing.T) {
+		if _, ok := fuzzyScore("users", "use"); ok {
+			t.Error("a query longer than the target reported a match")
+		}
+	})
+
+	t.Run("a missing or out-of-order character is not a match", func(t *testing.T) {
+		for _, tc := range [][2]string{{"xyz", "users"}, {"sru", "users"}} {
+			if _, ok := fuzzyScore(tc[0], tc[1]); ok {
+				t.Errorf("fuzzyScore(%q, %q) reported a match", tc[0], tc[1])
+			}
+		}
+	})
+
+	t.Run("a contiguous match beats a scattered one", func(t *testing.T) {
+		// Same three characters, same target: "use" sits together at the
+		// start, "ues" skips back to the s. Only the adjacency and position
+		// bonuses can separate them.
+		contiguous, _ := fuzzyScore("use", "users")
+		scattered, _ := fuzzyScore("ues", "users")
+		if contiguous <= scattered {
+			t.Errorf("the contiguous match scored %d, no better than the scattered %d", contiguous, scattered)
+		}
+	})
+
+	t.Run("a match at the start beats one in the middle", func(t *testing.T) {
+		first, _ := fuzzyScore("u", "users")
+		middle, _ := fuzzyScore("s", "users")
+		if first <= middle {
+			t.Errorf("the start match scored %d, no better than the middle %d", first, middle)
+		}
+	})
+
+	t.Run("a word boundary earns a bonus", func(t *testing.T) {
+		plain, _ := fuzzyScore("b", "axb")
+		for _, target := range []string{"a_b", "a-b", "a b"} {
+			boundary, _ := fuzzyScore("b", target)
+			if boundary <= plain {
+				t.Errorf("the boundary in %q scored %d, no better than %d", target, boundary, plain)
+			}
+		}
+	})
+
+	t.Run("the query is matched case-insensitively", func(t *testing.T) {
+		lower, _ := fuzzyScore("users", "Users")
+		upper, _ := fuzzyScore("USERS", "users")
+		exact, _ := fuzzyScore("users", "users")
+		if lower != exact || upper != exact {
+			t.Errorf("case changed the score: lower=%d upper=%d exact=%d", lower, upper, exact)
 		}
 	})
 }

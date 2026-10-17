@@ -127,7 +127,10 @@ inactive ones.
 Purpose: browse the schema tree and drive table operations.
 
 A tree of database → schema → table → columns/indexes/constraints, with a filter
-line (`/`). Focus with `e`. Table-level actions emit editor scaffolds rather than
+line (`/`). The filter matches table names case-insensitively as a fuzzy
+subsequence, so `tms` finds `items`; a matched table keeps its ancestors
+(database and schema) visible, and expansion is ignored while filtering. Focus
+with `e`. Table-level actions emit editor scaffolds rather than
 executing directly: `enter`/`l` loads a table's data into the grid, while `d`
 (drop), `v` (view DDL) and `n` (new table) open the editor pre-filled with
 `DROP TABLE …`, a DDL-generating query, or a `CREATE TABLE …` scaffold. `r`
