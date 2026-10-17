@@ -33,7 +33,9 @@ type rowRenderer struct {
 
 func rowRenderers() []rowRenderer {
 	return []rowRenderer{
-		{"RenderRow", func(v []interface{}, w []int, a int, _ map[int]bool) string { return cellRenderer().RenderRow(v, w, a, false) }, true},
+		{"RenderRow", func(v []interface{}, w []int, a int, _ map[int]bool) string {
+			return cellRenderer().RenderRow(v, w, a, false)
+		}, true},
 		{"RenderSelectedRow", func(v []interface{}, w []int, _ int, _ map[int]bool) string {
 			return cellRenderer().RenderSelectedRow(v, w)
 		}, false},
