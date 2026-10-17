@@ -1019,6 +1019,13 @@ func (g *Grid) startYank() (tea.Cmd, bool) {
 				row = g.data.Rows[i]
 			}
 		}
+	} else if idx := g.pendingInsertIndex(); idx >= 0 {
+		// Cursor row, and the cursor is on a draft insert. That row lives in
+		// pendingRows, not in the loaded result, so the data-row arithmetic
+		// below would build an index past the end of data.Rows and the bound
+		// check would drop it — the picker got no row and the yank copied
+		// nothing while the grid drew a row under the cursor.
+		row = g.pendingRows[idx]
 	} else {
 		// Cursor row
 		absRow := g.scrollRow + g.cursorRow + g.pager.Offset()
