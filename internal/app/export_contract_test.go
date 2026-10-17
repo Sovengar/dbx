@@ -109,12 +109,22 @@ func TestCopyToClipboardGivesTheContentToTheProcess(t *testing.T) {
 		}
 	})
 
-	t.Run("the SECOND tool is used when the first is missing, and also gets the content", func(t *testing.T) {
+	t.Run("the SECOND tool is used when the first fails, and also gets the content", func(t *testing.T) {
 		// The fallback is the path most X11 users actually take, and it works only
 		// because Stdin happens to be assigned before the final Run. Asserted so the
 		// two are not quietly swapped.
+		//
+		// The first attempt is made to FAIL rather than to be missing: TestMain puts
+		// stub helpers on PATH so no case can reach the developer's real clipboard,
+		// and a stubbed xclip is therefore always present. A non-zero exit takes the
+		// same branch the old "not installed" case took — the loop continues on any
+		// error — without depending on the host lacking xclip.
 		dir := t.TempDir()
 		fakeClipboard(t, dir, "xsel")
+		failingXclip := filepath.Join(dir, "xclip")
+		if err := os.WriteFile(failingXclip, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
 		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		t.Setenv("WAYLAND_DISPLAY", "")
 

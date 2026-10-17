@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -23,12 +25,66 @@ var (
 	sharedDBErr  error
 )
 
-// TestMain terminates the shared PostgreSQL container (if one was started)
-// after the package's tests finish.
+// TestMain sandboxes the clipboard, then terminates the shared PostgreSQL container (if
+// one was started) after the package's tests finish.
 func TestMain(m *testing.M) {
+	dir := sandboxClipboard()
 	code := m.Run()
+	_ = os.RemoveAll(dir)
 	stopSharedPostgres()
 	os.Exit(code)
+}
+
+// clipboardHelperNames are every clipboard helper copyToClipboard can pick on the POSIX
+// platforms this suite runs on. The sandbox writes a stub for each and the pin test reads
+// the same list, so a helper the sandbox forgets is a red test and not a silent gap.
+var clipboardHelperNames = []string{"wl-copy", "xclip", "xsel", "pbcopy"}
+
+// sandboxClipboard puts fake clipboard helpers at the FRONT of PATH for the whole package
+// and returns the directory holding them.
+//
+// copyToClipboard resolves its helper through PATH, so one case that forgets to stub the
+// seam does not fail — it silently overwrites the clipboard of whoever ran the suite with
+// a fixture like "SELECT * FROM users WHERE id = 1". That is what happened here: the
+// package's own copy-SQL cases ran the real helper, and the person running the tests found
+// their clipboard holding a statement they never copied.
+//
+// The fakes swallow their stdin and exit 0, so a forgotten stub copies nothing anywhere.
+// The cases that DO inspect the payload prepend their own stub to PATH, which still wins
+// because it goes in front of this directory.
+func sandboxClipboard() string {
+	dir, err := os.MkdirTemp("", "dbx-clipboard-sandbox")
+	if err != nil {
+		log.Fatalf("clipboard sandbox: %v", err)
+	}
+	for _, name := range clipboardHelperNames {
+		stub := filepath.Join(dir, name)
+		if err := os.WriteFile(stub, []byte("#!/bin/sh\ncat > /dev/null\n"), 0o700); err != nil {
+			log.Fatalf("clipboard sandbox: %v", err)
+		}
+	}
+	if err := os.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH")); err != nil {
+		log.Fatalf("clipboard sandbox: %v", err)
+	}
+	return dir
+}
+
+// TestTheClipboardSandboxIsInstalled pins the net, because a net nobody checks is removed
+// by the next person who finds the extra PATH entry surprising.
+//
+// It reads the files instead of calling copyToClipboard on purpose: probing the seam would
+// reintroduce the leak if the sandbox were ever the thing that was removed.
+func TestTheClipboardSandboxIsInstalled(t *testing.T) {
+	first := strings.SplitN(os.Getenv("PATH"), string(os.PathListSeparator), 2)[0]
+	for _, name := range clipboardHelperNames {
+		data, err := os.ReadFile(filepath.Join(first, name))
+		if err != nil {
+			t.Fatalf("%s is not sandboxed, so a case that forgets to stub copyToClipboard reaches the real clipboard: %v", name, err)
+		}
+		if !strings.Contains(string(data), "/dev/null") {
+			t.Errorf("%s does not swallow its stdin: %q", name, data)
+		}
+	}
 }
 
 // testDSN resolves the PostgreSQL DSN for integration tests:
