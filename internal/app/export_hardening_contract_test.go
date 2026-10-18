@@ -92,6 +92,7 @@ func TestADBControlledExportNameIsSanitised(t *testing.T) {
 		{"a non-ASCII identifier is unchanged", "public", "üsers", "public_üsers.csv"},
 		{"an ordinary name is unchanged", "public", "users", "public_users.csv"},
 		{"a digest-shaped name is reserved even when it is unchanged", "public", "a_b-c14cdd", "public_a_b-c14cdd-" + shortDigest("a_b-c14cdd") + ".csv"},
+		{"a dash and six non-hex characters are not the digest shape", "public", "abc-zzzzzz", "public_abc-zzzzzz.csv"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := exportFilename(tc.schema, tc.table, grid.ExportCSV, ',', false); got != tc.want {
