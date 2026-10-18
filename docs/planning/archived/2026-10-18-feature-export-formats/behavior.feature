@@ -105,16 +105,37 @@ Feature: Grid export — Markdown, custom delimiters and file compression
     Given a schema or table name that contains a path separator or a traversal
     When the user exports to a file
     Then path separators and control characters in the name are replaced with "_"
+    And a name that had to be changed carries a short digest
     And a ".." component can never be a traversal component of its own
     And the resolved destination must stay inside the project directory
     And a destination that escapes it is refused and logged
 
+  Scenario: Sanitised names that would collide stay distinct
+    Given the table names "a/b", "a_b" and "a<TAB>b"
+    When the user exports each to a file
+    Then each export has a distinct file name because a changed name carries a short digest
+    And an unchanged "public"/"users" is still named "public_users.csv"
+
+  Scenario: A symlink at the export destination is refused
+    Given a destination name in the project that is a symlink pointing outside it
+    When the user exports to a file
+    Then the outside target is untouched
+    And the export is refused with the refusal logged
+
+  Scenario: A very long identifier still exports
+    Given a schema or table name longer than the filesystem name limit
+    When the user exports to a file
+    Then the name is truncated and keeps the short digest
+    And the export does not fail with ENAMETOOLONG
+
   Scenario: Delimited cells cannot inject a spreadsheet formula
     Given a cell whose string form starts with "=", "+", "-", "@", TAB or CR
     When the user exports the delimited format
-    Then the cell is prefixed with a leading apostrophe
+    Then the cell is prefixed with a leading apostrophe in the file
+    And the clipboard and yank payloads keep the value byte for byte
     And SQL, JSON and Markdown exports are unchanged
 
   Scenario: Exported files are readable only by their owner
     When the user exports rows to a file
     Then the file is written with mode 0600
+    And re-exporting over a pre-existing file also leaves mode 0600

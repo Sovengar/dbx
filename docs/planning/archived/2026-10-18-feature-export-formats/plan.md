@@ -173,11 +173,22 @@ Review: 2026-10-18 — PASS WITH FINDINGS (round 2, tip `603c030`). 13/13 scenar
 | Compression applies to every file format | ✅ | 09d0431 |
 | Clipboard and yank exports are never compressed | ✅ | b3c5199 |
 | The existing SQL, JSON and CSV defaults are unchanged | ✅ | 24a1741 |
-| A DB-controlled schema or table cannot write outside the project | ✅ | d179127 |
-| Delimited cells cannot inject a spreadsheet formula | ✅ | d179127 |
-| Exported files are readable only by their owner | ✅ | d179127 |
+| A DB-controlled schema or table cannot write outside the project | ✅ | d179127, 95ff5da |
+| Delimited cells cannot inject a spreadsheet formula | ✅ | d179127, 95ff5da |
+| Exported files are readable only by their owner | ✅ | d179127, 95ff5da |
+| Sanitised names that would collide stay distinct | ✅ | 95ff5da |
+| A symlink at the export destination is refused | ✅ | 95ff5da |
+| A very long identifier still exports | ✅ | 95ff5da |
 
 Hardening addendum (2026-10-18, after the PR review): the three security-shaped
 findings filed against `main` — schema/table path traversal in `exportFilename`,
 CSV/TSV formula injection and the `0644` export mode — are fixed on the same branch
 before the merge, with real tests and their own scenarios above. See ADR 0004.
+
+Hardening follow-up (2026-10-18, after the re-review of `d179127`): the lexical
+containment was completed at open time (`O_NOFOLLOW`, so a destination symlink is
+refused and `ELOOP` takes the same refusal path), the owner-only mode is re-applied
+when an existing file is overwritten, a sanitised component carries a short digest so
+distinct names cannot collide and an overlong one is truncated, and the formula escape
+moved to the file boundary so the clipboard and yank stay byte-faithful. The scenarios
+the first pass already had were updated in place (same rows). See ADR 0004.
