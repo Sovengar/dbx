@@ -128,16 +128,22 @@ becomes `schema_table.csv.gz`. Clipboard copies and yanks are never compressed.
 Repeating an export overwrites the same name.
 
 A delimited cell whose string form begins with `=`, `+`, `-`, `@`, a tab or a
-carriage return is prefixed with an apostrophe, because a spreadsheet would
-otherwise execute it as a formula. The cost is accepted and recorded: `-1`
-exports as `'-1` and no longer round-trips byte for byte (the same applies to a
-column name that begins with one of those characters). SQL, JSON and Markdown are
-not spreadsheet input and are not escaped.
+carriage return is prefixed with an apostrophe **in the exported file only**, because
+a spreadsheet would otherwise execute it as a formula. Clipboard copies and the `y`
+yank keep the value byte-faithful, so yanking `-1` copies `-1`. The cost is accepted
+and recorded in ADR 0004: `-1` exports as `'-1` and no longer round-trips byte for
+byte, the escape is not injective (`-1` and a literal `'-1` both export as `'-1`),
+and the same applies to a column name that begins with one of those characters. SQL,
+JSON and Markdown are not spreadsheet input and are not escaped.
 
 The exported file name is built from the schema and table; path separators and
-control characters in either name are replaced with `_`, and the resolved file is
-refused (and logged) if it would fall outside the project directory. Exported
-files are written owner-only (`0600`).
+control characters in either name are replaced with `_`, and a name that had to be
+changed carries a `-` plus a short digest so two different names cannot collide on one
+file (`a/b`, `a_b` and `a<TAB>b` become distinct). A name too long for the filesystem
+is truncated and keeps the digest. The resolved file is refused (and logged) if it
+would fall outside the project directory, or if the destination is a symlink.
+Exported files are written owner-only (`0600`), including when an existing file is
+overwritten.
 
 With `nerd_font = true`, key hints render as glyphs in the keybinds pane, the
 `?` help modal and the inline footers: `enter` `esc` `tab` `space` `backspace`
