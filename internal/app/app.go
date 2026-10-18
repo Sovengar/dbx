@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -2804,9 +2805,9 @@ func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
 				data = gzipExport(data)
 			}
 
-			filePath := filepath.Join(m.project.Path, filename)
-			if err := os.WriteFile(filePath, data, 0644); err != nil {
-				return exportDoneMsg{err: fmt.Errorf("failed to write file: %w", err)}
+			filePath, err := writeExportFile(m.project.Path, filename, data)
+			if err != nil {
+				return exportDoneMsg{err: err}
 			}
 
 			return exportDoneMsg{filename: filePath}
@@ -2920,6 +2921,26 @@ func exportAsJSON(result *postgres.QueryResult) string {
 	return string(data) + "\n"
 }
 
+// escapeCSVFormula neutralises a spreadsheet formula at the start of a delimited
+// cell.
+//
+// Excel, LibreOffice and Sheets execute a cell that begins with `=`, `+`, `-`, `@`,
+// a tab or a carriage return, and a dbx export carries data the user did not author.
+// A leading apostrophe makes the cell literal text. The cost is deliberate and
+// recorded in the ADR and the changelog: `-1` exports as `'-1` and no longer
+// round-trips byte for byte. Only the delimited formats do this; SQL, JSON and
+// Markdown are not spreadsheet input and keep their payload untouched.
+func escapeCSVFormula(value string) string {
+	if value == "" {
+		return value
+	}
+	switch value[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + value
+	}
+	return value
+}
+
 func exportAsCSV(result *postgres.QueryResult, comma rune) string {
 	var sb strings.Builder
 	writer := csv.NewWriter(&sb)
@@ -2930,7 +2951,7 @@ func exportAsCSV(result *postgres.QueryResult, comma rune) string {
 	// Header
 	headers := make([]string, width)
 	for i, col := range result.Columns[:width] {
-		headers[i] = col.Name
+		headers[i] = escapeCSVFormula(col.Name)
 	}
 	// The sink is a strings.Builder, which cannot fail, but an invalid Comma makes
 	// csv.Writer.Write return before writing anything: unchecked, that is an empty
@@ -2945,7 +2966,7 @@ func exportAsCSV(result *postgres.QueryResult, comma rune) string {
 	for _, row := range result.Rows {
 		record := make([]string, width)
 		for i, val := range row[:width] {
-			record[i] = fmt.Sprintf("%v", val)
+			record[i] = escapeCSVFormula(fmt.Sprintf("%v", val))
 		}
 		if err := writer.Write(record); err != nil {
 			appDebugLog("exportAsCSV: row: %v", err)
@@ -2996,13 +3017,18 @@ func exportRowAsCSV(columns []string, row []interface{}, comma rune) string {
 	// Same as exportAsCSV: a strings.Builder cannot fail, but an invalid Comma
 	// makes csv.Writer.Write return without writing, so the error is logged, not
 	// dropped.
-	if err := writer.Write(columns[:rowWidth(columns, row)]); err != nil {
+	width := rowWidth(columns, row)
+	headers := make([]string, width)
+	for i, name := range columns[:width] {
+		headers[i] = escapeCSVFormula(name)
+	}
+	if err := writer.Write(headers); err != nil {
 		appDebugLog("exportRowAsCSV: header: %v", err)
 	}
 
-	record := make([]string, rowWidth(columns, row))
+	record := make([]string, width)
 	for i, val := range row[:len(record)] {
-		record[i] = fmt.Sprintf("%v", val)
+		record[i] = escapeCSVFormula(fmt.Sprintf("%v", val))
 	}
 	if err := writer.Write(record); err != nil {
 		appDebugLog("exportRowAsCSV: row: %v", err)
@@ -3090,6 +3116,28 @@ func markdownCell(val interface{}) string {
 	return cell
 }
 
+// sanitizeExportComponent makes one database-controlled identifier safe to be part
+// of a filename. The export is named `<schema>_<table>.<ext>`, and both components
+// come from the database, so a schema of `x/../../y` used to escape the project
+// directory. Every path separator (`/`, `\`) and every control character becomes
+// `_`, and a component that sanitises to exactly `.` or `..` becomes `_` so it can
+// never be a traversal component on its own. Ordinary identifiers are unchanged.
+func sanitizeExportComponent(name string) string {
+	var sb strings.Builder
+	for _, r := range name {
+		if r == '/' || r == '\\' || unicode.IsControl(r) {
+			sb.WriteRune('_')
+			continue
+		}
+		sb.WriteRune(r)
+	}
+	sanitized := sb.String()
+	if sanitized == "." || sanitized == ".." {
+		return "_"
+	}
+	return sanitized
+}
+
 // exportFilename owns the extension of every export, so the name and the
 // content are decided from the same format and the same normalised delimiter
 // and cannot diverge: .sql, .json, .csv, .tsv (tab) and .md, with .gz appended
@@ -3116,11 +3164,32 @@ func exportFilename(schema, table string, format grid.ExportFormat, comma rune, 
 		appDebugLog("exportFilename: unknown ExportFormat %d, using .sql", format)
 	}
 
-	name := fmt.Sprintf("%s_%s.%s", schema, table, ext)
+	name := fmt.Sprintf("%s_%s.%s", sanitizeExportComponent(schema), sanitizeExportComponent(table), ext)
 	if compress {
 		name += ".gz"
 	}
 	return name
+}
+
+// writeExportFile resolves an export name against the project directory, refuses a
+// destination that leaves it, and writes the bytes owner-only.
+//
+// This is the second, independent layer behind sanitizeExportComponent: even if a
+// name ever reached here unsanitised, the resolved path must still be inside the
+// project. filepath.Rel is what expresses "inside" — an absolute result or one
+// starting with `..` is outside — and a violation is logged and refused through the
+// caller's error path rather than written.
+func writeExportFile(projectPath, filename string, data []byte) (string, error) {
+	filePath := filepath.Join(projectPath, filename)
+	rel, err := filepath.Rel(projectPath, filePath)
+	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		appDebugLog("writeExportFile: refusing %q outside the project %q", filename, projectPath)
+		return "", fmt.Errorf("refusing to write outside the project directory: %s", filename)
+	}
+	if err := os.WriteFile(filePath, data, 0o600); err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+	return filePath, nil
 }
 
 // gzipExport compresses an export in memory. Not a streaming writer: the
