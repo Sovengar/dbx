@@ -106,12 +106,26 @@ the command.
 [ui]
 page_size = 100        # rows per grid page
 yank_max_rows = 10     # clipboard if the selection is <= this, else a file
+export_delimiter = ","  # separator of the delimited export: one char, or "tab"/"\t"
+export_compress = false # gzip exports that go to a file (never the clipboard)
 nerd_font = true       # Nerd Font glyphs for key hints
 ```
 
-Defaults: `page_size = 100`, `yank_max_rows = 10`, `nerd_font = true`. Set
+Defaults: `page_size = 100`, `yank_max_rows = 10`, `export_delimiter = ","`,
+`export_compress = false`, `nerd_font = true`. Set
 `nerd_font = false` to render key hints as plain text (`enter`/`esc`/`tab`/
 `ctrl+d`) for terminals without a Nerd Font.
+
+`export_delimiter` accepts one literal character (`;`, `|`, `,`) or the aliases
+`"tab"` / `"\t"` for the tab character; a tab writes a real tab byte and names
+the file `.tsv`, any other delimiter keeps the `.csv` extension. A value that is
+empty, longer than one character, or unusable for CSV (`"`, newline, NUL) falls
+back to `,` instead of failing the export.
+
+`export_compress = true` gzips every export that goes to a **file** (SQL, JSON,
+delimited and Markdown) and appends `.gz` after the format extension, so a CSV
+becomes `schema_table.csv.gz`. Clipboard copies and yanks are never compressed.
+Repeating an export overwrites the same name.
 
 With `nerd_font = true`, key hints render as glyphs in the keybinds pane, the
 `?` help modal and the inline footers: `enter` `esc` `tab` `space` `backspace`
