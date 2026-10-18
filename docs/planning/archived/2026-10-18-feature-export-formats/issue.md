@@ -1,10 +1,10 @@
-Status: approved
+Status: implemented
 
 # Export formats: Markdown, delimitadores personalizados y compresión
 
 - **Slug**: `feature-export-formats`
 - **Tipo**: feature (formatos de exportación del grid)
-- **Branch**: `feature/export-formats`
+- **Branch**: `feat/export-formats`
 - **Nivel**: PIPELINE (feature sobre el picker de export existente; no es refactor ni fix)
 - **Cross-reference**: tsk task #31 — "Export formats: Markdown, custom delimiters,
   compression" (`in_progress`).

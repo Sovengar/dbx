@@ -8,7 +8,7 @@ generated_by: codebase-researcher
 # Context: Export formats — Markdown, custom delimiter, file compression
 
 All paths absolute. Every line number below was read at commit
-`cf7ca7ac4ae36a71aa3c8049f89449fecd75dcbe` (branch `feature/export-formats`).
+`cf7ca7ac4ae36a71aa3c8049f89449fecd75dcbe` (branch `feat/export-formats`).
 
 ## Scope
 

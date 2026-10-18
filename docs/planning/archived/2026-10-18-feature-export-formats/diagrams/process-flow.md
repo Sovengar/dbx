@@ -7,7 +7,7 @@ flowchart LR
     B --> P["plan.md<br/>adr_required: true"]
     P --> C["context.md<br/>files, ranges, callers, tests"]
     C --> G["diagrams"]
-    G --> Z["commit on<br/>feature/export-formats"]
+    G --> Z["commit on<br/>feat/export-formats"]
 
     P -. "ADR: export-formats-config-and-pipeline" .-> ADR["config vs picker<br/>compression seam<br/>extension/.gz rules"]
     P -. "Risk: updateDescriptions<br/>positional indexing" .-> R1["derive from format"]

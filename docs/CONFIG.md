@@ -119,8 +119,8 @@ Defaults: `page_size = 100`, `yank_max_rows = 10`, `export_delimiter = ","`,
 `export_delimiter` accepts one literal character (`;`, `|`, `,`) or the aliases
 `"tab"` / `"\t"` for the tab character; a tab writes a real tab byte and names
 the file `.tsv`, any other delimiter keeps the `.csv` extension. A value that is
-empty, longer than one character, or unusable for CSV (`"`, newline, NUL) falls
-back to `,` instead of failing the export.
+empty, longer than one character, or unusable for CSV (`"`, newline, carriage
+return, NUL, invalid UTF-8) falls back to `,` instead of failing the export.
 
 `export_compress = true` gzips every export that goes to a **file** (SQL, JSON,
 delimited and Markdown) and appends `.gz` after the format extension, so a CSV

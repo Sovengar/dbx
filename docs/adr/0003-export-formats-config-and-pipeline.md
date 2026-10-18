@@ -87,14 +87,16 @@ previous one's description.
 
 ## Consequences
 
-- Adding a format is one enum value, one picker option, one exporter pair and one switch
-  arm; `updateDescriptions` needs no edit.
+- Adding a format is six sites: one enum value, one `noun()` case, one picker option,
+  both `handleExport` content switches, and one `exportFilename` extension arm.
+  `updateDescriptions` derives its wording from `noun()` and needs no edit.
 - The SQL/JSON/CSV outputs under the default configuration are byte-for-byte unchanged
-  and their extensions are the historical ones; a literal-output test pins that.
+  (pinned by a literal-output test) and their extensions are the historical ones (pinned
+  separately by the filename test).
 - Clipboard copies and yanks are never compressed by construction: only the file branch
   of `handleExport` calls `gzipExport`.
 - `os.WriteFile` still overwrites, and a compressed export can sit next to an
-  uncompressed one. That is pre-existing behaviour, documented in `docs/CONFIG.md`, and
-  collision handling is out of scope.
+  uncompressed one. That is pre-existing behaviour — overwriting the same name is
+  documented in `docs/CONFIG.md` — and collision handling is out of scope.
 - `docs/FEATURES.md`, `docs/CONFIG.md`, the `export` keybind description and the global
   dbx skill describe the new surface.
