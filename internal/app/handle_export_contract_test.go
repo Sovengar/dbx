@@ -398,7 +398,7 @@ func TestCompressionWritesAValidGzipFile(t *testing.T) {
 	m := exportModel(t)
 	m.config.UI.ExportCompress = true
 
-	rows := [][]interface{}{{int64(1), "ada"}, {int64(2), "grace"}}
+	rows := [][]interface{}{{int64(1), "ada"}, {int64(2), "grace"}, {int64(-1), "minus"}}
 	done, ok := m.handleExport(grid.ExportSelectedMsg{
 		Format: grid.ExportCSV, Schema: "public", Table: "users",
 		Columns: []string{"id", "name"},
@@ -414,12 +414,21 @@ func TestCompressionWritesAValidGzipFile(t *testing.T) {
 		t.Errorf("the file is named %q, want public_users.csv.gz — .gz goes after the format extension", got)
 	}
 
-	want := exportAsCSV(&postgres.QueryResult{
+	want := exportAsEscapedCSV(&postgres.QueryResult{
 		Columns: []postgres.ColumnInfo{{Name: "id"}, {Name: "name"}},
 		Rows:    rows,
 	}, ',')
-	if got := gunzipFile(t, done.filename); got != want {
+	got := gunzipFile(t, done.filename)
+	if got != want {
 		t.Errorf("decompressing the file gives:\n%q\nwant the uncompressed export:\n%q", got, want)
+	}
+	// The escape has to happen BEFORE gzip. If it ran afterwards the compressed bytes
+	// would be the unescaped serialiser and this row would still carry a raw -1 cell.
+	if !strings.Contains(got, "'-1") {
+		t.Errorf("the decompressed payload has no escaped -1 cell:\n%q", got)
+	}
+	if strings.Contains(got, "\n-1,") {
+		t.Errorf("the decompressed payload still has a bare -1 cell:\n%q", got)
 	}
 }
 
