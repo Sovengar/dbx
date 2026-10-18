@@ -72,11 +72,15 @@ large tables, exposed from the grid and/or CLI.
 
 ## 5. Export formats
 
-**Status:** partial.
+**Status:** implemented.
 
-Grid export covers **SQL, JSON and CSV** (to clipboard or a file). Missing:
-Markdown output, custom delimiters, and compression. Lower priority than the
-items above.
+Grid export covers **SQL, JSON, CSV and Markdown** (to the clipboard for a
+single row, to a file for several). The delimited format honours
+`ui.export_delimiter` — one literal character, or `tab` / `\t` for a real tab
+byte, which names the file `.tsv`; an unusable value falls back to a comma so a
+mistyped preference cannot empty an export. `ui.export_compress` gzips every
+**file** export and appends `.gz` after the format extension; clipboard copies
+and yanks are never compressed.
 
 ---
 

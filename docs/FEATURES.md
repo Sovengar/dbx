@@ -177,10 +177,15 @@ colour-coded: green = pending insert, blue = edited cell, red = row marked for
 deletion. Committing (`ctrl+s`) dumps the draft SQL into the editor with
 `commit on run`; running it executes the statements and commits immediately, so
 the changes become durable and **cannot** be undone with `U`. `D` discards drafts
-and `u` undoes row drafts. Export (`x`) writes SQL/JSON/CSV to a file next to the
-project, or copies to the clipboard for a single row; `y` always yanks to the
-clipboard, and a pending insert row yanks its own draft values like any other
-row under the cursor. `s` cycles the server-side sort (ASC → DESC → none). `o`
+and `u` undoes row drafts. Export (`x`) offers SQL, JSON, CSV and Markdown, writes
+them to a file next to the project, or copies to the clipboard for a single row.
+The delimited format uses `ui.export_delimiter` (one character, or `tab` / `\t`;
+a tab writes a real tab byte and a `.tsv` file, and an unusable value falls back to
+a comma). `ui.export_compress` gzips **file** exports of every format and appends
+`.gz` after the extension (`public_users.csv.gz`); clipboard copies and yanks are
+never compressed. `y` always yanks to the clipboard, and a pending insert row
+yanks its own draft values like any other row under the cursor. `s` cycles the
+server-side sort (ASC → DESC → none). `o`
 navigates an FK to its referenced table, `H` goes back through navigation
 history restoring the cursor and filter, and `r` refreshes.
 

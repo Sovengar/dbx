@@ -22,8 +22,11 @@ dbx is a terminal UI for databases designed for both humans and AI agents.
   database; drafts are color-coded (green insert, blue edit, red delete).
   Dumping the SQL opens it in the editor; running it commits the transaction.
   Discarding restores the original values.
-- **Yank** — Copy the selected row (SQL/JSON/CSV) to the clipboard, or export
-  multiple selected rows to a file next to `.dbx.toml`.
+- **Yank** — Copy the selected row (SQL/JSON/CSV/Markdown) to the clipboard, or
+  export multiple selected rows to a file next to `.dbx.toml`. The delimited
+  format uses `ui.export_delimiter` (one character, or `tab` / `\t` for a
+  `.tsv`), and `ui.export_compress` gzips file exports of every format (`.gz`
+  after the extension); clipboard copies and yanks are never compressed.
 - **Sort & filter** — Server-side `ORDER BY` cycling ASC → DESC → none, and an
   inline WHERE clause with autocomplete for columns, operators and values.
 - **Pagination** — Next/previous page, jump to first/last page, and jump to a

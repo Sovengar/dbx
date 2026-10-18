@@ -132,7 +132,7 @@ func defaultActions() []Action {
 			Contexts: []string{ContextGrid}, Owner: "grid"},
 		{ID: "refresh_data", Keys: []string{"r"}, Section: SectionData, Description: "Refresh Data",
 			Contexts: []string{ContextGrid}, Owner: "app"},
-		{ID: "export", Keys: []string{"x"}, Section: SectionData, Description: "Export (SQL/JSON/CSV)",
+		{ID: "export", Keys: []string{"x"}, Section: SectionData, Description: "Export (SQL/JSON/CSV/Markdown)",
 			Contexts: []string{ContextGrid}, Owner: "app"},
 
 		// ── Explorer ──────────────────────────────────────────────

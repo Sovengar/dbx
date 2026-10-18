@@ -24,6 +24,7 @@ package app
 import (
 	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -474,7 +475,7 @@ func TestTheExportedJSONIsReadable(t *testing.T) {
 func TestTheExportedCSVParses(t *testing.T) {
 	t.Run("the whole result has a header and one record per row", func(t *testing.T) {
 		r := exportResult()
-		out := exportAsCSV(r)
+		out := exportAsCSV(r, ',')
 
 		records, err := csv.NewReader(strings.NewReader(out)).ReadAll()
 		if err != nil {
@@ -494,7 +495,7 @@ func TestTheExportedCSVParses(t *testing.T) {
 			Columns: []postgres.ColumnInfo{{Name: "text"}},
 			Rows:    [][]interface{}{{`a,b "c" d`}},
 		}
-		out := exportAsCSV(r)
+		out := exportAsCSV(r, ',')
 
 		records, err := csv.NewReader(strings.NewReader(out)).ReadAll()
 		if err != nil {
@@ -513,7 +514,7 @@ func TestTheExportedCSVParses(t *testing.T) {
 			Columns: []postgres.ColumnInfo{{Name: "text"}},
 			Rows:    [][]interface{}{{"one\ntwo"}},
 		}
-		records, err := csv.NewReader(strings.NewReader(exportAsCSV(r))).ReadAll()
+		records, err := csv.NewReader(strings.NewReader(exportAsCSV(r, ','))).ReadAll()
 		if err != nil {
 			t.Fatalf("the export does not parse as CSV: %v", err)
 		}
@@ -534,7 +535,7 @@ func TestTheExportedCSVParses(t *testing.T) {
 			Columns: []postgres.ColumnInfo{{Name: "a"}, {Name: "b"}, {Name: "c"}},
 			Rows:    [][]interface{}{{int64(1)}},
 		}
-		out := exportAsCSV(r)
+		out := exportAsCSV(r, ',')
 		records, err := csv.NewReader(strings.NewReader(out)).ReadAll()
 		if err != nil {
 			t.Fatalf("the export does not parse as CSV: %v\n%q", err, out)
@@ -553,7 +554,7 @@ func TestTheExportedCSVParses(t *testing.T) {
 	})
 
 	t.Run("a rectangular result keeps every column", func(t *testing.T) {
-		out := exportAsCSV(exportResult())
+		out := exportAsCSV(exportResult(), ',')
 		records, err := csv.NewReader(strings.NewReader(out)).ReadAll()
 		if err != nil {
 			t.Fatalf("the export does not parse as CSV: %v", err)
@@ -564,7 +565,7 @@ func TestTheExportedCSVParses(t *testing.T) {
 	})
 
 	t.Run("the single-row form has a header and one record", func(t *testing.T) {
-		out := exportRowAsCSV([]string{"id", "name"}, []interface{}{int64(1), "ada"})
+		out := exportRowAsCSV([]string{"id", "name"}, []interface{}{int64(1), "ada"}, ',')
 		records, err := csv.NewReader(strings.NewReader(out)).ReadAll()
 		if err != nil {
 			t.Fatalf("the row export does not parse as CSV: %v\n%q", err, out)
@@ -577,6 +578,66 @@ func TestTheExportedCSVParses(t *testing.T) {
 		}
 	})
 
+	// Scenario: The delimited export uses the configured delimiter.
+	t.Run("a semicolon separates the fields", func(t *testing.T) {
+		out := exportAsCSV(exportResult(), ';')
+
+		// A comma reader must not accept it as two fields, which is what tells
+		// "wrote semicolons" apart from "wrote commas and hoped".
+		records, err := csv.NewReader(strings.NewReader(out)).ReadAll()
+		if err != nil {
+			t.Fatalf("the export does not parse as CSV: %v\n%q", err, out)
+		}
+		if records[0][0] != "id;name" {
+			t.Errorf("the header is %v, want one comma-delimited field holding the semicolon line", records[0])
+		}
+
+		reader := csv.NewReader(strings.NewReader(out))
+		reader.Comma = ';'
+		records, err = reader.ReadAll()
+		if err != nil {
+			t.Fatalf("the export does not parse as semicolon-delimited: %v\n%q", err, out)
+		}
+		if len(records) != len(exportResult().Rows)+1 {
+			t.Errorf("the export has %d records, want a header and %d rows", len(records), len(exportResult().Rows))
+		}
+		if len(records[0]) != 2 || records[0][0] != "id" || records[0][1] != "name" {
+			t.Errorf("the header is %v, want [id name]", records[0])
+		}
+	})
+
+	// Scenario: A value containing the delimiter is quoted.
+	t.Run("a value containing the configured delimiter is quoted, not split", func(t *testing.T) {
+		// Quoting is encoding/csv's job, and delegating to it is the decision
+		// this pins: a hand-rolled splitter would emit a row with one field too
+		// many and the value would silently lose its tail.
+		r := &postgres.QueryResult{
+			Columns: []postgres.ColumnInfo{{Name: "value"}},
+			Rows:    [][]interface{}{{`a|b`}},
+		}
+		out := exportAsCSV(r, '|')
+
+		if !strings.Contains(out, `"a|b"`) {
+			t.Errorf("the value is not quoted:\n%q", out)
+		}
+		reader := csv.NewReader(strings.NewReader(out))
+		reader.Comma = '|'
+		records, err := reader.ReadAll()
+		if err != nil {
+			t.Fatalf("the export does not parse as pipe-delimited: %v\n%q", err, out)
+		}
+		if len(records) != 2 || len(records[1]) != 1 || records[1][0] != "a|b" {
+			t.Errorf("the value came back as %q, want one field holding a|b", records)
+		}
+	})
+
+	t.Run("the single-row form takes the delimiter too", func(t *testing.T) {
+		out := exportRowAsCSV([]string{"id", "name"}, []interface{}{int64(1), "ada"}, ';')
+		if out != "id;name\n1;ada\n" {
+			t.Errorf("the row export is %q, want semicolons", out)
+		}
+	})
+
 	t.Run("a NULL in CSV is the four characters <nil>", func(t *testing.T) {
 		// Correct for CSV — there is no NULL in CSV, and inventing an empty field would
 		// be indistinguishable from the empty string. Pinned because it looks wrong and
@@ -585,7 +646,7 @@ func TestTheExportedCSVParses(t *testing.T) {
 			Columns: []postgres.ColumnInfo{{Name: "a"}},
 			Rows:    [][]interface{}{{nil}},
 		}
-		records, err := csv.NewReader(strings.NewReader(exportAsCSV(r))).ReadAll()
+		records, err := csv.NewReader(strings.NewReader(exportAsCSV(r, ','))).ReadAll()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -593,6 +654,54 @@ func TestTheExportedCSVParses(t *testing.T) {
 			t.Errorf("the NULL exported as %q, want <nil>", records[1][0])
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// backwards compatibility
+// ---------------------------------------------------------------------------
+
+// Scenario: The existing SQL, JSON and CSV defaults are unchanged.
+func TestTheDefaultExportsAreByteForByteUnchanged(t *testing.T) {
+	// Literal, whole outputs rather than structural assertions: this is the test
+	// that has to notice a trailing newline or a quoting change, and only an
+	// exact comparison can.
+	const wantSQL = `INSERT INTO "public"."users" ("id", "name") VALUES
+  (1, 'ada'),
+  (2, 'it''s here'),
+  (3, NULL)
+;
+`
+	const wantJSON = `[
+  {
+    "id": 1,
+    "name": "ada"
+  },
+  {
+    "id": 2,
+    "name": "it's here"
+  },
+  {
+    "id": 3,
+    "name": null
+  }
+]
+`
+	const wantCSV = "id,name\n1,ada\n2,it's here\n3,<nil>\n"
+
+	r := exportResult()
+	for _, tc := range []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"SQL", exportAsSQL("public", "users", r), wantSQL},
+		{"JSON", exportAsJSON(r), wantJSON},
+		{"CSV", exportAsCSV(r, ','), wantCSV},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("the default %s export changed:\ngot  %q\nwant %q", tc.name, tc.got, tc.want)
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -663,4 +772,146 @@ func sameSQLStatement(t *testing.T, a, b string) bool {
 		return strings.TrimSpace(s)
 	}
 	return norm(a) == norm(b)
+}
+
+// ---------------------------------------------------------------------------
+// Markdown
+// ---------------------------------------------------------------------------
+
+// markdownLines splits a Markdown export into its lines, and pins the trailing
+// newline on the way: every line-oriented format in this file ends with one.
+func markdownLines(t *testing.T, out string) []string {
+	t.Helper()
+	if !strings.HasSuffix(out, "\n") {
+		t.Errorf("the export does not end with a newline: %q", out)
+	}
+	return strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+}
+
+// markdownCells splits one table line into its cells. It deliberately does not
+// understand escaped pipes: the escaping tests assert on the raw text, and every
+// call here uses values that contain neither a pipe nor a newline.
+func markdownCells(t *testing.T, line string) []string {
+	t.Helper()
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "|") || !strings.HasSuffix(line, "|") {
+		t.Fatalf("the line is not a table row: %q", line)
+	}
+	cells := strings.Split(strings.TrimSuffix(strings.TrimPrefix(line, "|"), "|"), "|")
+	for i := range cells {
+		cells[i] = strings.TrimSpace(cells[i])
+	}
+	return cells
+}
+
+// Scenario: Markdown export of a single row goes to the clipboard as a table.
+func TestTheExportedMarkdownIsATable(t *testing.T) {
+	t.Run("a single row is a header, a separator and one data row", func(t *testing.T) {
+		out := exportRowAsMarkdown([]string{"id", "name"}, []interface{}{int64(1), "ada"})
+
+		lines := markdownLines(t, out)
+		if len(lines) != 3 {
+			t.Fatalf("the export has %d lines, want a header, a separator and one row:\n%s", len(lines), out)
+		}
+
+		header := markdownCells(t, lines[0])
+		if len(header) != 2 || header[0] != "id" || header[1] != "name" {
+			t.Errorf("the header is %v, want [id name]", header)
+		}
+		separator := markdownCells(t, lines[1])
+		if len(separator) != len(header) {
+			t.Errorf("the separator has %d cells and the header has %d:\n%s", len(separator), len(header), out)
+		}
+		for i, cell := range separator {
+			if cell != "---" {
+				t.Errorf("separator cell %d is %q, want ---", i, cell)
+			}
+		}
+		data := markdownCells(t, lines[2])
+		if len(data) != 2 || data[0] != "1" || data[1] != "ada" {
+			t.Errorf("the data row is %v, want [1 ada]", data)
+		}
+	})
+
+	// Scenario: Markdown export of several rows writes a .md table file.
+	t.Run("a whole result is a header, a separator and one row per record", func(t *testing.T) {
+		out := exportAsMarkdown(exportResult())
+
+		lines := markdownLines(t, out)
+		if len(lines) != len(exportResult().Rows)+2 {
+			t.Fatalf("the export has %d lines, want a header, a separator and %d rows:\n%s",
+				len(lines), len(exportResult().Rows), out)
+		}
+		header := markdownCells(t, lines[0])
+		if len(header) != 2 || header[0] != "id" || header[1] != "name" {
+			t.Errorf("the header is %v, want [id name]", header)
+		}
+		if separator := markdownCells(t, lines[1]); len(separator) != 2 {
+			t.Errorf("the separator is %v, want two cells", separator)
+		}
+		for i, want := range []string{"ada", "it's here", ""} {
+			if got := markdownCells(t, lines[i+2]); got[0] != fmt.Sprint(i+1) || got[1] != want {
+				t.Errorf("row %d is %v, want the value %q", i, got, want)
+			}
+		}
+	})
+
+	// Scenario: Markdown escapes pipes and newlines and renders NULL as an empty cell.
+	t.Run("a pipe, a newline and a NULL cannot break the table", func(t *testing.T) {
+		r := &postgres.QueryResult{
+			Columns: []postgres.ColumnInfo{{Name: "value"}},
+			Rows: [][]interface{}{
+				{`a|b`},
+				{"one\ntwo"},
+				{nil},
+				{`back\slash`},
+			},
+		}
+
+		lines := markdownLines(t, exportAsMarkdown(r))
+		want := []string{
+			`| a\|b |`,
+			"| one<br>two |",
+			"|  |", // a NULL is an empty cell, not the string <nil>
+			`| back\\slash |`,
+		}
+		if len(lines) != len(want)+2 {
+			t.Fatalf("the export has %d lines, want a header, a separator and %d rows:\n%s",
+				len(lines), len(want), exportAsMarkdown(r))
+		}
+		for i, w := range want {
+			if lines[i+2] != w {
+				t.Errorf("row %d is %q, want %q", i, lines[i+2], w)
+			}
+		}
+	})
+
+	// Scenario: Markdown truncates ragged rows so the table stays valid.
+	t.Run("a ragged result keeps one cell count on every line", func(t *testing.T) {
+		// A row shorter than the column list used to produce fewer cells than the
+		// header, and a Markdown table with mismatched widths does not render at
+		// all. The honest width is the one every row has, exactly as CSV does it.
+		r := &postgres.QueryResult{
+			Columns: []postgres.ColumnInfo{{Name: "a"}, {Name: "b"}, {Name: "c"}},
+			Rows:    [][]interface{}{{int64(1)}, {int64(2), "b"}},
+		}
+
+		out := exportAsMarkdown(r)
+		lines := markdownLines(t, out)
+		header := markdownCells(t, lines[0])
+		if len(header) != 1 || header[0] != "a" {
+			t.Errorf("the header is %v, want just [a] — the width every row has", header)
+		}
+		for i, line := range lines {
+			if got := len(markdownCells(t, line)); got != len(header) {
+				t.Errorf("line %d has %d cells and the header has %d:\n%s", i, got, len(header), out)
+			}
+		}
+		if strings.Contains(out, "| b |") || strings.Contains(out, "| c |") {
+			t.Errorf("the export names a column no row has:\n%s", out)
+		}
+		if strings.Contains(out, "NULL") {
+			t.Errorf("the export invented a value for a column the query did not return:\n%s", out)
+		}
+	})
 }
