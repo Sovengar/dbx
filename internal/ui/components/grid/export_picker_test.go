@@ -24,7 +24,7 @@ func press(t *testing.T, ep *ExportPicker, msg tea.KeyPressMsg) (tea.Cmd, bool) 
 	return ep.Update(msg)
 }
 
-// Scenario: The cursor walks the three options and stops at the two ends.
+// Scenario: The cursor walks the four options and stops at the two ends.
 //
 // The list is the whole picker, so the cursor has exactly one stop per option
 // and nowhere else. If the last stop were exclusive the CSV option would be
@@ -36,7 +36,7 @@ func TestExportPicker_CursorSweepsTheOptionsAndStopsAtBothEnds(t *testing.T) {
 		t.Run("down "+key.String(), func(t *testing.T) {
 			ep := newExportPickerForTest()
 			ep.Show("public", "users", nil, nil, []string{"id"})
-			const last = 2 // len(options) - 1
+			const last = 3 // len(options) - 1
 
 			// Walk down one option at a time and pin where the cursor lands.
 			for want := 1; want <= last; want++ {
@@ -67,8 +67,8 @@ func TestExportPicker_CursorSweepsTheOptionsAndStopsAtBothEnds(t *testing.T) {
 			if !ok {
 				t.Fatalf("the command produced %T, want ExportSelectedMsg", cmd())
 			}
-			if msg.Format != ExportCSV {
-				t.Errorf("Format = %v, want ExportCSV (the last option)", msg.Format)
+			if msg.Format != ExportMarkdown {
+				t.Errorf("Format = %v, want ExportMarkdown (the last option)", msg.Format)
 			}
 		})
 	}
@@ -77,9 +77,9 @@ func TestExportPicker_CursorSweepsTheOptionsAndStopsAtBothEnds(t *testing.T) {
 		t.Run("up "+key.String(), func(t *testing.T) {
 			ep := newExportPickerForTest()
 			ep.Show("public", "users", nil, nil, []string{"id"})
-			ep.cursor = 2
+			ep.cursor = 3
 
-			for want := 1; want >= 0; want-- {
+			for want := len(ep.options) - 2; want >= 0; want-- {
 				if _, handled := press(t, ep, key); !handled {
 					t.Fatalf("step to %d: the key was not handled", want)
 				}
@@ -135,7 +135,7 @@ func TestExportPicker_CursorStaysAValidOptionThroughAFullWalk(t *testing.T) {
 // on exactly one row: on all of them the list reads as "everything is
 // selected", and on none of them the user has to guess.
 func TestExportPicker_ArrowMarksExactlyTheCursorRow(t *testing.T) {
-	for cursor := 0; cursor < 3; cursor++ {
+	for cursor := 0; cursor < 4; cursor++ {
 		t.Run(string(rune('0'+cursor)), func(t *testing.T) {
 			ep := newExportPickerForTest()
 			ep.Show("public", "users", nil, nil, []string{"id"})
@@ -153,7 +153,7 @@ func TestExportPicker_ArrowMarksExactlyTheCursorRow(t *testing.T) {
 			}
 			// The marked row must be the one holding the option's own label, and
 			// the label must be the option the cursor is on.
-			labels := []string{"SQL", "JSON", "CSV"}
+			labels := []string{"SQL", "JSON", "CSV", "Markdown"}
 			if !strings.Contains(lines[marked[0]], labels[cursor]) {
 				t.Errorf("cursor %d: the arrow is on %q, want the %q row", cursor, strings.TrimSpace(lines[marked[0]]), labels[cursor])
 			}
@@ -167,7 +167,7 @@ func TestExportPicker_ArrowMarksExactlyTheCursorRow(t *testing.T) {
 // format and the context it was opened with. The picker closing on confirm is
 // what stops the user from exporting twice into the same dialog.
 func TestExportPicker_EnterConfirmsTheOptionUnderTheCursor(t *testing.T) {
-	wantFormats := map[int]ExportFormat{0: ExportSQL, 1: ExportJSON, 2: ExportCSV}
+	wantFormats := map[int]ExportFormat{0: ExportSQL, 1: ExportJSON, 2: ExportCSV, 3: ExportMarkdown}
 
 	for cursor, wantFormat := range wantFormats {
 		row := []interface{}{7, "ada"}
@@ -327,11 +327,11 @@ func TestExportPicker_EachModeNamesItsOwnAction(t *testing.T) {
 		unwantWord string
 	}{
 		{"clipboard", func(p *ExportPicker) { p.Show("sales", "orders", nil, nil, nil) },
-			"Export sales.orders", []string{"Copy INSERT", "Copy JSON", "Copy CSV"}, "Save"},
+			"Export sales.orders", []string{"Copy INSERT", "Copy JSON", "Copy CSV", "Copy Markdown"}, "Save"},
 		{"file", func(p *ExportPicker) { p.ShowFileMode("sales", "orders", nil, nil, nil) },
-			"Export to file sales.orders", []string{"Save INSERT", "Save JSON", "Save CSV"}, "Copy"},
+			"Export to file sales.orders", []string{"Save INSERT", "Save JSON", "Save CSV", "Save Markdown"}, "Copy"},
 		{"yank", func(p *ExportPicker) { p.ShowYankMode("sales", "orders", nil, nil, nil) },
-			"Yank sales.orders", []string{"Copy INSERT", "Copy JSON", "Copy CSV"}, "Save"},
+			"Yank sales.orders", []string{"Copy INSERT", "Copy JSON", "Copy CSV", "Copy Markdown"}, "Save"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ep := newExportPickerForTest()
@@ -363,7 +363,7 @@ func TestExportPicker_ShowResetsTheCursorAndTheModes(t *testing.T) {
 	ep := newExportPickerForTest()
 
 	ep.Show("public", "users", nil, nil, nil)
-	ep.cursor = 2
+	ep.cursor = 3
 	ep.Hide()
 	if ep.IsVisible() {
 		t.Fatal("Hide did not hide the picker")
@@ -456,4 +456,56 @@ func TestExportPicker_WidthAndHeightAreStoredButNotDrawn(t *testing.T) {
 	if ep.width != 200 || ep.height != 200 {
 		t.Errorf("width/height = %d/%d, want 200/200", ep.width, ep.height)
 	}
+}
+
+// Scenario: Cada opción se describe con SU formato, no con el de la posición.
+//
+// updateDescriptions used to assign options[0..2] by index. A fourth option
+// would have kept the wording its constructor gave it, so the file picker would
+// have offered "Copy Markdown to clipboard" over a button that writes a .md
+// file. The expected wording is written out per format here rather than read
+// back from format.noun(), so a wrong mapping fails instead of being echoed.
+func TestExportPicker_DescriptionsFollowTheirOwnFormat(t *testing.T) {
+	nouns := map[ExportFormat]string{
+		ExportSQL:      "INSERT",
+		ExportJSON:     "JSON",
+		ExportCSV:      "CSV",
+		ExportMarkdown: "Markdown",
+	}
+
+	for _, tc := range []struct {
+		mode   string
+		show   func(*ExportPicker)
+		verb   string
+		target string
+	}{
+		{"clipboard", func(p *ExportPicker) { p.Show("sales", "orders", nil, nil, nil) }, "Copy", "to clipboard"},
+		{"file", func(p *ExportPicker) { p.ShowFileMode("sales", "orders", nil, nil, nil) }, "Save", "to file"},
+		{"yank", func(p *ExportPicker) { p.ShowYankMode("sales", "orders", nil, nil, nil) }, "Copy", "to clipboard"},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			ep := newExportPickerForTest()
+			tc.show(ep)
+			ep.View() // descriptions are rewritten on render
+
+			if len(ep.options) != len(nouns) {
+				t.Fatalf("the picker has %d options, want %d", len(ep.options), len(nouns))
+			}
+			for _, opt := range ep.options {
+				want := tc.verb + " " + nouns[opt.format] + " " + tc.target
+				if opt.description != want {
+					t.Errorf("the %s option says %q, want %q — the description is not derived from its format",
+						opt.label, opt.description, want)
+				}
+			}
+		})
+	}
+
+	// A value outside the enum gets no wording at all instead of borrowing a
+	// neighbour's, so the failure is visible rather than plausible.
+	t.Run("an unknown format has no noun", func(t *testing.T) {
+		if got := ExportFormat(99).noun(); got != "" {
+			t.Errorf("ExportFormat(99).noun() = %q, want no noun", got)
+		}
+	})
 }

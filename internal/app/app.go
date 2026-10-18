@@ -1,6 +1,8 @@
 package app
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -2716,8 +2718,31 @@ func (r editorReadback) result(error) tea.Msg {
 	return editorContentMsg{content: string(data)}
 }
 
+// exportDelimiter is the configured field separator, normalised to one rune.
+//
+// A model without config (every fixture that builds &config.Config{}, and the
+// window between NewModel and the config being attached) must degrade to the
+// historical comma rather than panic.
+func (m Model) exportDelimiter() rune {
+	if m.config == nil {
+		return ','
+	}
+	return config.ExportDelimiterRune(m.config.UI.ExportDelimiter)
+}
+
+// exportCompress reports whether exports that go to a FILE are gzipped. The
+// clipboard is never compressed, so only the file branch asks.
+func (m Model) exportCompress() bool {
+	if m.config == nil {
+		return false
+	}
+	return m.config.UI.ExportCompress
+}
+
 func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
 	return func() tea.Msg {
+		delimiter := m.exportDelimiter()
+
 		// Single row: copy to clipboard
 		if msg.Row != nil {
 			var content string
@@ -2727,7 +2752,9 @@ func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
 			case grid.ExportJSON:
 				content = exportRowAsJSON(msg.Columns, msg.Row)
 			case grid.ExportCSV:
-				content = exportRowAsCSV(msg.Columns, msg.Row)
+				content = exportRowAsCSV(msg.Columns, msg.Row, delimiter)
+			case grid.ExportMarkdown:
+				content = exportRowAsMarkdown(msg.Columns, msg.Row)
 			}
 
 			if err := copyToClipboard(content); err != nil {
@@ -2753,7 +2780,9 @@ func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
 			case grid.ExportJSON:
 				content = exportAsJSON(result)
 			case grid.ExportCSV:
-				content = exportAsCSV(result)
+				content = exportAsCSV(result, delimiter)
+			case grid.ExportMarkdown:
+				content = exportAsMarkdown(result)
 			}
 
 			// YankMode: always clipboard
@@ -2764,19 +2793,18 @@ func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
 				return exportDoneMsg{clipboard: true, yankCount: len(msg.Rows)}
 			}
 
-			// Export mode: save to file
-			var filename string
-			switch msg.Format {
-			case grid.ExportSQL:
-				filename = fmt.Sprintf("%s_%s.sql", msg.Schema, msg.Table)
-			case grid.ExportJSON:
-				filename = fmt.Sprintf("%s_%s.json", msg.Schema, msg.Table)
-			case grid.ExportCSV:
-				filename = fmt.Sprintf("%s_%s.csv", msg.Schema, msg.Table)
+			// Export mode: save to file. Compression happens HERE, at the write
+			// boundary, so the exporters stay pure strings and the clipboard
+			// branch above cannot be compressed by accident.
+			compress := m.exportCompress()
+			filename := exportFilename(msg.Schema, msg.Table, msg.Format, delimiter, compress)
+			data := []byte(content)
+			if compress {
+				data = gzipExport(data)
 			}
 
 			filePath := filepath.Join(m.project.Path, filename)
-			if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+			if err := os.WriteFile(filePath, data, 0644); err != nil {
 				return exportDoneMsg{err: fmt.Errorf("failed to write file: %w", err)}
 			}
 
@@ -2891,9 +2919,10 @@ func exportAsJSON(result *postgres.QueryResult) string {
 	return string(data) + "\n"
 }
 
-func exportAsCSV(result *postgres.QueryResult) string {
+func exportAsCSV(result *postgres.QueryResult, comma rune) string {
 	var sb strings.Builder
 	writer := csv.NewWriter(&sb)
+	writer.Comma = comma
 
 	width := usableWidth(len(result.Columns), result.Rows)
 
@@ -2950,9 +2979,10 @@ func exportRowAsJSON(columns []string, row []interface{}) string {
 	return string(data) + "\n"
 }
 
-func exportRowAsCSV(columns []string, row []interface{}) string {
+func exportRowAsCSV(columns []string, row []interface{}, comma rune) string {
 	var sb strings.Builder
 	writer := csv.NewWriter(&sb)
+	writer.Comma = comma
 
 	// Writes to a strings.Builder never fail, so the errors are ignored.
 	_ = writer.Write(columns[:rowWidth(columns, row)])
@@ -2965,6 +2995,118 @@ func exportRowAsCSV(columns []string, row []interface{}) string {
 
 	writer.Flush()
 	return sb.String()
+}
+
+// exportAsMarkdown renders a whole result as a Markdown table: a header, a
+// separator and one row per record. It mirrors exportAsCSV — same pure,
+// string-returning shape, same width handling — because both are file formats.
+func exportAsMarkdown(result *postgres.QueryResult) string {
+	width := usableWidth(len(result.Columns), result.Rows)
+	headers := make([]string, width)
+	for i, col := range result.Columns[:width] {
+		headers[i] = col.Name
+	}
+	return markdownTable(headers, result.Rows)
+}
+
+// exportRowAsMarkdown renders one row as a Markdown table, for the clipboard.
+func exportRowAsMarkdown(columns []string, row []interface{}) string {
+	width := rowWidth(columns, row)
+	return markdownTable(columns[:width], [][]interface{}{row})
+}
+
+// markdownTable builds the header, the separator and every row at the header's
+// width, which is what makes the table render.
+func markdownTable(headers []string, rows [][]interface{}) string {
+	var sb strings.Builder
+
+	writeMarkdownRow(&sb, headers)
+
+	separator := make([]string, len(headers))
+	for i := range separator {
+		separator[i] = "---"
+	}
+	writeMarkdownRow(&sb, separator)
+
+	// One cell per header, never one per value: a row longer than the header is
+	// truncated and a shorter one would have made the table unrenderable, which
+	// usableWidth/rowWidth already ruled out for the caller.
+	for _, row := range rows {
+		cells := make([]string, len(headers))
+		for i := range headers {
+			cells[i] = markdownCell(row[i])
+		}
+		writeMarkdownRow(&sb, cells)
+	}
+
+	return sb.String()
+}
+
+// markdownCell renders one value so it cannot break the table.
+//
+// The backslash is escaped FIRST: escaping it after the pipe would turn the
+// backslash of `\|` into a second escape and the pipe would stay live. A
+// newline becomes <br> because a raw one ends the row, and a NULL becomes an
+// empty cell — "NULL" as text would claim the query returned a value it did not.
+func markdownCell(val interface{}) string {
+	if val == nil {
+		return ""
+	}
+	cell := fmt.Sprintf("%v", val)
+	cell = strings.ReplaceAll(cell, `\`, `\\`)
+	cell = strings.ReplaceAll(cell, "|", `\|`)
+	cell = strings.ReplaceAll(cell, "\r\n", "<br>")
+	cell = strings.ReplaceAll(cell, "\n", "<br>")
+	return cell
+}
+
+// exportFilename owns the extension of every export, so the name and the
+// content are decided from the same format and the same normalised delimiter
+// and cannot diverge: .sql, .json, .csv, .tsv (tab) and .md, with .gz appended
+// after the format extension when the file is compressed.
+//
+// Overwriting is deliberate and pre-existing: exporting twice writes the same
+// name, and a compressed export can sit next to an uncompressed one.
+func exportFilename(schema, table string, format grid.ExportFormat, comma rune, compress bool) string {
+	ext := "sql"
+	switch format {
+	case grid.ExportJSON:
+		ext = "json"
+	case grid.ExportCSV:
+		ext = "csv"
+		if comma == '\t' {
+			ext = "tsv"
+		}
+	case grid.ExportMarkdown:
+		ext = "md"
+	}
+
+	name := fmt.Sprintf("%s_%s.%s", schema, table, ext)
+	if compress {
+		name += ".gz"
+	}
+	return name
+}
+
+// gzipExport compresses an export in memory. Not a streaming writer: the
+// serialised export is already a []byte, and a bytes.Buffer cannot fail while
+// being written, so the only real error in this path is os.WriteFile, which the
+// caller reports. gzip.NewWriter leaves ModTime at zero, so the output is
+// deterministic and a round-trip test can compare it.
+func gzipExport(data []byte) []byte {
+	var buf bytes.Buffer
+	writer := gzip.NewWriter(&buf)
+	// Writes to a bytes.Buffer never fail, so the errors are ignored.
+	_, _ = writer.Write(data)
+	_ = writer.Close()
+	return buf.Bytes()
+}
+
+// writeMarkdownRow writes one "| a | b |" table line.
+func writeMarkdownRow(sb *strings.Builder, cells []string) {
+	sb.WriteString("| ")
+	sb.WriteString(strings.Join(cells, " | "))
+	sb.WriteString(" |\n")
 }
 
 // clipVia runs one clipboard helper with the content ALREADY attached to its stdin, and

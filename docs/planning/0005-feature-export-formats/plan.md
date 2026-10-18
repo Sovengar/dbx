@@ -158,16 +158,16 @@ muertos con test; cuelgues a `.mutation-timeouts`.
 Phase: execution
 | Scenario (behavior.feature) | Status | Commit |
 | --- | --- | --- |
-| Markdown export of a single row goes to the clipboard as a table | ⬜ | |
-| Markdown export of several rows writes a .md table file | ⬜ | |
-| Markdown escapes pipes and newlines and renders NULL as an empty cell | ⬜ | |
-| Markdown truncates ragged rows so the table stays valid | ⬜ | |
-| The delimited export uses the configured delimiter | ⬜ | |
-| A tab delimiter writes real tab bytes and a .tsv file | ⬜ | |
-| A value containing the delimiter is quoted | ⬜ | |
-| An unknown or empty delimiter falls back to a comma | ⬜ | |
-| Compression writes a valid gzip file with a .gz name | ⬜ | |
-| Compression is off by default and leaves files untouched | ⬜ | |
-| Compression applies to every file format | ⬜ | |
-| Clipboard and yank exports are never compressed | ⬜ | |
-| The existing SQL, JSON and CSV defaults are unchanged | ⬜ | |
+| Markdown export of a single row goes to the clipboard as a table | ✅ | 5b4a2ea |
+| Markdown export of several rows writes a .md table file | ✅ | bafa172 |
+| Markdown escapes pipes and newlines and renders NULL as an empty cell | ✅ | 37e208d |
+| Markdown truncates ragged rows so the table stays valid | ✅ | 0f4165c |
+| The delimited export uses the configured delimiter | ✅ | 7dbac59 |
+| A tab delimiter writes real tab bytes and a .tsv file | ✅ | 2312ff0 |
+| A value containing the delimiter is quoted | ✅ | e15df14 |
+| An unknown or empty delimiter falls back to a comma | ✅ | ccd3bf5 |
+| Compression writes a valid gzip file with a .gz name | ✅ | a8c533b |
+| Compression is off by default and leaves files untouched | ✅ | e6f4e7d |
+| Compression applies to every file format | ✅ | 09d0431 |
+| Clipboard and yank exports are never compressed | ✅ | b3c5199 |
+| The existing SQL, JSON and CSV defaults are unchanged | ✅ | 24a1741 |

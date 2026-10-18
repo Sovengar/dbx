@@ -17,7 +17,25 @@ const (
 	ExportSQL ExportFormat = iota
 	ExportJSON
 	ExportCSV
+	ExportMarkdown
 )
+
+// noun is what the picker calls the format in its description line. It lives
+// next to the enum so a new option cannot inherit the previous option's wording,
+// which is what the old positional updateDescriptions did.
+func (f ExportFormat) noun() string {
+	switch f {
+	case ExportSQL:
+		return "INSERT"
+	case ExportJSON:
+		return "JSON"
+	case ExportCSV:
+		return "CSV"
+	case ExportMarkdown:
+		return "Markdown"
+	}
+	return ""
+}
 
 type ExportSelectedMsg struct {
 	Format   ExportFormat
@@ -59,23 +77,23 @@ func NewExportPicker(styles *theme.Styles) *ExportPicker {
 			{label: "SQL", description: "Copy INSERT to clipboard", format: ExportSQL},
 			{label: "JSON", description: "Copy JSON to clipboard", format: ExportJSON},
 			{label: "CSV", description: "Copy CSV to clipboard", format: ExportCSV},
+			{label: "Markdown", description: "Copy Markdown to clipboard", format: ExportMarkdown},
 		},
 	}
 }
 
+// updateDescriptions rewrites every option's description for the mode the
+// picker was opened in. The wording comes from each option's OWN format, not
+// from its position: the positional version had one assignment per option, so a
+// fourth option would have silently kept the constructor-era "Copy Markdown to
+// clipboard" line in file mode.
 func (ep *ExportPicker) updateDescriptions() {
-	if ep.yankMode {
-		ep.options[0].description = "Copy INSERT to clipboard"
-		ep.options[1].description = "Copy JSON to clipboard"
-		ep.options[2].description = "Copy CSV to clipboard"
-	} else if ep.fileMode {
-		ep.options[0].description = "Save INSERT to file"
-		ep.options[1].description = "Save JSON to file"
-		ep.options[2].description = "Save CSV to file"
-	} else {
-		ep.options[0].description = "Copy INSERT to clipboard"
-		ep.options[1].description = "Copy JSON to clipboard"
-		ep.options[2].description = "Copy CSV to clipboard"
+	verb, target := "Copy", "to clipboard"
+	if ep.fileMode {
+		verb, target = "Save", "to file"
+	}
+	for i := range ep.options {
+		ep.options[i].description = fmt.Sprintf("%s %s %s", verb, ep.options[i].format.noun(), target)
 	}
 }
 

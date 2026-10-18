@@ -15,14 +15,17 @@ package app
 // arm is missing produces an EMPTY file, which looks like the export worked.
 
 import (
+	"compress/gzip"
 	"encoding/csv"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/buble/dbx/internal/config"
+	"github.com/buble/dbx/internal/drivers/postgres"
 	"github.com/buble/dbx/internal/ui/components/grid"
 )
 
@@ -48,6 +51,29 @@ func clipboardContents(t *testing.T, path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("nothing was copied: %v", err)
+	}
+	return string(data)
+}
+
+// gunzipFile reads a gzip file back to its original bytes, and fails the test if
+// the file is not valid gzip — which is the whole point of the compression tests.
+func gunzipFile(t *testing.T, path string) string {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("the file was not written: %v", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	reader, err := gzip.NewReader(file)
+	if err != nil {
+		t.Fatalf("the file is not valid gzip: %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("reading the gzip payload failed: %v", err)
 	}
 	return string(data)
 }
@@ -90,6 +116,23 @@ func TestASingleRowExportAlwaysGoesToTheClipboard(t *testing.T) {
 			}
 			if len(records) != 2 || records[0][0] != "id" {
 				t.Errorf("the CSV is %q", records)
+			}
+		}},
+		{"Markdown", grid.ExportMarkdown, func(t *testing.T, got string) {
+			lines := markdownLines(t, got)
+			if len(lines) != 3 {
+				t.Fatalf("the clipboard holds %d table lines, want a header, a separator and one row:\n%s", len(lines), got)
+			}
+			header := markdownCells(t, lines[0])
+			if len(header) != 2 || header[0] != "id" || header[1] != "name" {
+				t.Errorf("the header is %v, want [id name]", header)
+			}
+			separator := markdownCells(t, lines[1])
+			if len(separator) != len(header) {
+				t.Errorf("the separator is %v, want one cell per column", separator)
+			}
+			if data := markdownCells(t, lines[2]); len(data) != 2 || data[1] != "ada" {
+				t.Errorf("the data row is %v, want the selected row", data)
 			}
 		}},
 	} {
@@ -170,6 +213,21 @@ func TestSeveralRowsGoToAFileUnlessItIsAYank(t *testing.T) {
 			}
 			if len(records) != 3 {
 				t.Errorf("the file holds %d records, want a header and two rows", len(records))
+			}
+		}},
+		{"Markdown", grid.ExportMarkdown, ".md", func(t *testing.T, got string) {
+			lines := markdownLines(t, got)
+			if len(lines) != 4 {
+				t.Fatalf("the file holds %d table lines, want a header, a separator and two rows:\n%s", len(lines), got)
+			}
+			if header := markdownCells(t, lines[0]); len(header) != 2 || header[0] != "id" || header[1] != "name" {
+				t.Errorf("the header is %v, want [id name]", header)
+			}
+			if separator := markdownCells(t, lines[1]); len(separator) != 2 {
+				t.Errorf("the separator is %v, want two cells", separator)
+			}
+			if data := markdownCells(t, lines[3]); len(data) != 2 || data[1] != "grace" {
+				t.Errorf("the last row is %v, want the second selected row", data)
 			}
 		}},
 	} {
@@ -271,6 +329,400 @@ func TestSeveralRowsGoToAFileUnlessItIsAYank(t *testing.T) {
 			t.Errorf("a single-row yank reported a count of %d", done.yankCount)
 		}
 	})
+}
+
+// Scenario: The delimited export uses the configured delimiter.
+func TestTheDelimitedExportUsesTheConfiguredDelimiter(t *testing.T) {
+	t.Run("a semicolon separates the fields and keeps the .csv name", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		t.Setenv("WAYLAND_DISPLAY", "")
+
+		m := exportModel(t)
+		m.config.UI.ExportDelimiter = ";"
+
+		done, ok := m.handleExport(grid.ExportSelectedMsg{
+			Format: grid.ExportCSV, Schema: "public", Table: "users",
+			Columns: []string{"id", "name"},
+			Rows:    [][]interface{}{{int64(1), "ada"}, {int64(2), "grace"}},
+		})().(exportDoneMsg)
+		if !ok {
+			t.Fatal("the command did not produce an exportDoneMsg")
+		}
+		if done.err != nil {
+			t.Fatalf("the export failed: %v", done.err)
+		}
+		if got := filepath.Base(done.filename); got != "public_users.csv" {
+			t.Errorf("the file is named %q, want public_users.csv", got)
+		}
+
+		reader := csv.NewReader(strings.NewReader(clipboardContents(t, done.filename)))
+		reader.Comma = ';'
+		records, err := reader.ReadAll()
+		if err != nil {
+			t.Fatalf("the file is not semicolon-delimited: %v", err)
+		}
+		if len(records) != 3 || records[0][0] != "id" || records[1][1] != "ada" {
+			t.Errorf("the file holds %q, want a header and two semicolon rows", records)
+		}
+	})
+
+	t.Run("a model without config still exports with the historical comma", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		t.Setenv("WAYLAND_DISPLAY", "")
+
+		m := exportModel(t)
+		m.config = nil
+
+		done, ok := m.handleExport(grid.ExportSelectedMsg{
+			Format: grid.ExportCSV, Schema: "public", Table: "users",
+			Columns: []string{"id"},
+			Rows:    [][]interface{}{{int64(1)}},
+		})().(exportDoneMsg)
+		if !ok {
+			t.Fatal("the command did not produce an exportDoneMsg")
+		}
+		if done.err != nil {
+			t.Fatalf("the export failed: %v", done.err)
+		}
+		if got := clipboardContents(t, done.filename); got != "id\n1\n" {
+			t.Errorf("the file is %q, want comma-separated", got)
+		}
+	})
+}
+
+// Scenario: Compression writes a valid gzip file with a .gz name.
+func TestCompressionWritesAValidGzipFile(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("WAYLAND_DISPLAY", "")
+
+	m := exportModel(t)
+	m.config.UI.ExportCompress = true
+
+	rows := [][]interface{}{{int64(1), "ada"}, {int64(2), "grace"}}
+	done, ok := m.handleExport(grid.ExportSelectedMsg{
+		Format: grid.ExportCSV, Schema: "public", Table: "users",
+		Columns: []string{"id", "name"},
+		Rows:    rows,
+	})().(exportDoneMsg)
+	if !ok {
+		t.Fatal("the command did not produce an exportDoneMsg")
+	}
+	if done.err != nil {
+		t.Fatalf("the export failed: %v", done.err)
+	}
+	if got := filepath.Base(done.filename); got != "public_users.csv.gz" {
+		t.Errorf("the file is named %q, want public_users.csv.gz — .gz goes after the format extension", got)
+	}
+
+	want := exportAsCSV(&postgres.QueryResult{
+		Columns: []postgres.ColumnInfo{{Name: "id"}, {Name: "name"}},
+		Rows:    rows,
+	}, ',')
+	if got := gunzipFile(t, done.filename); got != want {
+		t.Errorf("decompressing the file gives:\n%q\nwant the uncompressed export:\n%q", got, want)
+	}
+}
+
+// Scenario: Compression applies to every file format.
+func TestCompressionAppliesToEveryFileFormat(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("WAYLAND_DISPLAY", "")
+
+	result := &postgres.QueryResult{
+		Columns: []postgres.ColumnInfo{{Name: "id"}, {Name: "name"}},
+		Rows:    [][]interface{}{{int64(1), "ada"}, {int64(2), "grace"}},
+	}
+
+	m := exportModel(t)
+	m.config.UI.ExportCompress = true
+
+	for _, tc := range []struct {
+		name   string
+		format grid.ExportFormat
+		ext    string
+		want   string
+	}{
+		{"SQL", grid.ExportSQL, ".sql", exportAsSQL("public", "users", result)},
+		{"JSON", grid.ExportJSON, ".json", exportAsJSON(result)},
+		{"CSV", grid.ExportCSV, ".csv", exportAsCSV(result, ',')},
+		{"Markdown", grid.ExportMarkdown, ".md", exportAsMarkdown(result)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			done, ok := m.handleExport(grid.ExportSelectedMsg{
+				Format: tc.format, Schema: "public", Table: "users",
+				Columns: []string{"id", "name"},
+				Rows:    result.Rows,
+			})().(exportDoneMsg)
+			if !ok {
+				t.Fatal("the command did not produce an exportDoneMsg")
+			}
+			if done.err != nil {
+				t.Fatalf("the export failed: %v", done.err)
+			}
+			if got := filepath.Base(done.filename); got != "public_users"+tc.ext+".gz" {
+				t.Errorf("the file is named %q, want public_users%s.gz", got, tc.ext)
+			}
+			if got := gunzipFile(t, done.filename); got != tc.want {
+				t.Errorf("the decompressed %s export is:\n%q\nwant:\n%q", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+// Scenario: Compression is off by default and leaves files untouched.
+func TestCompressionIsOffByDefault(t *testing.T) {
+	const want = "id,name\n1,ada\n2,grace\n"
+
+	for _, tc := range []struct {
+		name      string
+		breakConf bool
+	}{
+		{"the zero-value configuration", false},
+		{"a model with no config at all", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("PATH", t.TempDir())
+			t.Setenv("WAYLAND_DISPLAY", "")
+
+			m := exportModel(t)
+			if tc.breakConf {
+				m.config = nil
+			}
+
+			done, ok := m.handleExport(grid.ExportSelectedMsg{
+				Format: grid.ExportCSV, Schema: "public", Table: "users",
+				Columns: []string{"id", "name"},
+				Rows:    [][]interface{}{{int64(1), "ada"}, {int64(2), "grace"}},
+			})().(exportDoneMsg)
+			if !ok {
+				t.Fatal("the command did not produce an exportDoneMsg")
+			}
+			if done.err != nil {
+				t.Fatalf("the export failed: %v", done.err)
+			}
+			if got := filepath.Base(done.filename); got != "public_users.csv" {
+				t.Errorf("the file is named %q, want no .gz suffix", got)
+			}
+			if got := clipboardContents(t, done.filename); got != want {
+				t.Errorf("the file is %q, want the plain export", got)
+			}
+		})
+	}
+}
+
+// Scenario: Clipboard and yank exports are never compressed.
+func TestClipboardExportsAreNeverCompressed(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		format grid.ExportFormat
+		want   string
+	}{
+		{"CSV", grid.ExportCSV, "id,name\n1,ada\n"},
+		{"Markdown", grid.ExportMarkdown, "| id | name |\n| --- | --- |\n| 1 | ada |\n"},
+	} {
+		t.Run("a single-row copy as "+tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			clip := clipboardStub(t, dir, "xclip")
+
+			m := exportModel(t)
+			m.config.UI.ExportCompress = true
+
+			done, ok := m.handleExport(grid.ExportSelectedMsg{
+				Format: tc.format, Schema: "public", Table: "users",
+				Columns: []string{"id", "name"},
+				Row:     []interface{}{int64(1), "ada"},
+			})().(exportDoneMsg)
+			if !ok {
+				t.Fatal("the command did not produce an exportDoneMsg")
+			}
+			if done.err != nil {
+				t.Fatalf("the copy failed: %v", done.err)
+			}
+			got := clipboardContents(t, clip)
+			if strings.HasPrefix(got, "\x1f\x8b") {
+				t.Errorf("the clipboard holds gzip bytes, which nothing can paste:\n%q", got)
+			}
+			if got != tc.want {
+				t.Errorf("the clipboard holds %q, want the plain %s export", got, tc.name)
+			}
+		})
+	}
+
+	t.Run("a yank of several rows", func(t *testing.T) {
+		dir := t.TempDir()
+		clip := clipboardStub(t, dir, "xclip")
+
+		m := exportModel(t)
+		m.config.UI.ExportCompress = true
+
+		done, ok := m.handleExport(grid.ExportSelectedMsg{
+			Format: grid.ExportCSV, Schema: "public", Table: "users", YankMode: true,
+			Columns: []string{"id", "name"},
+			Rows:    [][]interface{}{{int64(1), "ada"}, {int64(2), "grace"}},
+		})().(exportDoneMsg)
+		if !ok {
+			t.Fatal("the command did not produce an exportDoneMsg")
+		}
+		if done.err != nil {
+			t.Fatalf("the yank failed: %v", done.err)
+		}
+		got := clipboardContents(t, clip)
+		if strings.HasPrefix(got, "\x1f\x8b") {
+			t.Errorf("the yank holds gzip bytes:\n%q", got)
+		}
+		if got != "id,name\n1,ada\n2,grace\n" {
+			t.Errorf("the clipboard holds %q, want the plain CSV", got)
+		}
+	})
+}
+
+// Scenario: The existing SQL, JSON and CSV defaults are unchanged.
+func TestTheDefaultFileExportsKeepTheirHistoricalNames(t *testing.T) {
+	for _, tc := range []struct {
+		format grid.ExportFormat
+		ext    string
+	}{
+		{grid.ExportSQL, ".sql"},
+		{grid.ExportJSON, ".json"},
+		{grid.ExportCSV, ".csv"},
+	} {
+		t.Run(tc.ext, func(t *testing.T) {
+			t.Setenv("PATH", t.TempDir())
+			t.Setenv("WAYLAND_DISPLAY", "")
+
+			m := exportModel(t)
+			done, ok := m.handleExport(grid.ExportSelectedMsg{
+				Format: tc.format, Schema: "public", Table: "users",
+				Columns: []string{"id", "name"},
+				Rows:    [][]interface{}{{int64(1), "ada"}},
+			})().(exportDoneMsg)
+			if !ok {
+				t.Fatal("the command did not produce an exportDoneMsg")
+			}
+			if done.err != nil {
+				t.Fatalf("the export failed: %v", done.err)
+			}
+			if got := filepath.Base(done.filename); got != "public_users"+tc.ext {
+				t.Errorf("the file is named %q, want public_users%s", got, tc.ext)
+			}
+		})
+	}
+}
+
+// Scenario: An unknown or empty delimiter falls back to a comma.
+func TestAnUnusableDelimiterFallsBackToAComma(t *testing.T) {
+	for _, delimiter := range []string{"", "nope", `"`, "\n"} {
+		t.Run(delimiter, func(t *testing.T) {
+			t.Setenv("PATH", t.TempDir())
+			t.Setenv("WAYLAND_DISPLAY", "")
+
+			m := exportModel(t)
+			m.config.UI.ExportDelimiter = delimiter
+
+			done, ok := m.handleExport(grid.ExportSelectedMsg{
+				Format: grid.ExportCSV, Schema: "public", Table: "users",
+				Columns: []string{"id", "name"},
+				Rows:    [][]interface{}{{int64(1), "ada"}},
+			})().(exportDoneMsg)
+			if !ok {
+				t.Fatal("the command did not produce an exportDoneMsg")
+			}
+			// The preference is wrong, not the request: the export has to work.
+			if done.err != nil {
+				t.Fatalf("an unusable delimiter failed the export: %v", done.err)
+			}
+			if got := filepath.Base(done.filename); got != "public_users.csv" {
+				t.Errorf("the file is named %q, want the comma format's .csv", got)
+			}
+			if got := clipboardContents(t, done.filename); got != "id,name\n1,ada\n" {
+				t.Errorf("the file is %q, want a comma-separated fallback", got)
+			}
+		})
+	}
+}
+
+// Scenario: A value containing the delimiter is quoted.
+func TestAValueContainingTheConfiguredDelimiterIsQuoted(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("WAYLAND_DISPLAY", "")
+
+	m := exportModel(t)
+	m.config.UI.ExportDelimiter = "|"
+
+	done, ok := m.handleExport(grid.ExportSelectedMsg{
+		Format: grid.ExportCSV, Schema: "public", Table: "users",
+		Columns: []string{"id", "name"},
+		Rows:    [][]interface{}{{int64(1), "a|b"}},
+	})().(exportDoneMsg)
+	if !ok {
+		t.Fatal("the command did not produce an exportDoneMsg")
+	}
+	if done.err != nil {
+		t.Fatalf("the export failed: %v", done.err)
+	}
+
+	data := clipboardContents(t, done.filename)
+	if !strings.Contains(data, `"a|b"`) {
+		t.Errorf("the value containing the delimiter is not quoted:\n%q", data)
+	}
+	reader := csv.NewReader(strings.NewReader(data))
+	reader.Comma = '|'
+	records, err := reader.ReadAll()
+	if err != nil {
+		t.Fatalf("the file is not pipe-delimited: %v", err)
+	}
+	if len(records) != 2 || len(records[1]) != 2 || records[1][1] != "a|b" {
+		t.Errorf("the row holds %q, want the delimiter kept inside the value", records)
+	}
+}
+
+// Scenario: A tab delimiter writes real tab bytes and a .tsv file.
+func TestATabDelimiterWritesTabBytesAndATsvFile(t *testing.T) {
+	// All three spellings have to mean the tab: a literal one, the name, and the
+	// TOML escape. The name and the escape are what a user can type without
+	// embedding an invisible byte.
+	for _, delimiter := range []string{"tab", `\t`, "\t"} {
+		t.Run(delimiter, func(t *testing.T) {
+			t.Setenv("PATH", t.TempDir())
+			t.Setenv("WAYLAND_DISPLAY", "")
+
+			m := exportModel(t)
+			m.config.UI.ExportDelimiter = delimiter
+
+			done, ok := m.handleExport(grid.ExportSelectedMsg{
+				Format: grid.ExportCSV, Schema: "public", Table: "users",
+				Columns: []string{"id", "name"},
+				Rows:    [][]interface{}{{int64(1), "ada"}, {int64(2), "grace"}},
+			})().(exportDoneMsg)
+			if !ok {
+				t.Fatal("the command did not produce an exportDoneMsg")
+			}
+			if done.err != nil {
+				t.Fatalf("the export failed: %v", done.err)
+			}
+			if got := filepath.Base(done.filename); got != "public_users.tsv" {
+				t.Errorf("the file is named %q, want public_users.tsv", got)
+			}
+
+			data := clipboardContents(t, done.filename)
+			if !strings.Contains(data, "id\tname\n") {
+				t.Errorf("the header is not tab-separated; the file holds %q", data)
+			}
+			if strings.Contains(data, "id,name") {
+				t.Errorf("the file still has commas instead of tab bytes: %q", data)
+			}
+
+			reader := csv.NewReader(strings.NewReader(data))
+			reader.Comma = '\t'
+			records, err := reader.ReadAll()
+			if err != nil {
+				t.Fatalf("the file is not tab-delimited: %v", err)
+			}
+			if len(records) != 3 || len(records[0]) != 2 || records[2][1] != "grace" {
+				t.Errorf("the file holds %q, want a header and two tab-separated rows", records)
+			}
+		})
+	}
 }
 
 func TestAnExportWithNothingToExportSaysSo(t *testing.T) {
