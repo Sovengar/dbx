@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image/color"
 	"io"
@@ -14,8 +17,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -2795,9 +2800,14 @@ func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
 				return exportDoneMsg{clipboard: true, yankCount: len(msg.Rows)}
 			}
 
-			// Export mode: save to file. Compression happens HERE, at the write
-			// boundary, so the exporters stay pure strings and the clipboard
-			// branch above cannot be compressed by accident.
+			// Export mode: save to file. The spreadsheet formula escape is applied
+			// HERE and only here, so the clipboard/yank payload above stays
+			// byte-faithful; a file a spreadsheet will open gets the leading `'`.
+			// Compression also happens at this boundary, so the clipboard cannot be
+			// compressed by accident.
+			if msg.Format == grid.ExportCSV {
+				content = exportAsEscapedCSV(result, delimiter)
+			}
 			compress := m.exportCompress()
 			filename := exportFilename(msg.Schema, msg.Table, msg.Format, delimiter, compress)
 			data := []byte(content)
@@ -2926,10 +2936,16 @@ func exportAsJSON(result *postgres.QueryResult) string {
 //
 // Excel, LibreOffice and Sheets execute a cell that begins with `=`, `+`, `-`, `@`,
 // a tab or a carriage return, and a dbx export carries data the user did not author.
-// A leading apostrophe makes the cell literal text. The cost is deliberate and
-// recorded in the ADR and the changelog: `-1` exports as `'-1` and no longer
-// round-trips byte for byte. Only the delimited formats do this; SQL, JSON and
-// Markdown are not spreadsheet input and keep their payload untouched.
+// A leading apostrophe makes the cell literal text. Only the delimited formats do
+// this; SQL, JSON and Markdown are not spreadsheet input and keep their payload
+// untouched.
+//
+// It is applied at the FILE-write boundary only (exportAsEscapedCSV, called from
+// handleExport before gzip). The clipboard and yank payloads stay byte-faithful,
+// so `y` on `-1` puts `-1` on the clipboard. Two consequences are deliberate and
+// recorded in the ADR: the export loses the byte-for-byte round trip (`-1` becomes
+// `'-1`), and the escape is not injective (`-1` and the literal `'-1` both export
+// as `'-1`).
 func escapeCSVFormula(value string) string {
 	if value == "" {
 		return value
@@ -2941,17 +2957,42 @@ func escapeCSVFormula(value string) string {
 	return value
 }
 
+// exportAsCSV renders a whole result as delimited text. It is BYTE-FAITHFUL:
+// every cell is exactly the fmt.Sprintf("%v") of the value, with no spreadsheet
+// escape. The clipboard and yank paths use it, because pasting `'-1` into a SQL
+// editor is corrupted data — the formula escape belongs to a FILE a spreadsheet
+// will open, and is applied at that write boundary by exportAsEscapedCSV.
 func exportAsCSV(result *postgres.QueryResult, comma rune) string {
+	return writeDelimited(result, comma, false)
+}
+
+// exportAsEscapedCSV is exportAsCSV with the formula escape applied cell by cell.
+// It is the serialiser for the FILE export, called from handleExport right before
+// compression, so the escape cannot leak into the clipboard payload.
+func exportAsEscapedCSV(result *postgres.QueryResult, comma rune) string {
+	return writeDelimited(result, comma, true)
+}
+
+// writeDelimited is the one delimited serialiser, with the formula escape as a
+// parameter so the two callers above cannot drift. escape=false keeps the bytes the
+// clipboard needs; escape=true prefixes a spreadsheet formula lead-in with `'`.
+func writeDelimited(result *postgres.QueryResult, comma rune, escape bool) string {
 	var sb strings.Builder
 	writer := csv.NewWriter(&sb)
 	writer.Comma = comma
 
 	width := usableWidth(len(result.Columns), result.Rows)
+	cell := func(value string) string {
+		if escape {
+			return escapeCSVFormula(value)
+		}
+		return value
+	}
 
 	// Header
 	headers := make([]string, width)
 	for i, col := range result.Columns[:width] {
-		headers[i] = escapeCSVFormula(col.Name)
+		headers[i] = cell(col.Name)
 	}
 	// The sink is a strings.Builder, which cannot fail, but an invalid Comma makes
 	// csv.Writer.Write return before writing anything: unchecked, that is an empty
@@ -2959,17 +3000,17 @@ func exportAsCSV(result *postgres.QueryResult, comma rune) string {
 	// instead of dropping it, matching the debug-log convention (logging never
 	// fails, so the export still returns what it produced).
 	if err := writer.Write(headers); err != nil {
-		appDebugLog("exportAsCSV: header: %v", err)
+		appDebugLog("writeDelimited: header: %v", err)
 	}
 
 	// Rows
 	for _, row := range result.Rows {
 		record := make([]string, width)
 		for i, val := range row[:width] {
-			record[i] = escapeCSVFormula(fmt.Sprintf("%v", val))
+			record[i] = cell(fmt.Sprintf("%v", val))
 		}
 		if err := writer.Write(record); err != nil {
-			appDebugLog("exportAsCSV: row: %v", err)
+			appDebugLog("writeDelimited: row: %v", err)
 		}
 	}
 
@@ -3009,26 +3050,26 @@ func exportRowAsJSON(columns []string, row []interface{}) string {
 	return string(data) + "\n"
 }
 
+// exportRowAsCSV renders a single row for the CLIPBOARD. It is byte-faithful for
+// the same reason exportAsCSV is: a yank of `-1` has to paste as `-1`, not `'-1`.
 func exportRowAsCSV(columns []string, row []interface{}, comma rune) string {
 	var sb strings.Builder
 	writer := csv.NewWriter(&sb)
 	writer.Comma = comma
 
-	// Same as exportAsCSV: a strings.Builder cannot fail, but an invalid Comma
+	// Same as writeDelimited: a strings.Builder cannot fail, but an invalid Comma
 	// makes csv.Writer.Write return without writing, so the error is logged, not
 	// dropped.
 	width := rowWidth(columns, row)
 	headers := make([]string, width)
-	for i, name := range columns[:width] {
-		headers[i] = escapeCSVFormula(name)
-	}
+	copy(headers, columns[:width])
 	if err := writer.Write(headers); err != nil {
 		appDebugLog("exportRowAsCSV: header: %v", err)
 	}
 
 	record := make([]string, width)
 	for i, val := range row[:len(record)] {
-		record[i] = escapeCSVFormula(fmt.Sprintf("%v", val))
+		record[i] = fmt.Sprintf("%v", val)
 	}
 	if err := writer.Write(record); err != nil {
 		appDebugLog("exportRowAsCSV: row: %v", err)
@@ -3116,12 +3157,50 @@ func markdownCell(val interface{}) string {
 	return cell
 }
 
+// maxExportComponentBytes bounds one sanitised component so the assembled
+// `<schema>_<table>.<ext>` (plus `.gz`) stays under the 255-byte limit a common
+// filesystem puts on one name. 100 leaves room for the `_` separator, the longest
+// extension and the `-` plus 6 hex digit digest suffix.
+const maxExportComponentBytes = 100
+
+// componentDigest is the short, stable suffix that disambiguates a sanitised
+// component from an ordinary one and from another sanitised component with the same
+// visible text. Six hex characters of the sha256 of the ORIGINAL name: enough that
+// two different originals effectively cannot collide, short enough to stay readable.
+func componentDigest(name string) string {
+	sum := sha256.Sum256([]byte(name))
+	return hex.EncodeToString(sum[:])[:6]
+}
+
+// truncateComponent cuts s to at most limit bytes on a rune boundary, so a long
+// multi-byte identifier is shortened without producing an invalid UTF-8 name.
+func truncateComponent(s string, limit int) string {
+	var sb strings.Builder
+	for _, r := range s {
+		if sb.Len()+utf8.RuneLen(r) > limit {
+			break
+		}
+		sb.WriteRune(r)
+	}
+	return sb.String()
+}
+
 // sanitizeExportComponent makes one database-controlled identifier safe to be part
 // of a filename. The export is named `<schema>_<table>.<ext>`, and both components
 // come from the database, so a schema of `x/../../y` used to escape the project
 // directory. Every path separator (`/`, `\`) and every control character becomes
 // `_`, and a component that sanitises to exactly `.` or `..` becomes `_` so it can
-// never be a traversal component on its own. Ordinary identifiers are unchanged.
+// never be a traversal component on its own.
+//
+// A component that HAD to be changed carries a `-` and the first six hex characters
+// of the sha256 of the ORIGINAL name. Without it, `a/b`, `a_b` and `a<TAB>b` all
+// sanitise to `a_b` and the second export silently overwrites the first. An
+// unchanged identifier keeps its historical byte-for-byte name, so `public_users.csv`
+// is still exactly what `public`/`users` produces.
+//
+// A component longer than maxExportComponentBytes is truncated and counted as
+// changed, so it too gets the digest suffix: the name stays under the filesystem
+// limit instead of failing with ENAMETOOLONG.
 func sanitizeExportComponent(name string) string {
 	var sb strings.Builder
 	for _, r := range name {
@@ -3132,8 +3211,16 @@ func sanitizeExportComponent(name string) string {
 		sb.WriteRune(r)
 	}
 	sanitized := sb.String()
+	changed := sanitized != name || sanitized == "." || sanitized == ".."
 	if sanitized == "." || sanitized == ".." {
-		return "_"
+		sanitized = "_"
+	}
+	if len(sanitized) > maxExportComponentBytes {
+		sanitized = truncateComponent(sanitized, maxExportComponentBytes)
+		changed = true
+	}
+	if changed {
+		return sanitized + "-" + componentDigest(name)
 	}
 	return sanitized
 }
@@ -3171,22 +3258,69 @@ func exportFilename(schema, table string, format grid.ExportFormat, comma rune, 
 	return name
 }
 
+// chmodExportFile and writeExportFileData are the two file operations that can
+// fail after the open succeeded — chmod and write — each behind a variable so its
+// caller's failure arm has a seam a test can drive, the same pattern as pgxConnect.
+// Their own bodies have no branch, so the happy path covers them; production only
+// ever runs the values below.
+var chmodExportFile = func(file *os.File, mode os.FileMode) error {
+	return file.Chmod(mode)
+}
+
+var writeExportFileData = func(file *os.File, data []byte) error {
+	_, err := file.Write(data)
+	return err
+}
+
 // writeExportFile resolves an export name against the project directory, refuses a
 // destination that leaves it, and writes the bytes owner-only.
 //
-// This is the second, independent layer behind sanitizeExportComponent: even if a
-// name ever reached here unsanitised, the resolved path must still be inside the
-// project. filepath.Rel is what expresses "inside" — an absolute result or one
-// starting with `..` is outside — and a violation is logged and refused through the
-// caller's error path rather than written.
+// Containment is enforced twice, and both layers matter.
+//
+// filepath.Rel is the lexical layer: a result that is `..` or starts with `..` plus
+// a separator is outside. filepath.IsAbs(rel) is deliberately NOT checked —
+// Rel(base, Join(base, name)) can only return a relative path, so that test would be
+// dead code claiming a guard the function does not have.
+//
+// The open is the second, independent layer, and it is the layer the write actually
+// goes through. O_NOFOLLOW makes the kernel refuse to follow a symlink at the
+// destination, so a link planted between the check and the write cannot redirect it
+// (the check→os.WriteFile pair was a TOCTOU hole before), and ELOOP takes the same
+// refusal path as a lexical escape. Opening once and writing through the descriptor
+// also means the bytes land in the very file that was checked.
+//
+// An empty project directory is refused rather than silently writing into the
+// process's current working directory.
 func writeExportFile(projectPath, filename string, data []byte) (string, error) {
+	if projectPath == "" {
+		appDebugLog("writeExportFile: refusing %q with an empty project directory", filename)
+		return "", fmt.Errorf("refusing to write with an empty project directory: %s", filename)
+	}
+
 	filePath := filepath.Join(projectPath, filename)
 	rel, err := filepath.Rel(projectPath, filePath)
-	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		appDebugLog("writeExportFile: refusing %q outside the project %q", filename, projectPath)
 		return "", fmt.Errorf("refusing to write outside the project directory: %s", filename)
 	}
-	if err := os.WriteFile(filePath, data, 0o600); err != nil {
+
+	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		if errors.Is(err, syscall.ELOOP) {
+			appDebugLog("writeExportFile: refusing %q outside the project %q", filename, projectPath)
+			return "", fmt.Errorf("refusing to write outside the project directory: %s", filename)
+		}
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	// The open-time permission applies only when the file is CREATED, so a
+	// pre-existing 0644 export would keep its mode. Chmod makes "owner-only" true
+	// for the file that is actually there, which is the population at risk.
+	if err := chmodExportFile(file, 0o600); err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+	if err := writeExportFileData(file, data); err != nil {
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
 	return filePath, nil
