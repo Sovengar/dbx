@@ -137,13 +137,16 @@ and the same applies to a column name that begins with one of those characters. 
 JSON and Markdown are not spreadsheet input and are not escaped.
 
 The exported file name is built from the schema and table; path separators and
-control characters in either name are replaced with `_`, and a name that had to be
-changed carries a `-` plus a short digest so two different names cannot collide on one
-file (`a/b`, `a_b` and `a<TAB>b` become distinct). A name too long for the filesystem
-is truncated and keeps the digest. The resolved file is refused (and logged) if it
-would fall outside the project directory, or if the destination is a symlink.
-Exported files are written owner-only (`0600`), including when an existing file is
-overwritten.
+control characters in either name are replaced with `_`. A name that had to be changed,
+or whose unchanged text already ends in `-` plus six hex digits, carries a `-` plus a
+short digest: ordinary identifiers keep their historical names, `a/b`, `a_b`,
+`a<TAB>b` and the crafted `a_b-c14cdd` stay distinct, and a residual 24-bit collision
+between crafted names is still possible. A name too long for the filesystem is
+truncated and keeps the digest. The resolved file is refused (and logged) if it would
+fall outside the project directory, or if the destination is a symlink (Unix refuses
+to follow it with `O_NOFOLLOW`; Windows checks it with `Lstat` before opening). Hard
+links, FIFOs and symlinked parent directories remain known residual risks. Exported
+files are written owner-only (`0600`), including when an existing file is overwritten.
 
 With `nerd_font = true`, key hints render as glyphs in the keybinds pane, the
 `?` help modal and the inline footers: `enter` `esc` `tab` `space` `backspace`

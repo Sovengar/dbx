@@ -105,15 +105,15 @@ Feature: Grid export — Markdown, custom delimiters and file compression
     Given a schema or table name that contains a path separator or a traversal
     When the user exports to a file
     Then path separators and control characters in the name are replaced with "_"
-    And a name that had to be changed carries a short digest
+    And a name that had to be changed or already matches the digest shape carries a short digest
     And a ".." component can never be a traversal component of its own
     And the resolved destination must stay inside the project directory
     And a destination that escapes it is refused and logged
 
-  Scenario: Sanitised names that would collide stay distinct
-    Given the table names "a/b", "a_b" and "a<TAB>b"
+  Scenario: Sanitised and digest-shaped names stay distinct
+    Given the table names "a/b", "a_b", "a<TAB>b" and "a_b-c14cdd"
     When the user exports each to a file
-    Then each export has a distinct file name because a changed name carries a short digest
+    Then each export has a distinct file name because a changed or digest-shaped name carries a short digest
     And an unchanged "public"/"users" is still named "public_users.csv"
 
   Scenario: A symlink at the export destination is refused

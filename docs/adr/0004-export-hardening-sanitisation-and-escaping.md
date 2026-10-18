@@ -40,19 +40,24 @@ sanitisation is ever wrong, and the open refuses to follow a link at the destina
 - `sanitizeExportComponent` replaces every path separator (`/`, `\`) and every control
   character in a schema or table name with `_`, maps a component that sanitises to
   exactly `.` or `..` to `_`, and truncates a component longer than 100 bytes. A
-  component that had to be changed carries `-` plus the first six hex characters of the
-  sha256 of the ORIGINAL name, so `a/b`, `a_b` and `a<TAB>b` cannot collide on one file
-  and a long name still fits the filesystem limit. An unchanged identifier keeps its
-  historical byte-for-byte name, so `public_users.csv` is still exactly `public`/`users`.
+  component that had to be changed, or whose unchanged text already ends in `-` plus
+  six hex digits, carries `-` plus the first six hex characters of the sha256 of the
+  ORIGINAL name. The digest shape is reserved, so `a/b`, `a_b`, `a<TAB>b` and the
+  unchanged `a_b-c14cdd` stay distinct, and a long name still fits the filesystem
+  limit. An ordinary (non-digest-shaped) identifier keeps its historical byte-for-byte
+  name, so `public_users.csv` is still exactly `public`/`users`.
 - After the join, `writeExportFile` requires the destination to stay under the project
   directory, expressed with `filepath.Rel`: a result of `..` or one starting with `..`
   plus a separator is outside. A violation is refused through the same error the handler
   already shows and is logged through `debuglog`; nothing is written.
-- The write opens the destination itself with `O_NOFOLLOW` and writes through that
-  descriptor. A symlink at the destination is refused by the kernel with `ELOOP`, which
-  takes the same refusal path as a lexical escape, and the bytes land in the file that
-  was checked rather than the file a link points at. This closes the check→write TOCTOU
-  window a lexical-only check leaves open.
+- The write opens the destination itself through `openNoFollow` and writes through that
+  descriptor. On Unix `O_NOFOLLOW` makes the kernel refuse a symlink at the destination
+  with `ELOOP`; on Windows, which has no such flag, the destination is checked with
+  `os.Lstat` and refused if it is a symlink before a normal open. `isSymlinkRefusal`
+  maps both refusals to the same path as a lexical escape, and the bytes land in the
+  file that was checked rather than the file a link points at. On Unix this closes the
+  check→write TOCTOU window a lexical-only check leaves open; the Windows two-step
+  leaves a narrow race, recorded below.
 
 None of the layers is redundant. Sanitisation is what keeps a legitimate export working
 under a name that is merely odd; containment is the backstop for a separator or a
@@ -132,12 +137,34 @@ exports.
   `-1` puts `-1` on the clipboard and the paste-into-editor flow is not corrupted.
 - The historical names under ordinary identifiers are unchanged: `public_users.csv`,
   `.tsv`, `.md`, `.json`, `.sql` and their `.gz` forms still come from the same one
-  helper. A component that had to be changed gets `-` plus a six-hex digest, so distinct
-  original names cannot collide on one file, and a component over 100 bytes is truncated
-  and keeps the digest so a long identifier exports instead of failing with
-  `ENAMETOOLONG`.
+  helper. A component that had to be changed, or that already had the digest shape, gets
+  `-` plus a six-hex digest. The suffix is 24 bits, so two crafted original names can
+  still collide; the guarantee is that ordinary identifiers keep their names and the
+  digest-shaped namespace stays reserved, not that no collision is possible. A component
+  over 100 bytes is truncated and keeps the digest so a long identifier exports instead
+  of failing with `ENAMETOOLONG`.
 - Files written before this change keep their `0644` mode only if they are never
   rewritten; a re-export chmods the file to `0600`, because the permission argument alone
   applies only at creation.
 - Adding a format is still the six sites listed in ADR 0003; the hardening lives inside
   the existing exporters, the filename helper and the write boundary, so it adds none.
+
+### Residual filesystem risks
+
+Containment is not airtight, and this ADR does not claim it is. The open guards the
+final component; it deliberately does not change these pre-existing behaviours:
+
+- **Hard links.** A hard link at the destination is a regular file to both `open` and
+  `os.Lstat`, so neither `O_NOFOLLOW` nor the Windows check refuses it. The write lands
+  in the linked inode.
+- **FIFOs.** A FIFO at the destination is not a regular file; opening or writing it can
+  block or fail. The export path does not special-case it.
+- **Symlinked parent directories.** Only the final component is inspected. A project
+  directory reached through a link, or a destination whose parent is a link, is outside
+  this check; the lexical check still applies to the name inside the project.
+- **The Windows fallback race.** Windows has no `O_NOFOLLOW`, so `Lstat` and the normal
+  open are separate operations. A link swapped in between them is a narrow race the
+  Unix path does not have.
+- **The 24-bit digest.** A crafted pair of original names can share the six-hex suffix.
+  Reserving the digest shape prevents the easy crafted case; it does not widen the
+  suffix.
