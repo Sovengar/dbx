@@ -3163,8 +3163,8 @@ const maxExportComponentBytes = 100
 
 // componentDigest is the short, stable suffix that disambiguates a sanitised
 // component from an ordinary one and from another sanitised component with the same
-// visible text. Six hex characters of the sha256 of the ORIGINAL name: enough that
-// two different originals effectively cannot collide, short enough to stay readable.
+// visible text. Six hex characters of the sha256 of the ORIGINAL name: short enough to
+// stay readable, but only 24 bits, so a crafted pair of originals can still collide.
 func componentDigest(name string) string {
 	sum := sha256.Sum256([]byte(name))
 	return hex.EncodeToString(sum[:])[:6]
@@ -3196,6 +3196,11 @@ func truncateComponent(s string, limit int) string {
 // unchanged identifier keeps its historical byte-for-byte name, so `public_users.csv`
 // is still exactly what `public`/`users` produces.
 //
+// A component that already ends in `-` plus six hex digits gets the digest too, even
+// when it did not change. That shape is the digest namespace: without this, an
+// unchanged `a_b-c14cdd` would land on exactly the name `a/b` produces and overwrite
+// it. Reserving the shape is what keeps unchanged names out of it.
+//
 // A component longer than maxExportComponentBytes is truncated and counted as
 // changed, so it too gets the digest suffix: the name stays under the filesystem
 // limit instead of failing with ENAMETOOLONG.
@@ -3209,7 +3214,7 @@ func sanitizeExportComponent(name string) string {
 		sb.WriteRune(r)
 	}
 	sanitized := sb.String()
-	changed := sanitized != name || sanitized == "." || sanitized == ".."
+	changed := sanitized != name || sanitized == "." || sanitized == ".." || isDigestShaped(sanitized)
 	if sanitized == "." || sanitized == ".." {
 		sanitized = "_"
 	}
@@ -3221,6 +3226,21 @@ func sanitizeExportComponent(name string) string {
 		return sanitized + "-" + componentDigest(name)
 	}
 	return sanitized
+}
+
+// isDigestShaped reports whether name ends in the `-` plus six hex digits shape the
+// digest suffix occupies. Hex is matched case-insensitively because the shape, not a
+// particular spelling, is what has to stay reserved.
+func isDigestShaped(name string) bool {
+	if len(name) < 7 || name[len(name)-7] != '-' {
+		return false
+	}
+	for _, r := range name[len(name)-6:] {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 // exportFilename owns the extension of every export, so the name and the
