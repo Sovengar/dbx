@@ -523,6 +523,28 @@ func TestWriteSchemaOutput_WithAFileWritesTheFileAndConfirmsOnStderr(t *testing.
 	}
 }
 
+// Scenario: El modo 0644 de `context -o` es el contrato documentado y no cambia.
+//
+// The grid export moved to 0600, but `dbx context -o` is a different surface: it is
+// the schema an agent reads, and docs/FEATURES.md promises mode 0644. Pinned so a
+// later hardening pass does not silently tighten this one too.
+func TestWriteSchemaOutput_FileModeIsPinnedTo0644(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "schema.json")
+
+	var stdout, stderr bytes.Buffer
+	if err := writeSchemaOutput([]byte("{}"), path, &stdout, &stderr); err != nil {
+		t.Fatalf("writeSchemaOutput: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Errorf("dbx context -o wrote mode %o, want 644", got)
+	}
+}
+
 // Scenario: Un archivo que no se puede escribir es un error.
 //
 // The command is the only thing standing between a mistyped `-o` and a silent no-op
