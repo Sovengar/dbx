@@ -529,6 +529,12 @@ func TestWriteSchemaOutput_WithAFileWritesTheFileAndConfirmsOnStderr(t *testing.
 // the schema an agent reads, and docs/FEATURES.md promises mode 0644. Pinned so a
 // later hardening pass does not silently tighten this one too.
 func TestWriteSchemaOutput_FileModeIsPinnedTo0644(t *testing.T) {
+	// os.WriteFile(..., 0644) is masked by the process umask, so the expected mode
+	// has to be measured under a known umask or the test either flakes under 077 or
+	// silently accepts a different permission. Set 0 and restore it afterwards.
+	restoreUmask := setUmaskForTest(t, 0)
+	t.Cleanup(restoreUmask)
+
 	path := filepath.Join(t.TempDir(), "schema.json")
 
 	var stdout, stderr bytes.Buffer
