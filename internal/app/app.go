@@ -8,7 +8,6 @@ import (
 	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"image/color"
 	"io"
@@ -17,7 +16,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -3283,11 +3281,12 @@ var writeExportFileData = func(file *os.File, data []byte) error {
 // dead code claiming a guard the function does not have.
 //
 // The open is the second, independent layer, and it is the layer the write actually
-// goes through. O_NOFOLLOW makes the kernel refuse to follow a symlink at the
-// destination, so a link planted between the check and the write cannot redirect it
-// (the check→os.WriteFile pair was a TOCTOU hole before), and ELOOP takes the same
-// refusal path as a lexical escape. Opening once and writing through the descriptor
-// also means the bytes land in the very file that was checked.
+// goes through. openNoFollow makes the platform refuse to follow a symlink at the
+// destination (O_NOFOLLOW on Unix, an Lstat check on Windows), so a link planted
+// between the check and the write cannot redirect it (the check→os.WriteFile pair was
+// a TOCTOU hole before), and a symlink refusal takes the same path as a lexical
+// escape. Opening once and writing through the descriptor also means the bytes land in
+// the very file that was checked.
 //
 // An empty project directory is refused rather than silently writing into the
 // process's current working directory.
@@ -3304,9 +3303,9 @@ func writeExportFile(projectPath, filename string, data []byte) (string, error) 
 		return "", fmt.Errorf("refusing to write outside the project directory: %s", filename)
 	}
 
-	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o600)
+	file, err := openNoFollow(filePath)
 	if err != nil {
-		if errors.Is(err, syscall.ELOOP) {
+		if isSymlinkRefusal(err) {
 			appDebugLog("writeExportFile: refusing %q outside the project %q", filename, projectPath)
 			return "", fmt.Errorf("refusing to write outside the project directory: %s", filename)
 		}
