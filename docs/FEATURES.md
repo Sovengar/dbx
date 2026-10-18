@@ -184,7 +184,12 @@ a tab writes a real tab byte and a `.tsv` file, and an unusable value falls back
 a comma). `ui.export_compress` gzips **file** exports of every format and appends
 `.gz` after the extension (`public_users.csv.gz`); clipboard copies and yanks are
 never compressed. `y` always yanks to the clipboard, and a pending insert row
-yanks its own draft values like any other row under the cursor. `s` cycles the
+yanks its own draft values like any other row under the cursor. Exports are
+hardened: path separators and control characters in the schema or table name are
+replaced with `_` and a destination outside the project is refused (and logged),
+delimited cells that begin with a spreadsheet formula character (`=`, `+`, `-`,
+`@`, tab, CR) get a leading apostrophe, and files are written owner-only (`0600`).
+`s` cycles the
 server-side sort (ASC → DESC → none). `o`
 navigates an FK to its referenced table, `H` goes back through navigation
 history restoring the cursor and filter, and `r` refreshes.
