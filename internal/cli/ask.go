@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,14 +26,26 @@ var askCmd = &cobra.Command{
 func init() {
 	askCmd.Flags().StringP("connection", "c", "", "Connection name from config")
 	askCmd.Flags().BoolP("json", "j", false, "Output as JSON")
-	askCmd.Flags().BoolP("sql-only", "s", false, "Only output the generated SQL")
+	askCmd.Flags().BoolP("sql-only", "s", false, "Only output the generated SQL, without the database")
+	askCmd.Flags().Bool("dry-run", false, "Generate with the real schema and print the SQL, without executing it")
+	askCmd.Flags().Bool("confirm", false, "Ask for confirmation before executing the generated SQL")
 	rootCmd.AddCommand(askCmd)
+}
+
+// askOptions is what the flags above decided, passed down as one value so runAsk
+// stays a thin reader of cobra and askAndReport stays a plain function a test can
+// call with any of the three review modes.
+type askOptions struct {
+	dryRun  bool
+	confirm bool
 }
 
 func runAsk(cmd *cobra.Command, args []string) error {
 	question := args[0]
 	jsonOutput, _ := cmd.Flags().GetBool("json")
 	sqlOnly, _ := cmd.Flags().GetBool("sql-only")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	confirm, _ := cmd.Flags().GetBool("confirm")
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -61,7 +74,10 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
 
-	return askAndReport(os.Stdout, os.Stderr, conn, provider, question, jsonOutput, cfg)
+	return askAndReport(os.Stdout, os.Stderr, conn, provider, question, jsonOutput, cfg, os.Stdin, askOptions{
+		dryRun:  dryRun,
+		confirm: confirm,
+	})
 }
 
 // generateSQLOnly prints the SQL and stops there.
@@ -79,7 +95,8 @@ func generateSQLOnly(w io.Writer, provider nl2sql.Provider, question string) err
 }
 
 // askAndReport is `dbx ask` with the connection and the provider already in hand:
-// generate the SQL from the real schema, run it, and report.
+// generate the SQL from the real schema and then either stop at the review step or
+// execute and report.
 //
 // The two modes are separate functions rather than one with a flag, because they
 // use the database differently: this one reads the schema first and can therefore
@@ -87,7 +104,11 @@ func generateSQLOnly(w io.Writer, provider nl2sql.Provider, question string) err
 //
 // cfg carries the session-log settings for the execution this function may run.
 // A nil config is the "log nothing" case; the helpers are no-ops without one.
-func askAndReport(stdout, stderr io.Writer, conn postgres.Conn, provider nl2sql.Provider, question string, asJSON bool, cfg *config.Config) error {
+//
+// stdin is passed in rather than read from os.Stdin so the confirmation prompt is a
+// plain function of its inputs; stdout carries the result and stderr everything
+// else, which is what keeps `--json` parseable while a prompt is on screen.
+func askAndReport(stdout, stderr io.Writer, conn postgres.Conn, provider nl2sql.Provider, question string, asJSON bool, cfg *config.Config, stdin io.Reader, opts askOptions) error {
 	ctx := context.Background()
 
 	schemaStr, err := getSchemaForLLM(ctx, conn)
@@ -104,7 +125,25 @@ func askAndReport(stdout, stderr io.Writer, conn postgres.Conn, provider nl2sql.
 		return fmt.Errorf("failed to generate SQL: %w", err)
 	}
 
+	// The review step. `--dry-run` prints the schema-aware SQL and stops, which is
+	// the non-interactive counterpart of the TUI's ASK pane: the SQL goes to
+	// stdout because in this mode it is the result, not progress.
+	if opts.dryRun {
+		if asJSON {
+			return writeJSON(stdout, map[string]interface{}{"sql": sql})
+		}
+		_, err := fmt.Fprintln(stdout, sql)
+		return err
+	}
+
 	_, _ = fmt.Fprintf(stderr, "SQL: %s\n\n", sql)
+
+	// A declined prompt is a successful run that executed nothing, not an error: the
+	// user asked to review the SQL and the review said no. The exit stays 0 so a
+	// cancelled review is not mistaken for a failure by the shell.
+	if opts.confirm && !confirmExecution(stdin, stderr) {
+		return nil
+	}
 
 	start := time.Now()
 	result, err := postgres.ExecuteQuery(ctx, conn, sql)
@@ -124,6 +163,31 @@ func askAndReport(stdout, stderr io.Writer, conn postgres.Conn, provider nl2sql.
 	}
 
 	return writeQueryResult(stdout, result, false)
+}
+
+// confirmExecution asks for approval of the generated SQL and reports whether it
+// was given.
+//
+// The prompt goes to stderr so stdout stays the result stream, and the answer is
+// read from stdin. Anything that is not an explicit yes is a no — including an
+// empty line and a read error — because the whole point of the review is that
+// silence does not execute. That default is why the prompt reads `[y/N]`.
+func confirmExecution(stdin io.Reader, stderr io.Writer) bool {
+	_, _ = fmt.Fprint(stderr, "Execute this query? [y/N] ")
+
+	var answer string
+	if _, err := fmt.Fscanln(stdin, &answer); err != nil {
+		_, _ = fmt.Fprintln(stderr, "Cancelled.")
+		return false
+	}
+
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return true
+	}
+
+	_, _ = fmt.Fprintln(stderr, "Cancelled.")
+	return false
 }
 
 func getSchemaForLLM(ctx context.Context, conn postgres.Conn) (string, error) {

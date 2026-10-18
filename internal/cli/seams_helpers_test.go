@@ -57,12 +57,14 @@ func (c cobraCommandForTest) command() *cobra.Command {
 	return cmd
 }
 
-// askCmdForTest is the ask command with the two flags runAsk reads.
+// askCmdForTest is the ask command with every flag runAsk reads.
 func askCmdForTest(t *testing.T, sqlOnly bool) *cobra.Command {
 	t.Helper()
 	cmd := &cobra.Command{Use: "ask"}
 	cmd.Flags().BoolP("json", "j", false, "Output as JSON")
 	cmd.Flags().Bool("sql-only", sqlOnly, "Print SQL without running it")
+	cmd.Flags().Bool("dry-run", false, "Print the schema-aware SQL without running it")
+	cmd.Flags().Bool("confirm", false, "Ask before running the generated SQL")
 	cmd.Flags().StringP("connection", "c", "", "Connection name from config")
 	return cmd
 }
