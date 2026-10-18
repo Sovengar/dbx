@@ -35,28 +35,17 @@ This is the largest remaining gap and the main thing that makes dbx
 
 ---
 
-## 2. Session logging — decide: implement or delete
+## 2. Session logging
 
-**Status:** half-built and dead. **Worth resolving either way.**
+**Status:** implemented.
 
-`internal/ai/session/logger.go` implements a JSON Lines logger and reader, but
-`NewLogger` has **zero callers** — nothing ever writes a session log. Meanwhile
-`dbx replay` reads logs through the same file, so it currently has nothing to
-read. The config keys `session.enabled` and `session.retention_days` are inert
-(`session.dir` is only used as the replay search path).
-
-Two coherent outcomes:
-
-- **Wire it up.** Instantiate the logger on query execution (TUI and CLI), write
-  JSON Lines to `session.dir` (timestamp, action, SQL, duration, rows, error),
-  rotate by day, honor `enabled`/`retention_days`. This turns `dbx replay` into a
-  real feature and gives agents a durable audit trail.
-- **Delete it.** Remove the unused logger and keep `replay` reading the
-  per-project query history that already backs the query browser
-  (`~/.local/state/dbx/projects/{project}/query_history.json`). Simpler, but
-  loses the "replay a session" concept.
-
-Either way, the config surface and the code should agree.
+`internal/ai/session/logger.go` writes and reads a daily NDJSON log under
+`session.dir`. The writer is instantiated by the TUI (`app.NewModel`) and by the
+CLI — `dbx query`, `dbx pipe` and `dbx ask` log the statements they execute — so
+`dbx replay` has real logs to read. `session.enabled` (default true) turns it off
+and `session.retention_days` (default 30) prunes old files; a log that cannot be
+opened disables logging instead of failing the command. `--sql-only`, `--dry-run`
+and a declined `--confirm` execute nothing and therefore write nothing.
 
 ---
 
@@ -184,3 +173,4 @@ Low priority, kept for completeness:
 |------|--------|--------|
 | 2026-09-11 | Initial plan (phases 0–5) | Start |
 | 2026-09-23 | Rewritten as a roadmap | The original phases mixed shipped, fictional and pending work; completed phases removed, remaining work re-scoped against the code |
+| 2026-10-18 | Closed §2 (session logging) | The writer existed but only the TUI called it; the CLI now logs too |

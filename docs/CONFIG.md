@@ -90,10 +90,15 @@ retention_days = 30
 
 Defaults: `enabled = true`, `dir = $TMPDIR/dbx/sessions`, `retention_days = 30`.
 
-> **Not implemented.** dbx does not write session logs. `dir` is only the search
-> path used by `dbx replay`; `enabled` and `retention_days` are inert. Executed
-> queries are recorded instead in the per-project query history that backs the
-> query browser (`~/.local/state/dbx/projects/{project}/query_history.json`).
+Every executed statement is appended to `<dir>/YYYY-MM-DD.jsonl`, one NDJSON
+object per line: `query` entries (`sql`, `duration_ms`, `rows`) and `error`
+entries. The TUI, `dbx query`, `dbx pipe` and `dbx ask` all write; `connect`
+entries come from the TUI only. `dbx replay` reads the same files.
+
+`enabled = false` disables the writer without disabling any command.
+`retention_days` prunes older daily files (the TUI sweeps at startup, the CLI as
+it opens the log). A log that cannot be opened disables logging and never fails
+the command.
 
 ### `ui`
 

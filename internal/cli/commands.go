@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -259,17 +260,29 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
 
+	// Best effort: a config that cannot be loaded disables the session log, not
+	// the query. getConnection has already resolved the connection the user asked
+	// for, and logging is the one feature allowed to be unavailable.
+	cfg, _ := loadConfig()
+
 	jsonOutput, _ := cmd.Flags().GetBool("json")
-	return queryAndReport(os.Stdout, conn, args[0], jsonOutput)
+	return queryAndReport(os.Stdout, conn, args[0], jsonOutput, cfg)
 }
 
 // queryAndReport runs one statement and prints the result. Everything `dbx query`
 // does is in here, with the connection already in hand.
-func queryAndReport(w io.Writer, conn postgres.Conn, sql string, asJSON bool) error {
+//
+// cfg carries the session-log settings. A nil config is the "log nothing" case:
+// the two helper calls below are no-ops without one, so a test or a command that
+// could not load the config still runs the statement.
+func queryAndReport(w io.Writer, conn postgres.Conn, sql string, asJSON bool, cfg *config.Config) error {
+	start := time.Now()
 	result, err := postgres.ExecuteQuery(context.Background(), conn, sql)
 	if err != nil {
+		logSessionError(cfg, sql, err)
 		return fmt.Errorf("query failed: %w", err)
 	}
+	logSessionQuery(cfg, sql, time.Since(start), result.Count)
 	return writeQueryResult(w, result, asJSON)
 }
 

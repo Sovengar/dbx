@@ -228,25 +228,23 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 Logs are written in JSON Lines format:
 
+The writer is instantiated by the TUI (`app.NewModel`) and by `dbx query`,
+`dbx pipe` and `dbx ask`; `dbx replay` reads the same files. One object per line,
+with `level` selecting the shape:
+
 ```json
 {
     "timestamp": "2026-09-11T14:30:22.123Z",
-    "session_id": "abc123",
-    "action": "query_executed",
+    "level": "query",
+    "action": "execute",
     "sql": "SELECT * FROM users WHERE active = true",
-    "table": "users",
-    "schema": "public",
     "duration_ms": 125,
-    "rows_affected": 42,
-    "columns": ["id", "name", "email", "active"],
-    "error": null,
-    "metadata": {
-        "connection": "local-dev",
-        "provider": "anthropic",
-        "nl2sql": false
-    }
+    "rows": 42
 }
 ```
+
+`error` entries carry `error` instead of `duration_ms`/`rows`; `connect` and
+`schema` entries carry `metadata` (`{"database": …}` / `{"table": …}`).
 
 ## File Structure Conventions
 

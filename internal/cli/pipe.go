@@ -86,8 +86,12 @@ func runPipe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("empty SQL input")
 	}
 
+	// Best effort, for the same reason as `dbx query`: the statement runs even
+	// when the session log cannot be opened.
+	cfg, _ := loadConfig()
+
 	jsonOutput, _ := cmd.Flags().GetBool("json")
-	return queryAndReport(os.Stdout, conn, sql, jsonOutput)
+	return queryAndReport(os.Stdout, conn, sql, jsonOutput, cfg)
 }
 
 // readSQL reads a whole stream and trims it.

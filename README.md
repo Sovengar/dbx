@@ -221,9 +221,10 @@ transaction.
 
 dbx writes a session log when `session.enabled` is true (default): one
 newline-delimited JSON file per day (`YYYY-MM-DD.jsonl`) in `[session] dir`
-(default `$TMPDIR/dbx/sessions`), with one object per line for executed queries,
-errors and connects. Files older than `session.retention_days` (default 30) are
-pruned at startup.
+(default `$TMPDIR/dbx/sessions`), with one object per line for executed queries
+and errors — from the TUI and from `dbx query`, `dbx pipe` and `dbx ask` — plus
+connects from the TUI. Files older than `session.retention_days` (default 30) are
+pruned.
 
 `dbx replay` re-executes the `query` entries of a session file:
 

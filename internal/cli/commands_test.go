@@ -26,7 +26,7 @@ func TestQueryAndReport_RunsTheStatementAndPrintsTheTextShape(t *testing.T) {
 	}}}
 
 	var out bytes.Buffer
-	if err := queryAndReport(&out, conn, "SELECT id, name FROM users", false); err != nil {
+	if err := queryAndReport(&out, conn, "SELECT id, name FROM users", false, nil); err != nil {
 		t.Fatalf("queryAndReport: %v", err)
 	}
 
@@ -55,7 +55,7 @@ func TestQueryAndReport_AFailedQueryIsReportedAndPrintsNothing(t *testing.T) {
 	conn := &fakeConn{steps: []step{{contains: "SELCT", err: boom}}}
 
 	var out bytes.Buffer
-	err := queryAndReport(&out, conn, "SELCT 1", false)
+	err := queryAndReport(&out, conn, "SELCT 1", false, nil)
 	if err == nil {
 		t.Fatal("a failing query returned no error")
 	}
@@ -77,7 +77,7 @@ func TestQueryAndReport_JSONModeProducesTheObject(t *testing.T) {
 	conn := &fakeConn{steps: []step{{contains: "SELECT", spec: rowsSpec{rows: [][]any{{7}}}}}}
 
 	var out bytes.Buffer
-	if err := queryAndReport(&out, conn, "SELECT 7", true); err != nil {
+	if err := queryAndReport(&out, conn, "SELECT 7", true, nil); err != nil {
 		t.Fatalf("queryAndReport: %v", err)
 	}
 	var got struct {
