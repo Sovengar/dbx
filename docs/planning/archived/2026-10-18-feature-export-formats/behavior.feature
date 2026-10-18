@@ -98,3 +98,23 @@ Feature: Grid export — Markdown, custom delimiters and file compression
     When the user exports with the SQL, JSON or CSV option
     Then the content matches today's output byte for byte
     And the file extensions are still ".sql", ".json" and ".csv"
+
+  # --- Hardening ---
+
+  Scenario: A DB-controlled schema or table cannot write outside the project
+    Given a schema or table name that contains a path separator or a traversal
+    When the user exports to a file
+    Then path separators and control characters in the name are replaced with "_"
+    And a ".." component can never be a traversal component of its own
+    And the resolved destination must stay inside the project directory
+    And a destination that escapes it is refused and logged
+
+  Scenario: Delimited cells cannot inject a spreadsheet formula
+    Given a cell whose string form starts with "=", "+", "-", "@", TAB or CR
+    When the user exports the delimited format
+    Then the cell is prefixed with a leading apostrophe
+    And SQL, JSON and Markdown exports are unchanged
+
+  Scenario: Exported files are readable only by their owner
+    When the user exports rows to a file
+    Then the file is written with mode 0600

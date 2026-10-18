@@ -14,3 +14,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Empty the SQL editor buffer after a successful run so the first `ctrl+p` recalls the just-executed query.
 - Render the explorer pane at exactly its assigned height instead of overflowing by two lines.
+
+### Security
+- Harden grid export against database-controlled names and spreadsheet formulas: path separators and control characters in the schema/table file name are replaced with `_` and a destination outside the project is refused (and logged), a delimited cell that begins with `=`, `+`, `-`, `@`, tab or CR is prefixed with an apostrophe (so `-1` exports as `'-1` and no longer round-trips byte for byte), and exported files are written owner-only (`0600`).
