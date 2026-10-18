@@ -152,10 +152,12 @@ muertos con test; cuelgues a `.mutation-timeouts`.
 `go build ./... && go vet ./... && go test ./...`, `make lint` y
 `make mutate-diff`; al terminar, `make install` (el usuario ejecuta
 `~/.local/bin/dbx`). Commits atómicos en Conventional Commits sobre
-`feature/export-formats`.
+`feat/export-formats`.
 
 ## Progress
-Phase: execution
+Phase: close
+Close: started 2026-10-18
+Review: 2026-10-18 — PASS WITH FINDINGS (round 2, tip `603c030`). 13/13 scenarios PASS, 0 CRITICAL, 0 HIGH, 0 MEDIUM gating, 10 LOW record-only (ADR drift N1/N2; `docs/CONFIG.md` reject list omits U+FFFD L1; unobserved log assertions L2/L2'; `writeGzip` log tag L3; backwards `case grid.ExportSQL` comment L4; stale absolute paths in `context.md` L5; `exportFilename` fallback N3; README/plan wording L6). Pre-existing, not regressions and out of this delta (filed separately): schema/table path traversal in `exportFilename`, CSV formula injection, 0644 export mode.
 | Scenario (behavior.feature) | Status | Commit |
 | --- | --- | --- |
 | Markdown export of a single row goes to the clipboard as a table | ✅ | 5b4a2ea |

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/color"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2931,8 +2932,14 @@ func exportAsCSV(result *postgres.QueryResult, comma rune) string {
 	for i, col := range result.Columns[:width] {
 		headers[i] = col.Name
 	}
-	// Writes to a strings.Builder never fail, so the errors are ignored.
-	_ = writer.Write(headers)
+	// The sink is a strings.Builder, which cannot fail, but an invalid Comma makes
+	// csv.Writer.Write return before writing anything: unchecked, that is an empty
+	// export the user reads as a successful export of an empty result. Log it
+	// instead of dropping it, matching the debug-log convention (logging never
+	// fails, so the export still returns what it produced).
+	if err := writer.Write(headers); err != nil {
+		appDebugLog("exportAsCSV: header: %v", err)
+	}
 
 	// Rows
 	for _, row := range result.Rows {
@@ -2940,7 +2947,9 @@ func exportAsCSV(result *postgres.QueryResult, comma rune) string {
 		for i, val := range row[:width] {
 			record[i] = fmt.Sprintf("%v", val)
 		}
-		_ = writer.Write(record)
+		if err := writer.Write(record); err != nil {
+			appDebugLog("exportAsCSV: row: %v", err)
+		}
 	}
 
 	writer.Flush()
@@ -2984,14 +2993,20 @@ func exportRowAsCSV(columns []string, row []interface{}, comma rune) string {
 	writer := csv.NewWriter(&sb)
 	writer.Comma = comma
 
-	// Writes to a strings.Builder never fail, so the errors are ignored.
-	_ = writer.Write(columns[:rowWidth(columns, row)])
+	// Same as exportAsCSV: a strings.Builder cannot fail, but an invalid Comma
+	// makes csv.Writer.Write return without writing, so the error is logged, not
+	// dropped.
+	if err := writer.Write(columns[:rowWidth(columns, row)]); err != nil {
+		appDebugLog("exportRowAsCSV: header: %v", err)
+	}
 
 	record := make([]string, rowWidth(columns, row))
 	for i, val := range row[:len(record)] {
 		record[i] = fmt.Sprintf("%v", val)
 	}
-	_ = writer.Write(record)
+	if err := writer.Write(record); err != nil {
+		appDebugLog("exportRowAsCSV: row: %v", err)
+	}
 
 	writer.Flush()
 	return sb.String()
@@ -3020,7 +3035,15 @@ func exportRowAsMarkdown(columns []string, row []interface{}) string {
 func markdownTable(headers []string, rows [][]interface{}) string {
 	var sb strings.Builder
 
-	writeMarkdownRow(&sb, headers)
+	// The header goes through the SAME escaper as every data cell. A column name
+	// can hold a pipe, a backslash or a newline just like a value, and a raw header
+	// would break the table before the first data row — the very failure the cells
+	// are escaped to prevent. One function, not a second header-only escaper.
+	escapedHeaders := make([]string, len(headers))
+	for i, header := range headers {
+		escapedHeaders[i] = markdownCell(header)
+	}
+	writeMarkdownRow(&sb, escapedHeaders)
 
 	separator := make([]string, len(headers))
 	for i := range separator {
@@ -3029,12 +3052,15 @@ func markdownTable(headers []string, rows [][]interface{}) string {
 	writeMarkdownRow(&sb, separator)
 
 	// One cell per header, never one per value: a row longer than the header is
-	// truncated and a shorter one would have made the table unrenderable, which
-	// usableWidth/rowWidth already ruled out for the caller.
+	// truncated. A row SHORTER than the header cannot reach here from
+	// usableWidth/rowWidth, but a direct caller can pass one, so a missing value
+	// stays an empty cell instead of indexing out of range.
 	for _, row := range rows {
 		cells := make([]string, len(headers))
 		for i := range headers {
-			cells[i] = markdownCell(row[i])
+			if i < len(row) {
+				cells[i] = markdownCell(row[i])
+			}
 		}
 		writeMarkdownRow(&sb, cells)
 	}
@@ -3046,8 +3072,9 @@ func markdownTable(headers []string, rows [][]interface{}) string {
 //
 // The backslash is escaped FIRST: escaping it after the pipe would turn the
 // backslash of `\|` into a second escape and the pipe would stay live. A
-// newline becomes <br> because a raw one ends the row, and a NULL becomes an
-// empty cell — "NULL" as text would claim the query returned a value it did not.
+// newline becomes <br> because a raw one ends the row — `\r\n`, `\n` and a lone
+// `\r` all count — and a NULL becomes an empty cell — "NULL" as text would claim
+// the query returned a value it did not.
 func markdownCell(val interface{}) string {
 	if val == nil {
 		return ""
@@ -3057,6 +3084,9 @@ func markdownCell(val interface{}) string {
 	cell = strings.ReplaceAll(cell, "|", `\|`)
 	cell = strings.ReplaceAll(cell, "\r\n", "<br>")
 	cell = strings.ReplaceAll(cell, "\n", "<br>")
+	// Any \r left after \r\n is gone is a lone carriage return, which ends a row
+	// just like \n; leaving it raw would break the table.
+	cell = strings.ReplaceAll(cell, "\r", "<br>")
 	return cell
 }
 
@@ -3079,6 +3109,11 @@ func exportFilename(schema, table string, format grid.ExportFormat, comma rune, 
 		}
 	case grid.ExportMarkdown:
 		ext = "md"
+	case grid.ExportSQL:
+		// Explicit so an unknown ExportFormat reaches default below instead of
+		// riding the zero value and silently looking like SQL.
+	default:
+		appDebugLog("exportFilename: unknown ExportFormat %d, using .sql", format)
 	}
 
 	name := fmt.Sprintf("%s_%s.%s", schema, table, ext)
@@ -3095,11 +3130,23 @@ func exportFilename(schema, table string, format grid.ExportFormat, comma rune, 
 // deterministic and a round-trip test can compare it.
 func gzipExport(data []byte) []byte {
 	var buf bytes.Buffer
-	writer := gzip.NewWriter(&buf)
-	// Writes to a bytes.Buffer never fail, so the errors are ignored.
-	_, _ = writer.Write(data)
-	_ = writer.Close()
+	writeGzip(&buf, data)
 	return buf.Bytes()
+}
+
+// writeGzip is gzipExport with the destination given. Against the bytes.Buffer
+// the exporter uses, neither the write nor the close can fail, but the error is
+// logged rather than dropped: the sink is the one thing that could change, and a
+// discarded gzip error is a corrupt file the user cannot tell from a good one.
+// The parameter is also what makes the failure path testable with a failing sink.
+func writeGzip(dst io.Writer, data []byte) {
+	writer := gzip.NewWriter(dst)
+	if _, err := writer.Write(data); err != nil {
+		appDebugLog("gzipExport: write: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		appDebugLog("gzipExport: close: %v", err)
+	}
 }
 
 // writeMarkdownRow writes one "| a | b |" table line.

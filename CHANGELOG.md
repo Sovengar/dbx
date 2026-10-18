@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Grid export (`x`) can now write a Markdown table, use a configurable delimiter (`ui.export_delimiter`, with `.tsv` for tab) and gzip file exports (`ui.export_compress`); clipboard and yank exports are never compressed.
 - Session logging now covers the CLI: `dbx query`, `dbx pipe` and `dbx ask` append the statements they execute to the daily session log, so `dbx replay` sees CLI sessions too.
 
 ### Fixed

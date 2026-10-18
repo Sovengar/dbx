@@ -798,6 +798,18 @@ func TestAFailedExportIsReportedRatherThanSwallowed(t *testing.T) {
 	})
 }
 
+// An unknown ExportFormat is a programming error; it must not look like SQL by
+// accident. The default arm keeps the historical .sql but logs, and this pins the
+// fallback and that it composes with compression.
+func TestExportFilenameFallsBackForAnUnknownFormat(t *testing.T) {
+	if got := exportFilename("public", "users", grid.ExportFormat(99), ',', false); got != "public_users.sql" {
+		t.Errorf("exportFilename with an unknown format = %q, want public_users.sql", got)
+	}
+	if got := exportFilename("public", "users", grid.ExportFormat(99), ',', true); got != "public_users.sql.gz" {
+		t.Errorf("exportFilename with an unknown format and compression = %q, want public_users.sql.gz", got)
+	}
+}
+
 // foundProjectIn is a project pointing at an existing directory.
 func foundProjectIn(dir string) *config.FoundProject {
 	return &config.FoundProject{Name: "p", Path: dir, Active: true}

@@ -915,3 +915,110 @@ func TestTheExportedMarkdownIsATable(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// Review fixes
+// ---------------------------------------------------------------------------
+
+// Scenario: Markdown escapes pipes and newlines and renders NULL as an empty cell.
+// M1: the header is a cell too, so it must go through the same escaper.
+func TestMarkdownEscapesTheHeaderLikeADataCell(t *testing.T) {
+	r := &postgres.QueryResult{
+		Columns: []postgres.ColumnInfo{{Name: "a|b"}, {Name: `c\d`}, {Name: "e\nf"}},
+	}
+	lines := markdownLines(t, exportAsMarkdown(r))
+
+	// The pipe and the backslash are escaped and the newline becomes <br>, exactly
+	// as they would in a value. A raw header would break the table before the
+	// first data row.
+	if got, want := lines[0], `| a\|b | c\\d | e<br>f |`; got != want {
+		t.Errorf("the header is %q, want %q", got, want)
+	}
+	// And the separator still has one cell per column, so the escaped header keeps
+	// the table's shape.
+	if got, want := lines[1], "| --- | --- | --- |"; got != want {
+		t.Errorf("the separator is %q, want %q", got, want)
+	}
+}
+
+// M2: a lone carriage return is a line break too, and a CRLF is still one break.
+func TestMarkdownRendersEveryLineBreakAsExactlyOneBr(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{"a lone carriage return", "one\rtwo"},
+		{"a CRLF pair", "one\r\ntwo"},
+		{"a lone newline", "one\ntwo"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := markdownCell(tc.value)
+			if n := strings.Count(got, "<br>"); n != 1 {
+				t.Errorf("markdownCell(%q) = %q, want exactly one <br>, got %d", tc.value, got, n)
+			}
+			if strings.ContainsAny(got, "\r\n") {
+				t.Errorf("markdownCell(%q) = %q, a raw line break survived", tc.value, got)
+			}
+		})
+	}
+}
+
+// The backslash has to be escaped BEFORE the pipe. Doing it the other way turns
+// the escape's own backslash into a second escape and leaves the pipe live, so
+// the two orders produce a different number of backslashes.
+func TestMarkdownEscapesTheBackslashBeforeThePipe(t *testing.T) {
+	if got, want := markdownCell(`a\|b`), `a\\\|b`; got != want {
+		t.Errorf("markdownCell(%q) = %q, want %q (three backslashes then the escaped pipe)", `a\|b`, got, want)
+	}
+}
+
+// A direct caller can pass a row shorter than the header even though the real
+// paths are width-clamped; the missing value must be an empty cell, not a panic.
+func TestMarkdownTableGuardsAgainstAShortRow(t *testing.T) {
+	lines := markdownLines(t, markdownTable([]string{"a", "b"}, [][]interface{}{{int64(1)}}))
+	if len(lines) != 3 {
+		t.Fatalf("the table has %d lines, want a header, a separator and one row", len(lines))
+	}
+	if got, want := lines[0], "| a | b |"; got != want {
+		t.Errorf("the header is %q, want %q", got, want)
+	}
+	if got, want := lines[2], "| 1 |  |"; got != want {
+		t.Errorf("the short row is %q, want the missing value as an empty cell", got)
+	}
+}
+
+// sinkWriter accepts a fixed number of Write calls and then fails. gzip writes
+// the header on the caller's Write and the remaining chunks — including the
+// trailer — during Close, so remaining=0 fails the write path and a small
+// remaining=1 fails the close path. The two log arms are the point.
+type sinkWriter struct{ remaining int }
+
+func (w *sinkWriter) Write(p []byte) (int, error) {
+	if w.remaining <= 0 {
+		return 0, fmt.Errorf("sink refused the write")
+	}
+	w.remaining--
+	return len(p), nil
+}
+
+func TestGzipExportDoesNotDropAFailingSink(t *testing.T) {
+	t.Run("the write fails", func(t *testing.T) {
+		writeGzip(&sinkWriter{remaining: 0}, []byte("x"))
+	})
+	t.Run("the close fails", func(t *testing.T) {
+		writeGzip(&sinkWriter{remaining: 1}, []byte("x"))
+	})
+}
+
+// An invalid Comma makes csv.Writer.Write return before writing anything. The
+// exporters log it rather than returning an empty string that reads as a
+// successful export of an empty result. Reached directly because the config path
+// normalises the delimiter before the exporters see it.
+func TestDelimitedExportsLogAnInvalidDelimiter(t *testing.T) {
+	if got := exportAsCSV(exportResult(), '"'); got != "" {
+		t.Errorf("exportAsCSV with an invalid delimiter = %q, want empty", got)
+	}
+	if got := exportRowAsCSV([]string{"id", "name"}, []interface{}{int64(1), "ada"}, '"'); got != "" {
+		t.Errorf("exportRowAsCSV with an invalid delimiter = %q, want empty", got)
+	}
+}
