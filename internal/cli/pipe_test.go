@@ -214,7 +214,7 @@ func TestAskAndReport_PassesTheRealSchemaToTheProvider(t *testing.T) {
 	provider := &stubProvider{name: "test-provider", sql: "SELECT id FROM users"}
 
 	var stdout, stderr bytes.Buffer
-	if err := askAndReport(&stdout, &stderr, conn, provider, "how many users?", false); err != nil {
+	if err := askAndReport(&stdout, &stderr, conn, provider, "how many users?", false, nil); err != nil {
 		t.Fatalf("askAndReport: %v", err)
 	}
 
@@ -244,7 +244,7 @@ func TestAskAndReport_RunsExactlyTheGeneratedSQL(t *testing.T) {
 	provider := &stubProvider{name: "p", sql: "SELECT id FROM users WHERE id = 1"}
 
 	var stdout, stderr bytes.Buffer
-	if err := askAndReport(&stdout, &stderr, conn, provider, "the first user", false); err != nil {
+	if err := askAndReport(&stdout, &stderr, conn, provider, "the first user", false, nil); err != nil {
 		t.Fatalf("askAndReport: %v", err)
 	}
 
@@ -268,7 +268,7 @@ func TestAskAndReport_DoesNotCallTheModelWithoutASchema(t *testing.T) {
 	provider := &stubProvider{name: "p", sql: "SELECT 1"}
 
 	var stdout, stderr bytes.Buffer
-	err := askAndReport(&stdout, &stderr, conn, provider, "anything", false)
+	err := askAndReport(&stdout, &stderr, conn, provider, "anything", false, nil)
 	if err == nil {
 		t.Fatal("a schema read failure returned no error")
 	}
@@ -290,7 +290,7 @@ func TestAskAndReport_AModelFailureIsReported(t *testing.T) {
 	provider := &stubProvider{name: "p", err: boom}
 
 	var stdout, stderr bytes.Buffer
-	err := askAndReport(&stdout, &stderr, conn, provider, "how many users?", false)
+	err := askAndReport(&stdout, &stderr, conn, provider, "how many users?", false, nil)
 	if err == nil {
 		t.Fatal("a failing model returned no error")
 	}
@@ -322,7 +322,7 @@ func TestAskAndReport_ABadQueryIsReportedAsAQueryFailure(t *testing.T) {
 	provider := &stubProvider{name: "p", sql: "SELECT nam FROM users"}
 
 	var stdout, stderr bytes.Buffer
-	err := askAndReport(&stdout, &stderr, conn, provider, "names?", false)
+	err := askAndReport(&stdout, &stderr, conn, provider, "names?", false, nil)
 	if err == nil {
 		t.Fatal("a rejected statement returned no error")
 	}
@@ -343,7 +343,7 @@ func TestAskAndReport_JSONModeCarriesTheSQL(t *testing.T) {
 	provider := &stubProvider{name: "p", sql: "SELECT id FROM users"}
 
 	var stdout, stderr bytes.Buffer
-	if err := askAndReport(&stdout, &stderr, conn, provider, "ids", true); err != nil {
+	if err := askAndReport(&stdout, &stderr, conn, provider, "ids", true, nil); err != nil {
 		t.Fatalf("askAndReport: %v", err)
 	}
 

@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/buble/dbx/internal/ai/nl2sql"
+	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/drivers/postgres"
 )
 
@@ -59,7 +61,7 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
 
-	return askAndReport(os.Stdout, os.Stderr, conn, provider, question, jsonOutput)
+	return askAndReport(os.Stdout, os.Stderr, conn, provider, question, jsonOutput, cfg)
 }
 
 // generateSQLOnly prints the SQL and stops there.
@@ -82,7 +84,10 @@ func generateSQLOnly(w io.Writer, provider nl2sql.Provider, question string) err
 // The two modes are separate functions rather than one with a flag, because they
 // use the database differently: this one reads the schema first and can therefore
 // fail before the model is ever called.
-func askAndReport(stdout, stderr io.Writer, conn postgres.Conn, provider nl2sql.Provider, question string, asJSON bool) error {
+//
+// cfg carries the session-log settings for the execution this function may run.
+// A nil config is the "log nothing" case; the helpers are no-ops without one.
+func askAndReport(stdout, stderr io.Writer, conn postgres.Conn, provider nl2sql.Provider, question string, asJSON bool, cfg *config.Config) error {
 	ctx := context.Background()
 
 	schemaStr, err := getSchemaForLLM(ctx, conn)
@@ -101,10 +106,13 @@ func askAndReport(stdout, stderr io.Writer, conn postgres.Conn, provider nl2sql.
 
 	_, _ = fmt.Fprintf(stderr, "SQL: %s\n\n", sql)
 
+	start := time.Now()
 	result, err := postgres.ExecuteQuery(ctx, conn, sql)
 	if err != nil {
+		logSessionError(cfg, sql, err)
 		return fmt.Errorf("query failed: %w", err)
 	}
+	logSessionQuery(cfg, sql, time.Since(start), result.Count)
 
 	if asJSON {
 		return writeJSON(stdout, map[string]interface{}{

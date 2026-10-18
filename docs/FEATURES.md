@@ -67,11 +67,13 @@ file (mode 0644) instead of stdout; `-j` defaults to true. Built for agents.
 
 ### Session logs — written by dbx
 
-With `session.enabled` (default true) the TUI appends NDJSON entries to a daily
-file `<session.dir>/YYYY-MM-DD.jsonl` (`session.dir` default `/tmp/dbx/sessions`):
-`query` (sql, duration, rows), `error` and `connect` entries. Files older than
-`session.retention_days` (default 30) are pruned at startup. A failed log open
-never blocks the TUI — logging is the one feature allowed to be unavailable.
+With `session.enabled` (default true) dbx appends NDJSON entries to a daily file
+`<session.dir>/YYYY-MM-DD.jsonl` (`session.dir` default `/tmp/dbx/sessions`):
+`query` (sql, duration, rows) and `error` entries for every executed statement —
+the TUI, `dbx query`, `dbx pipe` and `dbx ask` all write — plus `connect`
+entries from the TUI. Files older than `session.retention_days` (default 30) are
+pruned: the TUI sweeps at startup, the CLI as it opens the log. A failed log open
+never blocks the command — logging is the one feature allowed to be unavailable.
 
 ### `dbx replay [session-file]` — re-run a session log
 
