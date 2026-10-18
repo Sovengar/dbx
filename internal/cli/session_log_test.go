@@ -132,7 +132,7 @@ func TestAskAndReport_LogsTheExecutedStatement(t *testing.T) {
 	provider := &stubProvider{name: "test-provider", sql: "SELECT id FROM users"}
 
 	var stdout, stderr bytes.Buffer
-	if err := askAndReport(&stdout, &stderr, conn, provider, "users?", false, cfg); err != nil {
+	if err := askAndReport(&stdout, &stderr, conn, provider, "users?", false, cfg, nil, askOptions{}); err != nil {
 		t.Fatalf("askAndReport: %v", err)
 	}
 
@@ -159,7 +159,7 @@ func TestAskAndReport_LogsTheFailedStatement(t *testing.T) {
 	provider := &stubProvider{name: "test-provider", sql: "SELECT id FROM users"}
 
 	var stdout, stderr bytes.Buffer
-	if err := askAndReport(&stdout, &stderr, conn, provider, "users?", false, cfg); err == nil {
+	if err := askAndReport(&stdout, &stderr, conn, provider, "users?", false, cfg, nil, askOptions{}); err == nil {
 		t.Fatal("askAndReport returned no error")
 	}
 

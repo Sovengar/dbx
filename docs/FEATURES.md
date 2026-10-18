@@ -29,12 +29,18 @@ transaction is rolled back before the connection closes.
 
 ### `dbx ask [question]` — natural language → SQL
 
-Turns a question into SQL and runs it. Flags: `-c`, `-j`, `-s/--sql-only`.
-`--sql-only` needs no database and just prints the generated SQL. Otherwise dbx
-connects, builds a schema string (system schemas excluded) for the model, prints
-the SQL to **stderr**, and executes it in autocommit. There is **no confirmation
-step** in the CLI — the review flow belongs to the TUI ASK pane. Output is a
-text table or JSON `{sql, columns, rows, count}`. Intended for agents/scripting.
+Turns a question into SQL and runs it. Flags: `-c`, `-j`, `-s/--sql-only`,
+`--dry-run`, `--confirm`.
+
+`--sql-only` needs no database and just prints the generated SQL from the
+question alone. Otherwise dbx connects, builds a schema string (system schemas
+excluded) for the model, prints the SQL to **stderr**, and executes it in
+autocommit. `--dry-run` stops after the schema-aware generation: the SQL goes to
+**stdout** (JSON `{sql}` with `-j`) and nothing is executed. `--confirm` prompts
+`Execute this query? [y/N]` on stderr and runs the SQL only on an explicit
+`y`/`yes`; anything else cancels with exit 0. With both, `--dry-run` wins and no
+prompt is shown. Output is a text table or JSON `{sql, columns, rows, count}`.
+Intended for agents/scripting; the TUI ASK pane remains the multi-turn review.
 
 ### `dbx query [sql]` — run one statement
 

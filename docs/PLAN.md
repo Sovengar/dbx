@@ -133,14 +133,15 @@ switch would add surface without solving a real problem. This item is closed.
 
 ## 10. AI: CLI review parity
 
-**Status:** minor gap.
+**Status:** done — 2026-10-18.
 
 The TUI ASK pane is a multi-turn chat with an explicit review step before
-executing. The CLI `dbx ask` executes immediately (`--sql-only` skips
-execution). Consider adding an interactive confirm (or a `--dry-run`) for
-parity. NL→SQL itself is done: Anthropic, OpenAI, DeepSeek, Qwen plus
-OpenAI-compatible providers (opencode-go, pi, hermes, jcode), config- and
-env-driven.
+executing. The CLI `dbx ask` gained both halves of the parity: `--dry-run`
+connects, reads the real schema, generates and prints the SQL without executing
+it, and `--confirm` prompts `Execute this query? [y/N]` before running. Default
+behaviour is unchanged (generate and execute), so existing scripts keep working.
+NL→SQL itself is done: Anthropic, OpenAI, DeepSeek, Qwen plus OpenAI-compatible
+providers (opencode-go, pi, hermes, jcode), config- and env-driven.
 
 ---
 

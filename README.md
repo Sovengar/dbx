@@ -97,9 +97,10 @@ text inside strings and comments. The full context → suggestions table lives i
 
 Ask a question in natural language and dbx generates SQL for review before
 executing (the TUI ASK pane). The terminal command `dbx ask` runs the same
-generation but executes immediately, with no review step; it supports `--json`
-and `--sql-only` flags. Supports Anthropic, OpenAI, DeepSeek, Qwen, OpenCode,
-and any OpenAI-compatible endpoint.
+generation and can execute immediately, or stop at the review: `--dry-run`
+prints the schema-aware SQL without running it and `--confirm` asks before
+executing. It also supports `--json` and `--sql-only`. Supports Anthropic,
+OpenAI, DeepSeek, Qwen, OpenCode, and any OpenAI-compatible endpoint.
 
 ### Navigation & UI
 
@@ -212,10 +213,11 @@ dbx ask "show me users who signed up last week"
 ```
 
 The TUI ASK pane generates SQL, shows it for review, and executes on
-confirmation. The `dbx ask` command generates and executes in one step, with no
-review; use `--sql-only` to print the SQL without running it. Generated SQL is
-restricted to a single `SELECT`, enforced by a server-side READ ONLY
-transaction.
+confirmation. The `dbx ask` command generates and executes in one step by
+default; `--dry-run` prints the schema-aware SQL without running it and
+`--confirm` asks `Execute this query? [y/N]` first, so the CLI has the same
+review step. Generated SQL is restricted to a single `SELECT`, enforced by a
+server-side READ ONLY transaction.
 
 ### Session Logs
 
