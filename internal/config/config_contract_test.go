@@ -182,6 +182,8 @@ func TestLoadDeliversDefaultsWithoutOverwriting(t *testing.T) {
 			{"ui.history_size", cfg.UI.HistorySize, 100},
 			{"ui.page_size", cfg.UI.PageSize, 100},
 			{"ui.yank_max_rows", cfg.UI.YankMaxRows, 10},
+			{"ui.export_delimiter", cfg.UI.ExportDelimiter, ","},
+			{"ui.export_compress", cfg.UI.ExportCompress, false},
 			{"ui.nerd_font", cfg.UI.NerdFont, true},
 			{"editor.autocomplete", cfg.Editor.Autocomplete, true},
 			{"editor.autocomplete_trigger", cfg.Editor.AutocompleteTrigger, 1},

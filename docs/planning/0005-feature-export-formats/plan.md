@@ -155,7 +155,7 @@ muertos con test; cuelgues a `.mutation-timeouts`.
 `feature/export-formats`.
 
 ## Progress
-Phase: planning
+Phase: execution
 | Scenario (behavior.feature) | Status | Commit |
 | --- | --- | --- |
 | Markdown export of a single row goes to the clipboard as a table | ⬜ | |

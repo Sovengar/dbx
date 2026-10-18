@@ -107,7 +107,14 @@ type UIConfig struct {
 	StatusBarHelp bool `mapstructure:"statusbar_help"`
 	PageSize      int  `mapstructure:"page_size"`
 	YankMaxRows   int  `mapstructure:"yank_max_rows"`
-	NerdFont      bool `mapstructure:"nerd_font"`
+	// ExportDelimiter is the field separator of the delimited export format. It
+	// takes one literal character or the aliases `tab` / `\t`; an unusable value
+	// falls back to ',' (see ExportDelimiterRune) so a typo cannot break exports.
+	ExportDelimiter string `mapstructure:"export_delimiter"`
+	// ExportCompress gzips exports that go to a FILE. The clipboard is never
+	// compressed: what is pasted into another program has to be readable text.
+	ExportCompress bool `mapstructure:"export_compress"`
+	NerdFont       bool `mapstructure:"nerd_font"`
 	// HistorySize caps how many queries the per-project history keeps, dropping
 	// the oldest. The store hardcoded 500 while this defaulted to 100, and the two
 	// never met: the knob was declared, given a default and read by nothing.
@@ -199,6 +206,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("ui.history_size", 100)
 	v.SetDefault("ui.page_size", 100)
 	v.SetDefault("ui.yank_max_rows", 10)
+	v.SetDefault("ui.export_delimiter", ",")
+	v.SetDefault("ui.export_compress", false)
 	v.SetDefault("ui.state_dir", StateDir())
 	v.SetDefault("ui.nerd_font", true)
 
