@@ -71,8 +71,9 @@ func redirectAppLog(t *testing.T) string {
 // control character in either component becomes `_`, a component that sanitises to
 // exactly `.` or `..` becomes `_`, and a component that had to be changed carries a `-`
 // and the first six hex characters of the sha256 of the ORIGINAL name so two different
-// originals cannot collide on one file. An unchanged identifier keeps its historical
-// byte-for-byte name.
+// originals do not share one file name. An ordinary identifier keeps its historical
+// byte-for-byte name; a name already in the digest shape is reserved with its own
+// suffix, and a residual 24-bit collision requires crafted names.
 func TestADBControlledExportNameIsSanitised(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -90,6 +91,7 @@ func TestADBControlledExportNameIsSanitised(t *testing.T) {
 		{"a three-dot table is not a traversal and is left alone", "public", "...", "public_....csv"},
 		{"a non-ASCII identifier is unchanged", "public", "üsers", "public_üsers.csv"},
 		{"an ordinary name is unchanged", "public", "users", "public_users.csv"},
+		{"a digest-shaped name is reserved even when it is unchanged", "public", "a_b-c14cdd", "public_a_b-c14cdd-" + shortDigest("a_b-c14cdd") + ".csv"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := exportFilename(tc.schema, tc.table, grid.ExportCSV, ',', false); got != tc.want {
@@ -104,9 +106,13 @@ func TestADBControlledExportNameIsSanitised(t *testing.T) {
 // F3: `a/b`, `a_b` and `a<TAB>b` all sanitise to the same visible text. The digest
 // suffix is what keeps the second export from silently overwriting the first, and the
 // unchanged identifier still gets its historical name.
+//
+// `a_b-c14cdd` is the crafted case: it is exactly the name `a/b` produced, so the
+// digest shape itself has to be reserved. It also carries a digest of its own now, and
+// no two of these four names may land on one file.
 func TestSanitisedComponentsDoNotCollide(t *testing.T) {
 	seen := map[string]string{}
-	for _, table := range []string{"a/b", "a_b", "a\tb"} {
+	for _, table := range []string{"a/b", "a_b", "a\tb", "a_b-c14cdd"} {
 		name := exportFilename("public", table, grid.ExportCSV, ',', false)
 		if prev, ok := seen[name]; ok {
 			t.Errorf("%q and %q both export as %q", prev, table, name)
