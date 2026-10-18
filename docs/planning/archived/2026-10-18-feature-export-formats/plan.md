@@ -176,7 +176,7 @@ Review: 2026-10-18 — PASS WITH FINDINGS (round 2, tip `603c030`). 13/13 scenar
 | A DB-controlled schema or table cannot write outside the project | ✅ | d179127, 95ff5da |
 | Delimited cells cannot inject a spreadsheet formula | ✅ | d179127, 95ff5da |
 | Exported files are readable only by their owner | ✅ | d179127, 95ff5da |
-| Sanitised names that would collide stay distinct | ✅ | 95ff5da |
+| Sanitised and digest-shaped names stay distinct | ✅ | 95ff5da, 3969c2f |
 | A symlink at the export destination is refused | ✅ | 95ff5da |
 | A very long identifier still exports | ✅ | 95ff5da |
 
@@ -189,6 +189,14 @@ Hardening follow-up (2026-10-18, after the re-review of `d179127`): the lexical
 containment was completed at open time (`O_NOFOLLOW`, so a destination symlink is
 refused and `ELOOP` takes the same refusal path), the owner-only mode is re-applied
 when an existing file is overwritten, a sanitised component carries a short digest so
-distinct names cannot collide and an overlong one is truncated, and the formula escape
+changed names stay distinct and an overlong one is truncated, and the formula escape
 moved to the file boundary so the clipboard and yank stay byte-faithful. The scenarios
 the first pass already had were updated in place (same rows). See ADR 0004.
+
+Review follow-up (2026-10-18, after the second review): the Windows build no longer
+references Unix-only syscall constants — `openNoFollow`/`isSymlinkRefusal` sit behind
+build tags, with an `Lstat` fallback on Windows — the digest shape is reserved so an
+unchanged `a_b-c14cdd` cannot take `a/b`'s name, the `0644` pin is measured under a
+known umask, and the gzip test pins that the formula escape happens before compression.
+The collision scenario above now includes the crafted digest-shaped name. See ADR 0004
+for the platform fallback and the residual filesystem risks.

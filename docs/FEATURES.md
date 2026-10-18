@@ -186,11 +186,12 @@ a comma). `ui.export_compress` gzips **file** exports of every format and append
 never compressed. `y` always yanks to the clipboard, and a pending insert row
 yanks its own draft values like any other row under the cursor. Exports are
 hardened: path separators and control characters in the schema or table name are
-replaced with `_` and a changed name gets a short digest so distinct tables cannot
-collide, a destination outside the project or a symlink is refused (and logged),
-delimited cells that begin with a spreadsheet formula character (`=`, `+`, `-`,
-`@`, tab, CR) get a leading apostrophe **in the file only** (clipboard and yank
-stay byte-faithful), and files are written owner-only (`0600`).
+replaced with `_` and a changed or digest-shaped name gets a short digest, so ordinary
+identifiers keep their names and only crafted names can still collide, a destination
+outside the project or a symlink is refused (and logged; Unix uses `O_NOFOLLOW`,
+Windows checks with `Lstat`), delimited cells that begin with a spreadsheet formula
+character (`=`, `+`, `-`, `@`, tab, CR) get a leading apostrophe **in the file only**
+(clipboard and yank stay byte-faithful), and files are written owner-only (`0600`).
 `s` cycles the
 server-side sort (ASC → DESC → none). `o`
 navigates an FK to its referenced table, `H` goes back through navigation
