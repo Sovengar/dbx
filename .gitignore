@@ -30,3 +30,5 @@ report.json
 .mutation-run.log
 .mutation-scope.txt
 .mutation-budget.txt
+# Local AI runtime state
+.atl/
