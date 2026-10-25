@@ -321,6 +321,9 @@ results land in the grid under the synthetic table `query` and so never
 contribute a hint. It refuses while a DML transaction is pending or another
 read-only query is running. See ADR 0001.
 
+Providers include Anthropic, OpenAI, DeepSeek, Qwen, OpenCode and any
+OpenAI-compatible endpoint.
+
 ### Keybinds pane
 
 Purpose: the bottom status/keybind bar.
