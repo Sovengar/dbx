@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Bulk CSV transfer now uses PostgreSQL's streaming COPY protocol: `dbx export [schema.]table [-o file]` writes to stdout or an owner-only file (gzip when the name ends in `.gz`), `dbx import [schema.]table [file]` reads a file or stdin, both accept `--columns`, and the grid's whole-table export picker offers COPY CSV without the 1,000-row grid cap.
 - Grid export (`x`) can now write a Markdown table, use a configurable delimiter (`ui.export_delimiter`, with `.tsv` for tab) and gzip file exports (`ui.export_compress`); clipboard and yank exports are never compressed.
 - Session logging now covers the CLI: `dbx query`, `dbx pipe` and `dbx ask` append the statements they execute to the daily session log, so `dbx replay` sees CLI sessions too.
 

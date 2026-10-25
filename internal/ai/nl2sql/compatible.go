@@ -210,8 +210,8 @@ func stripJSONC(src []byte) []byte {
 	out := make([]byte, 0, len(src))
 	i := 0
 	for i < len(src) {
-		switch c := src[i]; {
-		case c == '"':
+		c := src[i]
+		if c == '"' {
 			out = append(out, c)
 			i++
 			for i < len(src) {
@@ -227,25 +227,25 @@ func stripJSONC(src []byte) []byte {
 				}
 				i++
 			}
-		case c == '/' && i+1 < len(src) && src[i+1] == '/':
+		} else if c == '/' && i+1 < len(src) && src[i+1] == '/' {
 			i += 2
 			for i < len(src) && src[i] != '\n' {
 				i++
 			}
-		case c == '/' && i+1 < len(src) && src[i+1] == '*':
+		} else if c == '/' && i+1 < len(src) && src[i+1] == '*' {
 			i += 2
 			for i < len(src) && (src[i] != '*' || i+1 >= len(src) || src[i+1] != '/') {
 				i++
 			}
 			i += 2
-		case c == ',':
+		} else if c == ',' {
 			if j := skipJSONCNoise(src, i+1); j < len(src) && (src[j] == '}' || src[j] == ']') {
 				i++ // drop trailing comma
 				continue
 			}
 			out = append(out, c)
 			i++
-		default:
+		} else {
 			out = append(out, c)
 			i++
 		}
@@ -256,21 +256,20 @@ func stripJSONC(src []byte) []byte {
 // skipJSONCNoise advances past whitespace and comments starting at i.
 func skipJSONCNoise(src []byte, i int) int {
 	for i < len(src) {
-		switch {
-		case src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r':
+		if src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r' {
 			i++
-		case src[i] == '/' && i+1 < len(src) && src[i+1] == '/':
+		} else if src[i] == '/' && i+1 < len(src) && src[i+1] == '/' {
 			i += 2
 			for i < len(src) && src[i] != '\n' {
 				i++
 			}
-		case src[i] == '/' && i+1 < len(src) && src[i+1] == '*':
+		} else if src[i] == '/' && i+1 < len(src) && src[i+1] == '*' {
 			i += 2
 			for i < len(src) && (src[i] != '*' || i+1 >= len(src) || src[i+1] != '/') {
 				i++
 			}
 			i += 2
-		default:
+		} else {
 			return i
 		}
 	}

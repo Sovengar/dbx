@@ -190,11 +190,15 @@ Placed in a project root. Uses a **different shape** from the global config:
 [connections.local-dev]
 driver = "postgres"
 dsn = "postgres://localhost/mydb"
-# ssh_tunnel = "bastion"   # optional
+ssh_tunnel = "bastion"   # optional OpenSSH host or alias
 ```
 
 - Keyed by connection name (`[connections.<name>]`), with `driver` and `dsn`.
 - The `dsn` supports env expansion: `${env:VAR}` and `$VAR`.
+- `ssh_tunnel` forwards the DSN's database host and port through the named
+  OpenSSH target; dbx connects the driver to an ephemeral loopback listener.
+  It honors `~/.ssh/config` aliases, keys, agents, known-hosts policy, and
+  `ProxyJump`. OpenSSH must be installed and authentication must not prompt.
 - This is the format the TUI's connection picker discovers by scanning `~/dev`.
 
 ## Environment variables

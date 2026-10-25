@@ -21,6 +21,13 @@ current working directory takes precedence; otherwise a connection name or the
 global config is used. `-c/--connection` forces a specific one. Commands that
 return data accept `-j/--json` for machine consumption.
 
+A project connection can set `ssh_tunnel = "bastion"`. dbx invokes OpenSSH for
+each PostgreSQL connection, forwarding the host and port from its DSN through
+that configured host or `~/.ssh/config` alias; the driver receives a rewritten
+ephemeral loopback DSN. This works in both CLI commands and the TUI. SSH
+authentication must be non-interactive; OpenSSH configuration supplies keys,
+agent use, host verification, and `ProxyJump` behavior.
+
 ### `dbx` — launch the TUI
 
 No flags. The optional positional argument does **not** select a connection: the
@@ -95,6 +102,22 @@ least `level` and `sql` (optionally `duration_ms`, `rows`, `error`, `metadata`,
 Reads SQL from stdin and executes it in autocommit. Refuses when stdin is a TTY
 (`echo "SELECT 1" | dbx pipe`); empty input is an error. Text table or JSON.
 Designed for pipelines.
+
+### `dbx export [table]` / `dbx import [table] [file]` — bulk CSV
+
+Streams data with PostgreSQL's COPY protocol instead of materialising rows in
+dbx. A table is `table` (defaults to schema `public`) or `schema.table`.
+
+- `dbx export public.users` writes headered CSV to stdout. `-o/--output FILE`
+  writes an owner-only file and a `.gz` suffix enables streaming gzip. `-j`
+  reports `{table, file, rows}` and therefore requires `--output`.
+- `dbx import public.users users.csv` imports headered CSV; an omitted file or
+  `-` reads stdin, and a `.gz` suffix enables streaming decompression. Text and
+  JSON completion summaries report the imported row count.
+- Both commands accept `--columns id,name,...` when the CSV contains a subset
+  of table columns; its order is the COPY field order. Without it, PostgreSQL
+  table order is used. COPY runs immediately and is not part of the TUI draft
+  transaction.
 
 ## Part 2 — TUI
 
@@ -192,6 +215,11 @@ outside the project or a symlink is refused (and logged; Unix uses `O_NOFOLLOW`,
 Windows checks with `Lstat`), delimited cells that begin with a spreadsheet formula
 character (`=`, `+`, `-`, `@`, tab, CR) get a leading apostrophe **in the file only**
 (clipboard and yank stay byte-faithful), and files are written owner-only (`0600`).
+With no row selection on a real table, the picker also offers **COPY CSV**. It
+streams the complete table through PostgreSQL `COPY TO` to an owner-only file,
+so it is not capped by the grid's 1,000 loaded rows; `ui.export_compress` still
+controls gzip. The COPY option is absent for selected rows and ad-hoc query
+results, which keep the four in-memory formats.
 `s` cycles the
 server-side sort (ASC → DESC → none). `o`
 navigates an FK to its referenced table, `H` goes back through navigation

@@ -26,7 +26,9 @@ dbx is a terminal UI for databases designed for both humans and AI agents.
   export multiple selected rows to a file next to `.dbx.toml`. The delimited
   format uses `ui.export_delimiter` (one character, or `tab` / `\t` for a
   `.tsv`), and `ui.export_compress` gzips file exports of every format (`.gz`
-  after the extension); clipboard copies and yanks are never compressed.
+  after the extension); clipboard copies and yanks are never compressed. With
+  no selected rows, **COPY CSV** streams the complete table through PostgreSQL
+  instead of stopping at the grid's loaded-row cap.
 - **Sort & filter** — Server-side `ORDER BY` cycling ASC → DESC → none, and an
   inline WHERE clause with autocomplete for columns, operators and values.
 - **Pagination** — Next/previous page, jump to first/last page, and jump to a
@@ -152,6 +154,11 @@ dbx
 # Query mode (no TUI)
 dbx query "SELECT * FROM users LIMIT 10" --json
 
+# Bulk COPY export/import (headered CSV)
+dbx export public.users -o users.csv.gz
+dbx import public.users users.csv.gz
+cat users.csv | dbx import public.users
+
 # Natural language
 dbx ask "show me all active users"
 ```
@@ -184,7 +191,13 @@ dsn = "postgres://localhost/mydb"
 [connections.staging]
 driver = "postgres"
 dsn = "postgres://staging.example.com/mydb"
+ssh_tunnel = "staging-bastion"
 ```
+
+`ssh_tunnel` is an OpenSSH host or alias. dbx forwards to the host and port in
+the DSN through that target, then connects PostgreSQL to an ephemeral loopback
+address. Configure keys, agent access, host verification, and any `ProxyJump`
+in `~/.ssh/config`; authentication must be non-interactive.
 
 ### Global config (`~/.config/dbx/config.toml`)
 

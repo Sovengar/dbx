@@ -166,3 +166,14 @@ func TestNl2sqlBoundarySkipJSONCCommentRunsToInputEnd(t *testing.T) {
 		t.Errorf("stripJSONC dropped the comma: got %q, want it preserved (the comment is not a closing brace)", got)
 	}
 }
+
+// The first non-word byte terminates a SQL verb. This makes punctuation after
+// a verb valid while keeping punctuation alone out of the statement set.
+func TestNl2sqlStatementWordTerminatesAtPunctuation(t *testing.T) {
+	if !statementOnLine("SELECT; -- terminate") {
+		t.Error("a semicolon after SELECT must not hide the statement")
+	}
+	if statementOnLine("; SELECT 1") {
+		t.Error("punctuation before SELECT is not a SQL statement start")
+	}
+}

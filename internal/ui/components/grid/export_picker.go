@@ -18,6 +18,7 @@ const (
 	ExportJSON
 	ExportCSV
 	ExportMarkdown
+	ExportCopyCSV
 )
 
 // noun is what the picker calls the format in its description line. It lives
@@ -33,6 +34,8 @@ func (f ExportFormat) noun() string {
 		return "CSV"
 	case ExportMarkdown:
 		return "Markdown"
+	case ExportCopyCSV:
+		return "table via COPY"
 	}
 	return ""
 }
@@ -56,11 +59,13 @@ type ExportPicker struct {
 	width    int
 	height   int
 	options  []exportOption
+	bulk     exportOption
 	row      []interface{}   // single row for clipboard export
 	rows     [][]interface{} // multiple rows for file export
 	columns  []string
 	fileMode bool // true = save to file, false = copy to clipboard
 	yankMode bool // true = yank (always clipboard), false = normal export
+	bulkMode bool // true = the whole database table, not only the loaded rows
 }
 
 type exportOption struct {
@@ -79,6 +84,7 @@ func NewExportPicker(styles *theme.Styles) *ExportPicker {
 			{label: "CSV", description: "Copy CSV to clipboard", format: ExportCSV},
 			{label: "Markdown", description: "Copy Markdown to clipboard", format: ExportMarkdown},
 		},
+		bulk: exportOption{label: "COPY CSV", description: "Stream the entire table to file", format: ExportCopyCSV},
 	}
 }
 
@@ -95,6 +101,14 @@ func (ep *ExportPicker) updateDescriptions() {
 	for i := range ep.options {
 		ep.options[i].description = fmt.Sprintf("%s %s %s", verb, ep.options[i].format.noun(), target)
 	}
+	ep.bulk.description = "Stream the entire table to file"
+}
+
+func (ep *ExportPicker) visibleOptions() []exportOption {
+	if ep.bulkMode && ep.fileMode && !ep.yankMode {
+		return append(append([]exportOption{}, ep.options...), ep.bulk)
+	}
+	return ep.options
 }
 
 func (ep *ExportPicker) Show(schema, table string, row []interface{}, rows [][]interface{}, columns []string) {
@@ -107,6 +121,7 @@ func (ep *ExportPicker) Show(schema, table string, row []interface{}, rows [][]i
 	ep.columns = columns
 	ep.fileMode = false
 	ep.yankMode = false
+	ep.bulkMode = false
 }
 
 func (ep *ExportPicker) ShowFileMode(schema, table string, row []interface{}, rows [][]interface{}, columns []string) {
@@ -119,6 +134,12 @@ func (ep *ExportPicker) ShowFileMode(schema, table string, row []interface{}, ro
 	ep.columns = columns
 	ep.fileMode = true
 	ep.yankMode = false
+	ep.bulkMode = false
+}
+
+func (ep *ExportPicker) ShowBulkFileMode(schema, table string, rows [][]interface{}, columns []string) {
+	ep.ShowFileMode(schema, table, nil, rows, columns)
+	ep.bulkMode = true
 }
 
 func (ep *ExportPicker) ShowYankMode(schema, table string, row []interface{}, rows [][]interface{}, columns []string) {
@@ -131,6 +152,7 @@ func (ep *ExportPicker) ShowYankMode(schema, table string, row []interface{}, ro
 	ep.columns = columns
 	ep.fileMode = false
 	ep.yankMode = true
+	ep.bulkMode = false
 }
 
 func (ep *ExportPicker) Hide() {
@@ -163,9 +185,10 @@ func (ep *ExportPicker) Update(msg tea.Msg) (tea.Cmd, bool) {
 
 func (ep *ExportPicker) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	key := msg.String()
+	options := ep.visibleOptions()
 	switch key {
 	case "j", "down":
-		if ep.cursor < len(ep.options)-1 {
+		if ep.cursor < len(options)-1 {
 			ep.cursor++
 		}
 		return nil, true
@@ -175,7 +198,7 @@ func (ep *ExportPicker) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	case "enter":
-		selected := ep.options[ep.cursor]
+		selected := options[ep.cursor]
 		ep.visible = false
 		return func() tea.Msg {
 			return ExportSelectedMsg{
@@ -216,7 +239,7 @@ func (ep *ExportPicker) View() string {
 	lines = append(lines, "")
 
 	// Options
-	for i, opt := range ep.options {
+	for i, opt := range ep.visibleOptions() {
 		arrow := "  "
 		if i == ep.cursor {
 			arrow = lipgloss.NewStyle().
@@ -227,7 +250,7 @@ func (ep *ExportPicker) View() string {
 
 		label := lipgloss.NewStyle().
 			Bold(true).
-			Width(8).
+			Width(10).
 			Render(opt.label)
 
 		desc := ep.styles.TextMuted.Render(opt.description)

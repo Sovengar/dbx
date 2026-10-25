@@ -74,6 +74,56 @@ func TestStripJSONCSurvivesTruncatedInput(t *testing.T) {
 	}
 }
 
+// JSONC is read from a user-managed file, so comments, escaped strings, and
+// trailing commas must be handled together without changing actual values.
+func TestStripJSONCCommentAndCommaBoundaries(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "escaped quote and slashes remain part of a string",
+			in:   `{"url":"https://example.test/a\\\"//b","items":["x",],}`,
+			want: `{"url":"https://example.test/a\\\"//b","items":["x"]}`,
+		},
+		{
+			name: "line comment before a closing brace permits a trailing comma",
+			in:   "{\"one\":1, // ignored\n}",
+			want: "{\"one\":1 \n}",
+		},
+		{
+			name: "block comment before a closing bracket permits a trailing comma",
+			in:   `{"items":[1, /* ignored */ ]}`,
+			want: `{"items":[1  ]}`,
+		},
+		{
+			name: "ordinary comma is preserved",
+			in:   `{"one":1,"two":2}`,
+			want: `{"one":1,"two":2}`,
+		},
+		{
+			name: "comments at end of an incomplete document do not invent a closing delimiter",
+			in:   `{"one":1,/* unfinished`,
+			want: `{"one":1,`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := string(stripJSONC([]byte(tc.in))); got != tc.want {
+				t.Errorf("stripJSONC(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSkipJSONCNoise_TrailingSlashIsData(t *testing.T) {
+	if got := skipJSONCNoise([]byte("/"), 0); got != 0 {
+		t.Errorf("skipJSONCNoise on a trailing slash = %d, want 0", got)
+	}
+}
+
 func TestBaseURLFromOpenCodeConfig(t *testing.T) {
 	cases := []struct {
 		name string

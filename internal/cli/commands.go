@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,10 +11,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/spf13/cobra"
 
 	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/drivers/postgres"
+	"github.com/buble/dbx/internal/sshtunnel"
 )
 
 var queryCmd = &cobra.Command{
@@ -83,17 +86,8 @@ func getConnection(cmd *cobra.Command) (postgres.Conn, error) {
 	// yield, which is a different database from the one the user named. The flag was
 	// honoured only in the global-config branch below, so the same command behaved
 	// differently depending on whether a project file happened to exist.
-	if dsn := findLocalDSN(connName); dsn != "" {
-		ctx := context.Background()
-		conn, err := pgxConnect(ctx, dsn)
-		if err != nil {
-			return nil, fmt.Errorf("failed to connect: %w", err)
-		}
-		if err := conn.Ping(ctx); err != nil {
-			_ = conn.Close(ctx)
-			return nil, fmt.Errorf("failed to ping: %w", err)
-		}
-		return conn, nil
+	if projectConn, ok := findLocalConnection(connName); ok {
+		return connectConfigured(context.Background(), projectConn.GetDSN(), projectConn.SSHTunnel)
 	}
 
 	// Fall back to global config
@@ -107,17 +101,68 @@ func getConnection(cmd *cobra.Command) (postgres.Conn, error) {
 		return nil, err
 	}
 
-	ctx := context.Background()
+	return connectConfigured(context.Background(), dsn, "")
+}
+
+type tunnelLifecycle interface {
+	Close() error
+	Err() error
+}
+
+var openSSHTunnel = func(dsn, via string) (string, tunnelLifecycle, error) {
+	return sshtunnel.Open(dsn, via)
+}
+
+type tunneledCLIConn struct {
+	pgconnPing
+	tunnel tunnelLifecycle
+}
+
+func (c *tunneledCLIConn) PgConn() *pgconn.PgConn {
+	provider, ok := c.pgconnPing.(interface{ PgConn() *pgconn.PgConn })
+	if !ok {
+		return nil
+	}
+	return provider.PgConn()
+}
+
+func (c *tunneledCLIConn) Close(ctx context.Context) error {
+	return errors.Join(c.pgconnPing.Close(ctx), c.tunnel.Close())
+}
+
+func connectConfigured(ctx context.Context, dsn, sshTarget string) (postgres.Conn, error) {
+	var tunnel tunnelLifecycle
+	if sshTarget != "" {
+		var err error
+		dsn, tunnel, err = openSSHTunnel(dsn, sshTarget)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open SSH tunnel: %w", err)
+		}
+	}
+
 	conn, err := pgxConnect(ctx, dsn)
 	if err != nil {
+		if tunnel != nil {
+			tunnelErr := tunnel.Err()
+			_ = tunnel.Close()
+			if tunnelErr != nil {
+				return nil, fmt.Errorf("failed to connect through SSH tunnel: %w", tunnelErr)
+			}
+		}
 		return nil, fmt.Errorf("failed to connect: %w", err)
 	}
 
 	if err := conn.Ping(ctx); err != nil {
 		_ = conn.Close(ctx)
+		if tunnel != nil {
+			_ = tunnel.Close()
+		}
 		return nil, fmt.Errorf("failed to ping: %w", err)
 	}
 
+	if tunnel != nil {
+		return &tunneledCLIConn{pgconnPing: conn, tunnel: tunnel}, nil
+	}
 	return conn, nil
 }
 
@@ -222,25 +267,33 @@ func dsnFor(connName string, cfg *config.Config) (string, error) {
 // Sorting also makes `--connection` unnecessary for the common case: the alphabetically
 // first name is at least stable enough to document.
 func findLocalDSN(name string) string {
+	conn, ok := findLocalConnection(name)
+	if !ok {
+		return ""
+	}
+	return conn.GetDSN()
+}
+
+func findLocalConnection(name string) (config.ProjectConnection, bool) {
 	wd, err := os.Getwd()
 	if err != nil {
-		return ""
+		return config.ProjectConnection{}, false
 	}
 
 	cfg, err := config.LoadProjectConfig(wd + "/.dbx.toml")
 	if err != nil {
-		return ""
+		return config.ProjectConnection{}, false
 	}
 	if len(cfg.Connections) == 0 {
-		return ""
+		return config.ProjectConnection{}, false
 	}
 
 	if name != "" {
 		conn, ok := cfg.Connections[name]
-		if !ok {
-			return ""
+		if !ok || conn.GetDSN() == "" {
+			return config.ProjectConnection{}, false
 		}
-		return conn.GetDSN()
+		return conn, true
 	}
 
 	names := make([]string, 0, len(cfg.Connections))
@@ -250,7 +303,10 @@ func findLocalDSN(name string) string {
 	sort.Strings(names)
 
 	conn := cfg.Connections[names[0]]
-	return conn.GetDSN()
+	if conn.GetDSN() == "" {
+		return config.ProjectConnection{}, false
+	}
+	return conn, true
 }
 
 func runQuery(cmd *cobra.Command, args []string) error {

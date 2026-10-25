@@ -1071,8 +1071,14 @@ func (g *Grid) startExport() (tea.Cmd, bool) {
 		}
 		g.exportPicker.Show(g.schema, g.tableName, row, nil, g.columns)
 	} else {
-		// No selection: export ALL rows to file
-		g.exportPicker.ShowFileMode(g.schema, g.tableName, nil, g.data.Rows, g.columns)
+		// No selection: the COPY option can stream the whole real table instead
+		// of being capped by the grid's loaded-row window. Ad-hoc query results
+		// have no table COPY can address, so they keep the normal file formats.
+		if g.schema != "" && g.tableName != "" && g.tableName != "query" {
+			g.exportPicker.ShowBulkFileMode(g.schema, g.tableName, g.data.Rows, g.columns)
+		} else {
+			g.exportPicker.ShowFileMode(g.schema, g.tableName, nil, g.data.Rows, g.columns)
+		}
 	}
 
 	return nil, true

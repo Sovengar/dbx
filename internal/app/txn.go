@@ -398,8 +398,7 @@ func maskNonCode(sql string) string {
 	blank := func(from, to int) { blankRange(out, from, to) }
 
 	for i := 0; i < len(sql); {
-		switch {
-		case sql[i] == '\'':
+		if sql[i] == '\'' {
 			start := i
 			i++
 			for i < len(sql) {
@@ -414,8 +413,8 @@ func maskNonCode(sql string) string {
 				i++
 			}
 			blank(start, i)
-		case (sql[i] == 'e' || sql[i] == 'E') && i+1 < len(sql) && sql[i+1] == '\'' &&
-			(i == 0 || !isIdentifierByte(sql[i-1])):
+		} else if (sql[i] == 'e' || sql[i] == 'E') && i+1 < len(sql) && sql[i+1] == '\'' &&
+			(i == 0 || !isIdentifierByte(sql[i-1])) {
 			// E-string: backslash escapes are honored.
 			start := i
 			i += 2
@@ -435,7 +434,7 @@ func maskNonCode(sql string) string {
 				i++
 			}
 			blank(start, i)
-		case sql[i] == '"':
+		} else if sql[i] == '"' {
 			start := i
 			i++
 			for i < len(sql) {
@@ -450,13 +449,13 @@ func maskNonCode(sql string) string {
 				i++
 			}
 			blank(start, i)
-		case sql[i] == '-' && i+1 < len(sql) && sql[i+1] == '-':
+		} else if sql[i] == '-' && i+1 < len(sql) && sql[i+1] == '-' {
 			start := i
 			for i < len(sql) && sql[i] != '\n' {
 				i++
 			}
 			blank(start, i)
-		case sql[i] == '/' && i+1 < len(sql) && sql[i+1] == '*':
+		} else if sql[i] == '/' && i+1 < len(sql) && sql[i+1] == '*' {
 			start := i
 			i += 2
 			for i+1 < len(sql) && (sql[i] != '*' || sql[i+1] != '/') {
@@ -468,14 +467,14 @@ func maskNonCode(sql string) string {
 				i = len(sql)
 			}
 			blank(start, i)
-		case sql[i] == '$':
+		} else if sql[i] == '$' {
 			if end, ok := matchDollarQuote(sql, i); ok {
 				blank(i, end)
 				i = end
 			} else {
 				i++
 			}
-		default:
+		} else {
 			i++
 		}
 	}

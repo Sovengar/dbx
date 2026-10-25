@@ -483,6 +483,37 @@ func TestIsSelectOnly_KeywordOutsideALiteralIsRejected(t *testing.T) {
 	}
 }
 
+// Scenario: quoted identifiers and comments are opaque to the ASK validator,
+// but executable SQL after them remains visible.
+//
+// This is deliberately asserted through selectOnlyViolation rather than by
+// inspecting the masker alone: the user-visible contract is that harmless text
+// mentioning a write is accepted, while an actual write after the opaque region
+// is refused. It exercises every non-string opaque form the lexer supports.
+func TestIsSelectOnly_KeywordsInOpaqueNonStringRegionsStayData(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		body      string
+		separator string
+	}{
+		{"quoted identifier", `SELECT "DELETE" FROM users`, " "},
+		{"line comment", "SELECT 1 -- DROP TABLE users", "\n"},
+		{"block comment", "SELECT 1 /* UPDATE users SET admin = true */", " "},
+		{"dollar quoted body", "SELECT $tag$INSERT INTO users VALUES (1)$tag$", " "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := selectOnlyViolation(tc.body); got != "" {
+				t.Fatalf("selectOnlyViolation(%q) = %q, want allowed", tc.body, got)
+			}
+
+			visibleWrite := tc.body + tc.separator + "DELETE FROM users"
+			if got := selectOnlyViolation(visibleWrite); !strings.Contains(got, "DELETE is not allowed") {
+				t.Errorf("selectOnlyViolation(%q) = %q, want visible DELETE refusal", visibleWrite, got)
+			}
+		})
+	}
+}
+
 // Scenario: Un FOR al final del texto no es un bloqueo de fila: no hay token
 // detrás que pueda ser una de las palabras de bloqueo.
 func TestSelectOnlyViolation_ForAtTheEndHasNoLockWord(t *testing.T) {

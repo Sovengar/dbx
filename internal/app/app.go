@@ -8,6 +8,7 @@ import (
 	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image/color"
 	"io"
@@ -31,6 +32,7 @@ import (
 	"github.com/buble/dbx/internal/ai/session"
 	"github.com/buble/dbx/internal/config"
 	"github.com/buble/dbx/internal/drivers/postgres"
+	"github.com/buble/dbx/internal/sshtunnel"
 	"github.com/buble/dbx/internal/store"
 	"github.com/buble/dbx/internal/theme"
 	"github.com/buble/dbx/internal/ui"
@@ -47,6 +49,7 @@ import (
 	"github.com/buble/dbx/internal/ui/components/querybrowser"
 	"github.com/buble/dbx/internal/ui/keydisplay"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type AppState int
@@ -367,6 +370,32 @@ var pgxConnect = func(ctx context.Context, dsn string) (postgres.Conn, error) {
 	return pgx.Connect(ctx, dsn)
 }
 
+type appTunnelLifecycle interface {
+	Close() error
+	Err() error
+}
+
+var openSSHTunnel = func(dsn, via string) (string, appTunnelLifecycle, error) {
+	return sshtunnel.Open(dsn, via)
+}
+
+type tunneledAppConn struct {
+	postgres.TxBeginner
+	tunnel appTunnelLifecycle
+}
+
+func (c *tunneledAppConn) PgConn() *pgconn.PgConn {
+	provider, ok := c.TxBeginner.(interface{ PgConn() *pgconn.PgConn })
+	if !ok {
+		return nil
+	}
+	return provider.PgConn()
+}
+
+func (c *tunneledAppConn) Close(ctx context.Context) error {
+	return errors.Join(c.TxBeginner.Close(ctx), c.tunnel.Close())
+}
+
 func (m Model) connectToDB(project config.FoundProject) tea.Cmd {
 	return func() tea.Msg {
 		dsn := project.Connection.GetDSN()
@@ -374,10 +403,26 @@ func (m Model) connectToDB(project config.FoundProject) tea.Cmd {
 			return dbConnectedMsg{err: fmt.Errorf("no DSN provided")}
 		}
 
+		var tunnel appTunnelLifecycle
+		if project.Connection.SSHTunnel != "" {
+			var err error
+			dsn, tunnel, err = openSSHTunnel(dsn, project.Connection.SSHTunnel)
+			if err != nil {
+				return dbConnectedMsg{err: fmt.Errorf("failed to open SSH tunnel: %w", err)}
+			}
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		conn, err := pgxConnect(ctx, dsn)
 		if err != nil {
+			if tunnel != nil {
+				tunnelErr := tunnel.Err()
+				_ = tunnel.Close()
+				if tunnelErr != nil {
+					return dbConnectedMsg{err: fmt.Errorf("failed to connect through SSH tunnel: %w", tunnelErr)}
+				}
+			}
 			return dbConnectedMsg{err: fmt.Errorf("failed to connect: %w", err)}
 		}
 
@@ -388,7 +433,20 @@ func (m Model) connectToDB(project config.FoundProject) tea.Cmd {
 			// is returned rather than the connection, because a connection that cannot answer
 			// a ping cannot answer a query either.
 			_ = conn.Close(ctx)
+			if tunnel != nil {
+				_ = tunnel.Close()
+			}
 			return dbConnectedMsg{err: fmt.Errorf("failed to ping: %w", err)}
+		}
+
+		if tunnel != nil {
+			beginner, ok := conn.(postgres.TxBeginner)
+			if !ok {
+				_ = conn.Close(ctx)
+				_ = tunnel.Close()
+				return dbConnectedMsg{err: fmt.Errorf("connection cannot open transactions")}
+			}
+			conn = &tunneledAppConn{TxBeginner: beginner, tunnel: tunnel}
 		}
 
 		return dbConnectedMsg{conn: conn, project: &project}
@@ -1431,6 +1489,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dbConnectedMsg:
 		if m.connectCancelled {
 			m.connectCancelled = false
+			if msg.conn != nil {
+				_ = msg.conn.Close(context.Background())
+			}
 			return m, nil
 		}
 		// Logged BEFORE the returns, and by PROJECT NAME rather than by DSN.
@@ -1479,6 +1540,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// displays "Connected to database".
 		beginner, ok := msg.conn.(postgres.TxBeginner)
 		if !ok {
+			if msg.conn != nil {
+				_ = msg.conn.Close(context.Background())
+			}
 			m.state = StateError
 			m.err = fmt.Errorf("connection cannot open transactions")
 			m.spinnerActive = false
@@ -1686,7 +1750,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.toast.ShowSuccess("Copied to clipboard")
 			}
 		} else {
-			m.toast.ShowSuccess(fmt.Sprintf("Exported to %s", msg.filename))
+			if msg.rowCount > 0 {
+				m.toast.ShowSuccess(fmt.Sprintf("Exported %d rows to %s", msg.rowCount, msg.filename))
+			} else {
+				m.toast.ShowSuccess(fmt.Sprintf("Exported to %s", msg.filename))
+			}
 		}
 		return m, nil
 
@@ -2745,6 +2813,9 @@ func (m Model) exportCompress() bool {
 }
 
 func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
+	if msg.Format == grid.ExportCopyCSV {
+		return m.handleCopyExport(msg)
+	}
 	return func() tea.Msg {
 		delimiter := m.exportDelimiter()
 
@@ -2822,6 +2893,55 @@ func (m Model) handleExport(msg grid.ExportSelectedMsg) tea.Cmd {
 		}
 
 		return exportDoneMsg{err: fmt.Errorf("no data to export")}
+	}
+}
+
+// handleCopyExport streams the complete table through PostgreSQL instead of
+// serialising the rows currently loaded in the grid. This is deliberately a
+// file-only path: clipboard exports stay small and byte-oriented.
+func (m Model) handleCopyExport(msg grid.ExportSelectedMsg) tea.Cmd {
+	return func() tea.Msg {
+		if m.conn == nil {
+			return exportDoneMsg{err: fmt.Errorf("not connected")}
+		}
+		if m.project == nil {
+			return exportDoneMsg{err: fmt.Errorf("no project directory for export")}
+		}
+
+		compress := m.exportCompress()
+		filename := exportFilename(msg.Schema, msg.Table, grid.ExportCopyCSV, ',', compress)
+		file, filePath, err := createExportFile(m.project.Path, filename)
+		if err != nil {
+			return exportDoneMsg{err: err}
+		}
+		complete := false
+		defer func() {
+			_ = file.Close()
+			if !complete {
+				_ = os.Remove(filePath)
+			}
+		}()
+
+		var dst io.Writer = file
+		var gz *gzip.Writer
+		if compress {
+			gz = gzip.NewWriter(file)
+			dst = gz
+		}
+		rows, err := postgres.CopyTableTo(context.Background(), m.conn, dst, msg.Schema, msg.Table, nil)
+		if err != nil {
+			return exportDoneMsg{err: err}
+		}
+		if gz != nil {
+			if err := gz.Close(); err != nil {
+				return exportDoneMsg{err: fmt.Errorf("failed to finish gzip export: %w", err)}
+			}
+		}
+		if err := file.Close(); err != nil {
+			return exportDoneMsg{err: fmt.Errorf("failed to finish export: %w", err)}
+		}
+		complete = true
+		return exportDoneMsg{filename: filePath, rowCount: rows}
 	}
 }
 
@@ -3262,6 +3382,8 @@ func exportFilename(schema, table string, format grid.ExportFormat, comma rune, 
 		}
 	case grid.ExportMarkdown:
 		ext = "md"
+	case grid.ExportCopyCSV:
+		ext = "csv"
 	case grid.ExportSQL:
 		// Explicit so an unknown ExportFormat reaches default below instead of
 		// riding the zero value and silently looking like SQL.
@@ -3311,38 +3433,49 @@ var writeExportFileData = func(file *os.File, data []byte) error {
 // An empty project directory is refused rather than silently writing into the
 // process's current working directory.
 func writeExportFile(projectPath, filename string, data []byte) (string, error) {
+	file, filePath, err := createExportFile(projectPath, filename)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = file.Close() }()
+	if err := writeExportFileData(file, data); err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+	return filePath, nil
+}
+
+// createExportFile applies the grid export's containment, no-symlink and 0600
+// policy, returning the already-open descriptor so COPY can stream into it.
+func createExportFile(projectPath, filename string) (*os.File, string, error) {
 	if projectPath == "" {
 		appDebugLog("writeExportFile: refusing %q with an empty project directory", filename)
-		return "", fmt.Errorf("refusing to write with an empty project directory: %s", filename)
+		return nil, "", fmt.Errorf("refusing to write with an empty project directory: %s", filename)
 	}
 
 	filePath := filepath.Join(projectPath, filename)
 	rel, err := filepath.Rel(projectPath, filePath)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		appDebugLog("writeExportFile: refusing %q outside the project %q", filename, projectPath)
-		return "", fmt.Errorf("refusing to write outside the project directory: %s", filename)
+		return nil, "", fmt.Errorf("refusing to write outside the project directory: %s", filename)
 	}
 
 	file, err := openNoFollow(filePath)
 	if err != nil {
 		if isSymlinkRefusal(err) {
 			appDebugLog("writeExportFile: refusing %q outside the project %q", filename, projectPath)
-			return "", fmt.Errorf("refusing to write outside the project directory: %s", filename)
+			return nil, "", fmt.Errorf("refusing to write outside the project directory: %s", filename)
 		}
-		return "", fmt.Errorf("failed to write file: %w", err)
+		return nil, "", fmt.Errorf("failed to write file: %w", err)
 	}
-	defer func() { _ = file.Close() }()
 
 	// The open-time permission applies only when the file is CREATED, so a
 	// pre-existing 0644 export would keep its mode. Chmod makes "owner-only" true
 	// for the file that is actually there, which is the population at risk.
 	if err := chmodExportFile(file, 0o600); err != nil {
-		return "", fmt.Errorf("failed to write file: %w", err)
+		_ = file.Close()
+		return nil, "", fmt.Errorf("failed to write file: %w", err)
 	}
-	if err := writeExportFileData(file, data); err != nil {
-		return "", fmt.Errorf("failed to write file: %w", err)
-	}
-	return filePath, nil
+	return file, filePath, nil
 }
 
 // gzipExport compresses an export in memory. Not a streaming writer: the
@@ -3476,6 +3609,7 @@ type exportDoneMsg struct {
 	filename  string
 	clipboard bool
 	yankCount int
+	rowCount  int64
 	err       error
 }
 
@@ -3613,7 +3747,6 @@ func (m Model) renderMainView() string {
 			panes = append(panes, ui.Mark(zonePaneGrid, m.renderGrid(m.width, contentHeight)))
 		}
 	}
-
 	// Register pane bounds from the freshly rendered output and strip the zone
 	// markers before layering overlays on top.
 	//

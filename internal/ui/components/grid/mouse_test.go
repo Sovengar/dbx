@@ -129,6 +129,23 @@ func TestGrid_HandleClick_OutOfRange(t *testing.T) {
 	}
 }
 
+func TestMouseHandler_HoverTracksOnlyVisibleDataRows(t *testing.T) {
+	g := newMouseTestGrid(40, []int{10, 12, 14}, 5)
+	mh := NewMouseHandler(g)
+
+	if got := mh.HoverRow(); got != -1 {
+		t.Fatalf("initial HoverRow() = %d, want -1", got)
+	}
+
+	mh.SetHover(3)
+	if _, hit := mh.HandleClick(1, 7); hit {
+		t.Fatal("click below the last row reported a data hit")
+	}
+	if got := mh.HoverRow(); got != -1 {
+		t.Errorf("HoverRow() after leaving visible rows = %d, want -1", got)
+	}
+}
+
 func TestGrid_HandleClick_HeaderRow(t *testing.T) {
 	g := newMouseTestGrid(40, []int{10, 12, 14}, 5)
 	g.header.SetColumns(g.columns)
