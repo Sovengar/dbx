@@ -73,6 +73,13 @@ func runBulkImport(cmd *cobra.Command, args []string) error {
 	return importTableAndReport(os.Stdout, os.Stdin, conn, args[0], input, columns, asJSON)
 }
 
+// chmodBulkExportFile is the one file operation between CreateTemp and the COPY that can
+// fail, kept behind a variable so its caller's error arm is testable without a filesystem
+// that refuses chmod. The app's export writer uses the same seam for the same reason.
+var chmodBulkExportFile = func(file *os.File, mode os.FileMode) error {
+	return file.Chmod(mode)
+}
+
 func copyColumns(cmd *cobra.Command) ([]string, error) {
 	raw, _ := cmd.Flags().GetString("columns")
 	if strings.TrimSpace(raw) == "" {
@@ -142,7 +149,7 @@ func exportTableToFile(conn postgres.Conn, schema, table, output string, columns
 			_ = os.Remove(tmp)
 		}
 	}()
-	if err := file.Chmod(0o600); err != nil {
+	if err := chmodBulkExportFile(file, 0o600); err != nil {
 		return 0, fmt.Errorf("failed to secure export file: %w", err)
 	}
 
