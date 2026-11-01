@@ -20,8 +20,9 @@ func TestPendingTransaction_ShowsInStatusbar(t *testing.T) {
 	if !strings.Contains(view, "tx pending") {
 		t.Fatalf("statusbar does not show 'tx pending': %q", view)
 	}
-	if !strings.Contains(view, "U Rollback Last Transaction") {
-		t.Fatalf("statusbar does not show the rollback keybind: %q", view)
+	want := m.styles.Primary.Render("U") + " " + m.styles.Help.Render("Rollback Last Transaction")
+	if !strings.Contains(view, want) {
+		t.Fatalf("statusbar does not show the rollback keybind with an accent key and help description: %q", view)
 	}
 }
 
