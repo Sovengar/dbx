@@ -508,4 +508,10 @@ func TestExportPicker_DescriptionsFollowTheirOwnFormat(t *testing.T) {
 			t.Errorf("ExportFormat(99).noun() = %q, want no noun", got)
 		}
 	})
+
+	t.Run("the COPY format names itself", func(t *testing.T) {
+		if got := ExportCopyCSV.noun(); got != "table via COPY" {
+			t.Errorf("ExportCopyCSV.noun() = %q, want %q", got, "table via COPY")
+		}
+	})
 }
