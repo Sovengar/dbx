@@ -46,6 +46,49 @@ func TestKeybindsPane_NonKeySegmentKeepsHelpColour(t *testing.T) {
 	}
 }
 
+// Scenario: A segment keeps its plain projection when only one of its parts is
+// present, which is what renderLines uses for width arithmetic.
+func TestKeybindSegment_PlainHandlesEmptyParts(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		seg  keybindSegment
+		want string
+	}{
+		{"label only", keybindSegment{label: "tx pending"}, "tx pending"},
+		{"key only", keybindSegment{key: "x"}, "x"},
+		{"key and label", keybindSegment{key: "x", label: "Yank"}, "x Yank"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.seg.plain(); got != tc.want {
+				t.Errorf("plain() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Scenario: Styling a segment with only one part paints that part with the same
+// colour it has in a full key and description pair.
+func TestKeybindsPane_StyledSegmentHandlesEmptyParts(t *testing.T) {
+	p := paneAt(config.ContextExplorer, 200)
+	st := p.styles
+
+	for _, tc := range []struct {
+		name string
+		seg  keybindSegment
+		want string
+	}{
+		{"label only", keybindSegment{label: "tx pending"}, st.Help.Render("tx pending")},
+		{"key only", keybindSegment{key: "x"}, st.Primary.Render("x")},
+		{"key and label", keybindSegment{key: "x", label: "Yank"}, st.Primary.Render("x") + " " + st.Help.Render("Yank")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := p.renderStyledSegment(tc.seg); got != tc.want {
+				t.Errorf("renderStyledSegment() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // Scenario: Styling never enters the width arithmetic: renderLines stays plain
 // text and the rendered box still fits the width it was given.
 func TestKeybindsPane_StyledViewKeepsPlainWidthArithmetic(t *testing.T) {
