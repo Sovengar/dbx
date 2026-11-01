@@ -18,6 +18,24 @@ import (
 // segments flow onto a new line below.
 const maxKeybindsPerLine = 7
 
+// keybindSegment is one key hint, kept split so the key and the description can
+// be painted independently without styling entering the plain-text width math.
+type keybindSegment struct {
+	key   string
+	label string
+}
+
+func (s keybindSegment) plain() string {
+	switch {
+	case s.key == "":
+		return s.label
+	case s.label == "":
+		return s.key
+	default:
+		return s.key + " " + s.label
+	}
+}
+
 // KeybindsPane renders the keybinds of the currently focused view, derived
 // entirely from the keybind registry (no hardcoded key strings).
 type KeybindsPane struct {
@@ -110,11 +128,11 @@ func (s *KeybindsPane) View() string {
 		return ""
 	}
 
-	lines := s.renderLines()
+	lines := s.renderSegmentLines()
 
 	var parts []string
-	for _, l := range lines {
-		parts = append(parts, s.styles.Help.Render(l))
+	for _, line := range lines {
+		parts = append(parts, s.renderStyledSegments(line))
 	}
 	content := strings.Join(parts, "\n")
 
@@ -129,9 +147,47 @@ func (s *KeybindsPane) View() string {
 	return bordered.RenderWithTitleEx(border, borderFg, bordered.AlignLeft, " Keybinds ", content, s.width, 0)
 }
 
-// renderLines builds the segments for the active context and wraps them to the
-// pane width. It is also what the panel tests assert against.
+// renderStyledSegments paints a line's keys with the accent colour and its
+// descriptions with the help colour, keeping the separator in the help colour.
+func (s *KeybindsPane) renderStyledSegments(segments []keybindSegment) string {
+	parts := make([]string, 0, len(segments))
+	for _, seg := range segments {
+		parts = append(parts, s.renderStyledSegment(seg))
+	}
+	return strings.Join(parts, s.styles.Help.Render(" · "))
+}
+
+func (s *KeybindsPane) renderStyledSegment(seg keybindSegment) string {
+	switch {
+	case seg.key == "":
+		return s.styles.Help.Render(seg.label)
+	case seg.label == "":
+		return s.styles.Primary.Render(seg.key)
+	default:
+		return s.styles.Primary.Render(seg.key) + " " + s.styles.Help.Render(seg.label)
+	}
+}
+
+// renderLines builds the plain-text segments for the active context and wraps
+// them to the pane width. It is also what the panel tests assert against.
 func (s *KeybindsPane) renderLines() []string {
+	lines := s.renderSegmentLines()
+	if lines == nil {
+		return nil
+	}
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		parts := make([]string, len(line))
+		for j, seg := range line {
+			parts[j] = seg.plain()
+		}
+		out[i] = strings.Join(parts, " · ")
+	}
+	return out
+}
+
+// renderSegmentLines is the unstyled, wrapped source of renderLines.
+func (s *KeybindsPane) renderSegmentLines() [][]keybindSegment {
 	if s.keybinds == nil {
 		return nil
 	}
@@ -156,46 +212,50 @@ func (s *KeybindsPane) renderLines() []string {
 
 	// One segment per display group; the pane shows primary keys only (the help
 	// modal is where aliases live).
-	var segments []string
+	var segments []keybindSegment
 	for _, g := range config.GroupActions(active, s.keybinds.PrimaryKey) {
 		if g.KeyText == "" {
 			continue
 		}
-		segments = append(segments, keydisplay.Key(g.KeyText)+" "+g.Label)
+		segments = append(segments, keybindSegment{key: keydisplay.Key(g.KeyText), label: g.Label})
 	}
 	if s.txPending {
-		segments = append(segments, "tx pending")
+		segments = append(segments, keybindSegment{label: "tx pending"})
 	}
 
 	if len(segments) == 0 {
-		return []string{""}
+		return [][]keybindSegment{{}}
 	}
 
 	if s.width <= 0 {
-		return []string{strings.Join(segments, " · ")}
+		return [][]keybindSegment{segments}
 	}
 
 	// Wrap segments into lines. A line breaks either when it reaches
 	// maxKeybindsPerLine entries or when the next segment would overflow the
 	// pane width, whichever comes first.
-	var lines []string
-	current := ""
+	var lines [][]keybindSegment
+	var current []keybindSegment
+	currentText := ""
 	count := 0
 	for _, seg := range segments {
-		if current != "" && (count >= maxKeybindsPerLine || lipgloss.Width(current+" · "+seg) > s.width-2) {
+		if currentText != "" && (count >= maxKeybindsPerLine || lipgloss.Width(currentText+" · "+seg.plain()) > s.width-2) {
 			lines = append(lines, current)
-			current = seg
+			current = []keybindSegment{seg}
+			currentText = seg.plain()
 			count = 1
 			continue
 		}
-		if current == "" {
-			current = seg
+		if currentText == "" {
+			current = []keybindSegment{seg}
+			currentText = seg.plain()
 		} else {
-			current += " · " + seg
+			current = append(current, seg)
+			currentText += " · " + seg.plain()
 		}
 		count++
 	}
-	if current != "" {
+	if currentText != "" {
 		lines = append(lines, current)
 	}
 	return lines
