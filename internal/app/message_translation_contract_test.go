@@ -311,6 +311,7 @@ func TestAnExportReportsWhereItWent(t *testing.T) {
 		{"a clipboard copy with rows says how many", exportDoneMsg{clipboard: true, yankCount: 12}, "12"},
 		{"a clipboard copy with no rows says nothing about a count", exportDoneMsg{clipboard: true, yankCount: 0}, "clipboard"},
 		{"a file export names the file", exportDoneMsg{filename: "/tmp/orders.csv"}, "orders.csv"},
+		{"a file export with rows says how many", exportDoneMsg{filename: "/tmp/orders.csv", rowCount: 12}, "12"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := routerModelLoaded(t)
