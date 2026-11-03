@@ -50,6 +50,10 @@ cat users.csv | dbx import public.users
 
 # Natural language
 dbx ask "show me all active users"
+
+# Which models does the configured provider offer?
+dbx models            # one id per line
+dbx models --json     # {"models": [...]}
 ```
 
 ## Keybinds
@@ -106,6 +110,17 @@ retention_days = 30
 ```
 
 See [docs/CONFIG.md](docs/CONFIG.md) for full reference.
+
+### Model listing and the shared contract
+
+`dbx models` reads the provider's `/models` endpoint through
+[`agentbridge`](https://github.com/Sovengar/agentbridge) (`ModelSource`), so dbx
+holds no `/models` parsing of its own: the endpoint, key and the cached answer
+come from the same config resolution `dbx ask` uses.
+
+The generation path stays in `internal/ai/nl2sql`: it owns the SQL prompt and
+the schema, which is app knowledge, not agent invocation. The agent-facing
+surface (catalog, argv, model sources) is shared.
 
 ## CLI Reference
 
