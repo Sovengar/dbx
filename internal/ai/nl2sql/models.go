@@ -6,13 +6,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/sovengar/ai"
+	"github.com/sovengar/agentbridge"
 )
 
 // ModelSource returns the model catalog of the configured provider behind the
-// shared ai.ModelSource interface, so dbx holds no endpoint or /models parsing
+// shared agentbridge.ModelSource interface, so dbx holds no endpoint or /models parsing
 // of its own. The answer is cached: the picker queries it on every open.
-func ModelSource(cfg Config) (ai.ModelSource, error) {
+func ModelSource(cfg Config) (agentbridge.ModelSource, error) {
 	name := cfg.Provider
 	if name == "" {
 		name = autoDetect()
@@ -51,8 +51,8 @@ func ModelSource(cfg Config) (ai.ModelSource, error) {
 		return nil, fmt.Errorf("provider %s exposes no /models endpoint", name)
 	}
 
-	return &ai.CachedSource{
-		Source: ai.APISource{Endpoint: baseURL, APIKey: apiKey},
+	return &agentbridge.CachedSource{
+		Source: agentbridge.APISource{Endpoint: baseURL, APIKey: apiKey},
 		TTL:    time.Minute,
 	}, nil
 }
@@ -64,7 +64,7 @@ func Models(ctx context.Context, cfg Config) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	options, err := source.Options(ctx, ai.Agent{Name: cfg.Provider})
+	options, err := source.Options(ctx, agentbridge.Agent{Name: cfg.Provider})
 	if err != nil {
 		return nil, err
 	}

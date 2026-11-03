@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/sovengar/ai"
+	"github.com/sovengar/agentbridge"
 )
 
 func TestModelsListsTheProviderCatalog(t *testing.T) {
@@ -46,7 +46,7 @@ func TestModelSourceRejectsAProviderWithoutEndpoint(t *testing.T) {
 }
 
 func TestModelSourceIsTheSharedSeam(t *testing.T) {
-	var source ai.ModelSource
+	var source agentbridge.ModelSource
 	source, err := ModelSource(Config{
 		Provider: "local",
 		Providers: map[string]ProviderConfig{
