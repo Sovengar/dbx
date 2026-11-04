@@ -1,13 +1,10 @@
 package nl2sql
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
 	"strings"
+
+	"github.com/sovengar/agentbridge"
 )
 
 type Qwen struct {
@@ -23,7 +20,7 @@ func NewQwen(apiKey, model string) *Qwen {
 	return NewQwenAt(apiKey, model, qwenDefaultBaseURL)
 }
 
-// qwenDefaultBaseURL is Qwen's OpenAI-compatible endpoint.
+// qwenDefaultBaseURL is Qwen's OpenAI-compatible base.
 const qwenDefaultBaseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 // NewQwenAt is NewQwen with an explicit endpoint. See NewAnthropicAt.
@@ -31,83 +28,17 @@ func NewQwenAt(apiKey, model, baseURL string) *Qwen {
 	if model == "" {
 		model = "qwen-turbo"
 	}
-	return &Qwen{apiKey: apiKey, model: model, baseURL: strings.TrimRight(baseURL, "/") + "/chat/completions"}
+	return &Qwen{apiKey: apiKey, model: model, baseURL: strings.TrimRight(baseURL, "/")}
 }
 
 func (q *Qwen) Name() string { return "qwen" }
 
-type qwenRequest struct {
-	Model    string    `json:"model"`
-	Messages []qwenMsg `json:"messages"`
-}
-
-type qwenMsg struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type qwenResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
-	Error *struct {
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
+// Generate asks for SQL through the shared invoker. Qwen sends no max_tokens,
+// and the shared invoker omits the field when it is zero.
 func (q *Qwen) Generate(ctx context.Context, prompt string, schema string) (string, error) {
-	system := BuildSystemPrompt(schema)
-
-	body, _ := json.Marshal(qwenRequest{
-		Model: q.model,
-		Messages: []qwenMsg{
-			{Role: "system", Content: system},
-			{Role: "user", Content: prompt},
-		},
-	})
-
-	req, err := http.NewRequestWithContext(ctx, "POST", q.baseURL, bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+q.apiKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API error (%d): %s", resp.StatusCode, string(respBody))
-	}
-
-	var result qwenResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if result.Error != nil {
-		return "", fmt.Errorf("API error: %s", result.Error.Message)
-	}
-
-	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("empty response from Qwen")
-	}
-
-	sql := strings.TrimSpace(result.Choices[0].Message.Content)
-	sql, err = requireSQL("qwen", sql)
-	if err != nil {
-		return "", err
-	}
-	return sql, nil
+	return chat(ctx, "qwen", agentbridge.APIInvoker{
+		Endpoint: q.baseURL,
+		APIKey:   q.apiKey,
+		Model:    q.model,
+	}, nil, prompt, schema)
 }

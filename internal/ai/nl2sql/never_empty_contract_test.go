@@ -88,7 +88,7 @@ var openAIResponses = []struct {
 		name:      "a body that is not JSON",
 		status:    http.StatusOK,
 		body:      `<html>gateway timeout</html>`,
-		wantError: "failed to parse",
+		wantError: "parse response",
 	},
 	{
 		name:      "an HTTP error",

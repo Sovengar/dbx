@@ -181,9 +181,9 @@ func TestEveryDefaultEndpointIsTheDocumentedOne(t *testing.T) {
 	}{
 		{"anthropic", NewAnthropic("key", "").baseURL, anthropicDefaultBaseURL + "/v1/messages",
 			"claude-sonnet-4-20250514", NewAnthropic("key", "")},
-		{"qwen", NewQwen("key", "").baseURL, qwenDefaultBaseURL + "/chat/completions",
+		{"qwen", NewQwen("key", "").baseURL, qwenDefaultBaseURL,
 			"qwen-turbo", NewQwen("key", "")},
-		{"deepseek", NewDeepSeek("key", "").baseURL, deepSeekDefaultBaseURL + "/chat/completions",
+		{"deepseek", NewDeepSeek("key", "").baseURL, deepSeekDefaultBaseURL,
 			"deepseek-chat", NewDeepSeek("key", "")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -208,8 +208,11 @@ func TestEveryDefaultEndpointIsTheDocumentedOne(t *testing.T) {
 			if strings.Contains(got, "//chat/completions//") || strings.HasSuffix(got, "//") {
 				t.Errorf("%s: the endpoint %q has a doubled or trailing separator", name, got)
 			}
-			if !strings.HasPrefix(got, "http://localhost:1234/") {
-				t.Errorf("%s: the endpoint %q does not start at the given base", name, got)
+			// The OpenAI-compatible providers store the base and the shared invoker
+			// appends /chat/completions; anthropic and pi still carry their own path.
+			if strings.TrimRight(got, "/") != "http://localhost:1234" &&
+				got != "http://localhost:1234/v1/messages" {
+				t.Errorf("%s: the endpoint %q is not the given base (or its documented path)", name, got)
 			}
 		}
 		// And an empty model still gets the default, because a provider with no model is one

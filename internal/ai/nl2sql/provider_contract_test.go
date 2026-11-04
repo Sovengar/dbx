@@ -404,9 +404,12 @@ func TestDefaultBaseURL_KnownNamesGetTheirEndpointAndOthersGetNothing(t *testing
 		{"opencode-go", "https://opencode.ai/zen/go/v1"},
 		{"hermes", "https://inference-api.nousresearch.com/v1"},
 		{"deepseek", "https://api.deepseek.com/v1"},
-		{"anthropic", ""},
-		{"openai", ""},
-		{"qwen", ""},
+		// The provider table is now the single source, so every built-in
+		// carries its documented endpoint instead of only the three that the
+		// old switch happened to list.
+		{"anthropic", "https://api.anthropic.com"},
+		{"openai", "https://api.openai.com/v1"},
+		{"qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1"},
 		{"", ""},
 		{"something-else", ""},
 	} {

@@ -56,14 +56,14 @@ var piBodies = []struct {
 	// Written with an interpreted string for two reasons, both learned: a raw one ends at
 	// the first backtick of the fence it contains, and the newline inside a JSON string
 	// literal has to be the two-character ESCAPE - a real newline there is a parse error
-	// the provider reports as "failed to parse response", which reads like a wire-format
+	// the provider reports as "parse response", which reads like a wire-format
 	// problem and is not one.
 	{"a DELETE the fence does not eat", http.StatusOK,
 		"{\"entries\":[{\"text\":\"```DELETE\\nFROM orders\\n```\"}]}", true, ""},
 
 	{"an API error object", http.StatusOK, `{"error":{"message":"model overloaded"}}`, false, "model overloaded"},
 	{"no entries at all", http.StatusOK, `{"entries":[]}`, false, "empty response"},
-	{"a body that is not JSON", http.StatusOK, "<html>gateway timeout</html>", false, "failed to parse"},
+	{"a body that is not JSON", http.StatusOK, "<html>gateway timeout</html>", false, "parse response"},
 	{"an HTTP error", http.StatusInternalServerError, `{"error":"upstream is down"}`, false, "500"},
 	{"a rate limit", http.StatusTooManyRequests, "slow down", false, "429"},
 }

@@ -10,8 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
-	"time"
+
+	"github.com/sovengar/agentbridge"
 )
 
 type OpenAICompatible struct {
@@ -32,71 +32,23 @@ func NewOpenAICompatible(name, apiKey, model, baseURL string) *OpenAICompatible 
 
 func (o *OpenAICompatible) Name() string { return o.name }
 
+// Generate asks for SQL through the shared invoker. The provider keeps only its
+// identity (name, endpoint, key and the headers its vendor requires); the
+// request, the parsing and the error ladder are agentbridge's.
 func (o *OpenAICompatible) Generate(ctx context.Context, prompt string, schema string) (string, error) {
-	system := BuildSystemPrompt(schema)
-
-	body, _ := json.Marshal(openAIRequest{
-		Model: o.model,
-		Messages: []openAIMsg{
-			{Role: "system", Content: system},
-			{Role: "user", Content: prompt},
-		},
-		MaxTokens: 1024,
-	})
-
-	url := strings.TrimRight(o.baseURL, "/") + "/chat/completions"
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	if o.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+o.apiKey)
-	}
-	// OpenCode Go requires x-opencode-session header
+	var headers map[string]string
 	if o.name == "opencode-go" {
-		req.Header.Set("x-opencode-session", "dbx-"+fmt.Sprintf("%d", time.Now().UnixNano()))
+		headers = opencodeHeaders()
 	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API error (%d): %s", resp.StatusCode, string(respBody))
-	}
-
-	var result openAIResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if result.Error != nil {
-		return "", fmt.Errorf("API error: %s", result.Error.Message)
-	}
-
-	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("empty response from %s", o.name)
-	}
-
-	// The one failure mode that must not be a success. Everything else
-	// below returns an error, and an error the TUI shows. Empty SQL with
-	// a nil error reaches execute_query as an empty statement: the AI
-	// answers nothing, dbx runs nothing, and the user sees the keypress do
-	// nothing at all. A refusal, a safety filter and a truncated response
-	// all arrive like this — and so does a refusal in PROSE, which is why the
-	// check is looksLikeSQL and not `== ""`.
-	return requireSQL(o.name, result.Choices[0].Message.Content)
+	return chat(ctx, o.name, agentbridge.APIInvoker{
+		Endpoint:  o.baseURL,
+		APIKey:    o.apiKey,
+		Model:     o.model,
+		MaxTokens: 1024,
+	}, headers, prompt, schema)
 }
 
+// defaultOpenCodeBaseURL is the OpenCode Go OpenAI-compatible base.
 const defaultOpenCodeBaseURL = "https://opencode.ai/zen/go/v1"
 
 func DetectOpenCodeConfig() (apiKey, model, baseURL string, found bool) {

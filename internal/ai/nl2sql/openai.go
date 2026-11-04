@@ -1,13 +1,10 @@
 package nl2sql
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
 	"strings"
+
+	"github.com/sovengar/agentbridge"
 )
 
 type OpenAI struct {
@@ -32,85 +29,18 @@ func NewOpenAIAt(apiKey, model, baseURL string) *OpenAI {
 	if model == "" {
 		model = "gpt-4o"
 	}
-	return &OpenAI{apiKey: apiKey, model: model, baseURL: strings.TrimRight(baseURL, "/") + "/chat/completions"}
+	return &OpenAI{apiKey: apiKey, model: model, baseURL: strings.TrimRight(baseURL, "/")}
 }
 
 func (o *OpenAI) Name() string { return "openai" }
 
-type openAIRequest struct {
-	Model     string      `json:"model"`
-	Messages  []openAIMsg `json:"messages"`
-	MaxTokens int         `json:"max_tokens"`
-}
-
-type openAIMsg struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type openAIResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
-	Error *struct {
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
+// Generate asks for SQL through the shared invoker. The transport is
+// agentbridge's; the SQL contract is this package's.
 func (o *OpenAI) Generate(ctx context.Context, prompt string, schema string) (string, error) {
-	system := BuildSystemPrompt(schema)
-
-	body, _ := json.Marshal(openAIRequest{
-		Model: o.model,
-		Messages: []openAIMsg{
-			{Role: "system", Content: system},
-			{Role: "user", Content: prompt},
-		},
+	return chat(ctx, "openai", agentbridge.APIInvoker{
+		Endpoint:  o.baseURL,
+		APIKey:    o.apiKey,
+		Model:     o.model,
 		MaxTokens: 1024,
-	})
-
-	req, err := http.NewRequestWithContext(ctx, "POST", o.baseURL, bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+o.apiKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API error (%d): %s", resp.StatusCode, string(respBody))
-	}
-
-	var result openAIResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if result.Error != nil {
-		return "", fmt.Errorf("API error: %s", result.Error.Message)
-	}
-
-	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("empty response from OpenAI")
-	}
-
-	sql := strings.TrimSpace(result.Choices[0].Message.Content)
-	sql, err = requireSQL("openai", sql)
-	if err != nil {
-		return "", err
-	}
-	return sql, nil
+	}, nil, prompt, schema)
 }
